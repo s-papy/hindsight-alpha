@@ -134,8 +134,12 @@ def _filter_for_logging(
             continue
         try:
             elapsed = (now - datetime.fromisoformat(last_logged)).total_seconds()
-        except ValueError:
-            elapsed = HEARTBEAT_SECONDS  # unparseable timestamp -- treat as due, don't get stuck silent
+        except (ValueError, TypeError):
+            # ValueError: unparseable timestamp. TypeError: a NAIVE timestamp in
+            # the file (an older build, or a hand edit) subtracted from an aware
+            # `now` -- reproduced 24/08, and it killed the whole run rather than
+            # this one comparison. Either way: treat as due, don't get stuck silent.
+            elapsed = HEARTBEAT_SECONDS
         if elapsed >= HEARTBEAT_SECONDS:
             surfaced.append(action)
             still_failing[key] = now.isoformat()
@@ -255,10 +259,25 @@ def main() -> None:
         # same day, but pre-empted here rather than reproduced after the
         # fact -- this dedup layer is new, not a bug being fixed in existing
         # behavior.
+        # The whole dedup block is wrapped -- fixed 24/08 after reproducing a
+        # crash here. This bookkeeping is explicitly NOT risk-critical (see
+        # _load_dedup_state's docstring: a bad read just costs one extra log
+        # line), yet it sits in the finally of the one job whose entire purpose
+        # is exit discipline. Anything raising in here used to take the run
+        # down AND swallow the very failure it was deciding whether to log --
+        # the same 'real event loses its trace to the bookkeeping that follows
+        # it' family as the five bugs fixed earlier today. Degrading to 'log
+        # everything this run' is the safe direction: noisier, never silent.
         now = datetime.now(timezone.utc)
-        dedup_state = _load_dedup_state()
-        surfaced, dedup_state = _filter_for_logging(actions, dedup_state, now)
-        _save_dedup_state(dedup_state)  # persisted even when nothing is logged, so pruning a
+        try:
+            dedup_state = _load_dedup_state()
+            surfaced, dedup_state = _filter_for_logging(actions, dedup_state, now)
+            _save_dedup_state(dedup_state)
+        except Exception as dedup_error:
+            print(f"  WARNING: exit-log deduplication failed ({type(dedup_error).__name__}: "
+                  f"{dedup_error}) -- logging every non-routine action this run instead of "
+                  f"throttling. Delete {DEDUP_FILE.name} if this persists.", flush=True)
+            surfaced = [a for a in actions if not a.is_routine()]  # persisted even when nothing is logged, so pruning a
         # resolved failure's signature isn't itself lost between runs.
 
         noteworthy = record["outcome"] == "error" or bool(surfaced)

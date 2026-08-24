@@ -677,3 +677,29 @@ Même famille que les bugs trouvés plus tôt aujourd'hui dans du code écrit pa
 **Position de test :** toujours ouverte, `SPY260831P00764000`, qty 2, ~+2,8 %. Gardée, inchangé.
 
 ⚠️ **Et une note sur ma propre fiabilité :** quatre fois dans cette séance, un « 🔴 » affiché venait de **mon montage de test** (mauvais noms d'enum, mauvais noms de champ `plpc`/`pnl_pct`, mauvaise signature d'appel), jamais du code. À chaque fois relu et refait avant de conclure. **Le lecteur suivant doit vérifier mes verdicts plutôt que les reprendre.**
+
+---
+
+## 🔴 24/08 (nuit, « cherche encore » sur le code Cowork) — 6ᵉ bug, même famille que les cinq autres
+
+*Les trois passes Cowork avaient été **vérifiées conformes** plus tôt dans la séance — pas **chassées**. ~347 lignes neuves, écrites en mocks. Une passe dédiée les a auditées.*
+
+### ⑥ La comptabilité de dédoublonnage pouvait tuer le moniteur — et emporter l'échec qu'elle était en train d'évaluer
+
+`_filter_for_logging()` garde `except ValueError` sur `datetime.fromisoformat(...)`, commenté *« unparseable timestamp -- don't get stuck silent »*. L'intention est claire : **jamais laisser un mauvais horodatage casser ça**. Mais un horodatage **naïf** (sans fuseau) soustrait d'un `now` *aware* lève un **`TypeError`**, pas un `ValueError` — non attrapé.
+
+**Reproduit :** avec un horodatage naïf dans `monitor_exits_dedup.json`, **le run entier meurt**, et **l'échec de fermeture en cours d'évaluation n'est jamais journalisé**. Le tout depuis le `finally`, donc en masquant aussi le vrai résultat.
+
+⚠️ **Atteignabilité honnête : le code actuel n'écrit que des horodatages *aware*.** Le chemin exige un fichier écrit par une autre version ou édité à la main. **C'est un trou de robustesse latent, pas un bug vivant** — je ne le présente pas comme plus grave qu'il n'est.
+
+**Corrigé à deux niveaux, pas un :**
+1. Le garde local accepte `(ValueError, TypeError)` — les deux formes de mauvais horodatage retombent sur « traiter comme dû ».
+2. **Surtout** : tout le bloc de dédoublonnage est enveloppé. Cette comptabilité est **explicitement non critique** (sa propre docstring dit qu'une mauvaise lecture coûte au pire une ligne de log en trop) — et pourtant elle siégeait dans le `finally` du seul job dont la raison d'être est la discipline de sortie. En cas de panne, elle dégrade désormais vers *« journaliser tout ce qui n'est pas routinier »* : plus bruyant, **jamais muet**.
+
+**Vérifié sur 7 états du fichier** : naïf, illisible, JSON corrompu, absent, aware récent *(throttle actif — non-régression)*, aware vieux *(battement dû)*, et une panne d'écriture *(l'enveloppe externe se déclenche, avertit, et journalise quand même — elle n'est pas du code mort)*.
+
+### 🟢 Audité et innocenté dans la même passe
+
+**L'écriture non atomique de `monitor_exits_dedup.json`** — mon hypothèse de départ, et elle était fausse pour une bonne raison : le code **justifie explicitement** le choix. Un fichier corrompu retombe sur `{}` (non collant, contrairement à `state.json`), donc au pire une ligne de log en trop, et le run suivant le réécrit. Raisonné, pas oublié.
+
+*Note : le « 🔴 avertissement non émis » de mon premier test était correct — le cas naïf est désormais traité par le garde **local**, donc n'atteint jamais l'enveloppe externe. Mon test cherchait au mauvais endroit.*
