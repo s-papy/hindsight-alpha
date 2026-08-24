@@ -61,6 +61,34 @@ Mais en cherchant plus loin (forum communautaire Alpaca, pas juste la doc), trou
 
 ---
 
+## 🔴 24/08 (nuit, 2e « cherche encore ») — l'écriture d'état n'était pas atomique
+
+**Un bug de plus, démontré en deux temps plutôt qu'affirmé. Deux autres candidats examinés et innocentés.**
+
+### ④ `_save_state()` tronquait le fichier avant d'écrire — et l'architecture du jour a multiplié l'exposition
+
+**Le mécanisme, prouvé** : `Path.write_text()` ouvre en mode `"w"`, ce qui **tronque le fichier à 0 octet AVANT d'écrire le moindre octet** (sondé directement : 77 → 0 dès l'`open`, contenu seulement ensuite). Puis, en tuant un processus dans cette fenêtre : le fichier reste `{"account_id": "abc", "start` — **exactement l'état `_corrupted`**.
+
+**Pourquoi ça compte plus ce soir que ce matin**, et c'est le vrai point :
+- La gestion de corruption ajoutée dans la passe précédente rend un `state.json` cassé **collant, volontairement** : toutes les entrées sont refusées jusqu'à intervention humaine. Sûr — mais une écriture déchirée n'est plus un désagrément passager, **elle arrête l'agent pour le reste d'une semaine sans surveillance**.
+- `monitor_exits.py` est désormais planifié **toutes les 15 minutes** (launchd) : un **second** processus appelle cette fonction bien plus souvent que le run quotidien d'`agent.py`, et les deux peuvent se chevaucher.
+
+**Autrement dit : les deux décisions prises aujourd'hui ont, ensemble, transformé un risque théorique en risque d'indisponibilité réel.** Aucune des deux n'était fausse isolément.
+
+**Corrigé** : écriture dans un fichier temporaire du même répertoire, `fsync`, puis `os.replace()` — atomique sur POSIX. **Vérifié en rejouant le même scénario de mise à mort : `state.json` intact, complet, encore valide.** Non-régression : écriture normale OK, aucun résidu `.tmp`.
+
+### ⑤ `hindsight_guard.py` — audité pour la première fois, **innocenté**
+
+La revendication centrale du projet n'avait jamais été relue. Hypothèse testée : `max(scores, key=...)` retourne le **premier** élément en présence d'un `NaN` (toute comparaison avec NaN est fausse), et `_sharpe()` rend bien `NaN` si un rendement est `NaN`/`inf` — un score corrompu pourrait donc gagner le sweep en silence.
+
+**Testé : non.** Le `NaN` gagne bien le `max`, **mais `NaN > seuil` est faux**, donc `in_sample_clears_bar` le rejette et `agrees` reste `False`. **Le garde-fou échoue du bon côté.** *(Seul résidu : une liste de candidats vide lève `ValueError` au lieu de refuser proprement — inatteignable, `CANDIDATE_HV_WINDOWS` est une constante.)*
+
+### ⑥ `decision_log.read_log()` — **innocenté** aussi
+
+Deux processus écrivent ce fichier en append. Testé avec une ligne volontairement tronquée : la lecture **avertit, saute la ligne, et continue** — le dashboard public ne casse pas. Aucun correctif nécessaire.
+
+---
+
 ## 🔴 24/08 (nuit) — « cherche encore » : deux bugs de plus, reproduits avant d'être déclarés
 
 **Deux vrais défauts trouvés dans le code écrit quelques heures plus tôt, chacun reproduit par un test AVANT correction.** Un troisième candidat examiné et **innocenté**.

@@ -66,6 +66,7 @@ across multiple days. Not a secret, but run-specific — see .gitignore.
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -193,7 +194,36 @@ def _save_state(state: dict) -> None:
             "New entries stay refused until a human deletes or repairs the file by hand."
         )
         return
-    STATE_FILE.write_text(json.dumps(state, indent=2))
+
+    # Atomic write -- found 24/08, "cherche encore", and demonstrated rather
+    # than assumed: Path.write_text() opens in mode "w", which truncates the
+    # file to 0 bytes BEFORE writing a single byte of the new content (probed
+    # directly: 77 bytes -> 0 immediately on open, content only afterwards).
+    # A process killed inside that window leaves a truncated or partial file
+    # -- reproduced by killing a writer mid-write, which produced exactly the
+    # invalid JSON _load_state() now flags as _corrupted.
+    #
+    # That mattered less this morning than it does now, for two reasons that
+    # both landed today:
+    #   - the corruption handling added earlier in this same pass makes a
+    #     corrupted state.json STICKY on purpose: every new entry is refused
+    #     until a human intervenes. Safe, but it means a torn write is no
+    #     longer a transient annoyance -- it stops the agent for the rest of
+    #     an unattended week.
+    #   - monitor_exits.py is now scheduled every 15 minutes (launchd), so a
+    #     SECOND process calls this function far more often than agent.py's
+    #     once-a-day run ever did, and the two can overlap.
+    #
+    # Writing to a temp file in the same directory and os.replace()-ing it in
+    # is atomic on POSIX: a reader (or a crash) sees either the complete old
+    # file or the complete new one, never a half-written one. fsync before
+    # the swap so the content is durable before it becomes visible.
+    tmp = STATE_FILE.with_suffix(STATE_FILE.suffix + ".tmp")
+    with open(tmp, "w") as fh:
+        fh.write(json.dumps(state, indent=2))
+        fh.flush()
+        os.fsync(fh.fileno())
+    os.replace(tmp, STATE_FILE)
 
 
 def _record_starting_equity(equity: float, state: dict, account_id: Optional[str]) -> dict:

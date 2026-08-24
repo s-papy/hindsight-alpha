@@ -6,3 +6,4 @@ __pycache__/
 state.json
 HALT
 .DS_Store
+state.json.tmp
