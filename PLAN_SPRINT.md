@@ -71,6 +71,22 @@ Test de bout en bout (clôture de position + sweep multi-symboles + garde-fous +
 
 Confirmé avec `git check-ignore` (l'outil réel) : `.env`, `.env.hackathon`, `state.json` bien exclus, `.env.example` bien suivi. Confirmé qu'aucun import actif ne pointe vers le code mort (`alpaca_client.py`, `momentum_strategy.py`) — seules des mentions en commentaire, volontaires.
 
+## 🟢 24/08 — session terminal n°2 : nettoyage git + dashboard vérifié visuellement
+
+**Fait et vérifié :**
+- `test-gitignore-check/` **supprimé** (ne contenait que son `.git`, zéro fichier utile).
+- `.git` **reconstruit propre** sur `main` (l'ancien avait `index.lock`, `th02JRu`, 10 `tmp_obj_*`, zéro commit). `fsck` clean.
+- **Secrets vérifiés AVANT le premier commit** : `git check-ignore -v` confirme `.env` (règle `.env`), `.env.hackathon` (règle `.env.*`), `state.json` — les trois ignorés ; `.env.example` bien suivable et **vérifié sans vraie clé** (placeholders `your_..._here`, et différent du vrai `.env`). Scan du contenu de tout l'historique : **0 occurrence** de clé.
+- `.DS_Store` retiré de l'index et ajouté au `.gitignore` (il partait dans un dépôt public).
+- Commits : `68c778d` (initial, 21 fichiers) puis `c7f1376` (fix close + snapshot réel).
+- **Dashboard vérifié VISUELLEMENT pour la première fois** (serveur local + navigateur) : les 3 sections s'affichent, **zéro erreur console**, chiffres conformes à `docs/data.json` (equity 99 887,95 · 1 position · 1 décision). Le `PLACEHOLDER` fictif a disparu.
+- `decision_log.jsonl` **créé au premier run** — il était vide simplement parce qu'`agent.py` n'avait plus tourné depuis le câblage de `decision_log`.
+
+**🔴 5ᵉ écart code/API trouvé — le plus grave, dans le système de risque :**
+`alpaca position close --symbol` → `unknown flag`. La vraie signature est **`--symbol-or-asset-id`**. **`manage_exits()` aurait donc levé une exception à CHAQUE take-profit ou stop-loss réel** — la branche que les mocks ne pouvaient pas attraper. Corrigé et **prouvé en direct** : position `SPY260831P00763000` réellement fermée (ordre `37275e32-6dc4-4b98-9b0a-28ab60289d39`, sell 2), positions à 0. Les deux branches de `manage_exits()` ont désormais une confirmation live.
+
+**🔴 BLOQUÉ — ne dépend pas de moi :** dépôt GitHub, push et Pages (étapes 5, 7, 8) sont impossibles depuis ce Mac : **aucune authentification GitHub n'existe** (ni `gh`, ni token, ni clé SSH, ni credential helper, ni trousseau). Le commit est prêt et propre ; il attend une voie d'authentification décidée par Spap.
+
 ## 🟢 24/08 — Premier test réel réussi (session terminal, compte de dev)
 
 Pipeline complet vérifié de bout en bout contre l'API Alpaca réelle via le CLI officiel (installé depuis le binaire GitHub `alpacahq/cli` v0.0.13, empreinte SHA-256 vérifiée — ni `brew` ni `go` n'étaient disponibles sur ce Mac). Ordre paper confirmé : `id=e896888f-7c58-418a-aefc-3d5034cfaef9`, 2 puts `SPY260831P00763000` à 4,88 $, coût 976 $ sous le plafond de 1 000 $.
