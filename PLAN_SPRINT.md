@@ -49,6 +49,30 @@ Fichiers jamais relus cette session (`config.py`, `decision_log.py`, `.env.examp
 
 ---
 
+## 🟠 24/08 — LE BACKTEST RÉEL A TOURNÉ. Résultat : edge fragile, pas prouvé.
+
+**Premier passage de la stratégie contre de vraies barres historiques** (657 par symbole, via le CLI). Rapport complet : `BACKTEST_RESULTS.md`.
+
+| | SPY | QQQ | IWM |
+|---|---|---|---|
+| **fenêtre 10 j** (la seule positive) | +0,1071 | +0,1771 | +0,2090 |
+| les 4 autres fenêtres (20/30/60/90) | 🔴 négatives | 🔴 négatives | 🔴 négatives (sauf 30 j ≈ 0) |
+| taux de succès du 10 j | 45,1 % | 43,9 % | 54,4 % |
+| **gain restant si on retire les 5 meilleurs jours** | **0,1070 → 0,0177** | **0,1767 → 0,0402** | 0,2088 → 0,0989 |
+| `hindsight_guard` | 🟢 propre | 🟢 propre | 🟢 propre |
+
+**Trois lectures, honnêtement :**
+- 🔴 **4 des 5 fenêtres candidates perdent de l'argent** sur les trois symboles. L'edge tient à une seule.
+- 🔴 **83 % du gain de SPY vient de 5 jours sur 102** (77 % QQQ, 53 % IWM). C'est la signature *attendue* d'une stratégie d'optionalité longue — mais sur ~110 trades, ça ne distingue pas un edge d'une chance.
+- ⚠️ **Le payoff est un proxy** qui ignore le spread et le theta — exactement les coûts qui frappent les ~70 % de trades perdants. Un coût réel mangerait d'abord ce qui reste après les 5 meilleurs jours.
+- 🟢 **Aucune fuite de sélection** : la fenêtre gagnante gagne aussi sans information future, sur les trois symboles.
+
+**🔒 Aucun seuil retouché après avoir vu ces chiffres** — c'est précisément le biais que ce projet existe pour attraper.
+
+**Correctifs de la même session, vérifiés contre le vrai CLI** (commit `d23341a`) : isolation par symbole dans `agent.py` · `state.json` désormais gardé par `account_id` (une bascule de compte re-calibre et lève le verrou automatiquement) · **`account_number` confirmé présent dans la sortie CLI** (`PA3I2OIKF5F4` pour le dev, distinct de l'UUID) et le faux WARNING de `test_connection.py` est mort — vérifié dans les 3 cas (bon numéro → silence, UUID → alerte, mauvais numéro → alerte). Le dashboard affiche maintenant ce même `account_number`.
+
+---
+
 # 🔗 URLS DE SOUMISSION — requises par le formulaire du hackathon
 
 | champ du formulaire | valeur |
