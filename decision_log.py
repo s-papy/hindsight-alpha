@@ -27,6 +27,39 @@ def log_run(record: Dict[str, Any]) -> None:
         f.write(json.dumps(record) + "\n")
 
 
+def log_run_or_dump(record: Dict[str, Any], context: str = "") -> bool:
+    """log_run(), but never raises at the caller. Returns True if the record
+    reached the file, False if it had to be dumped to stdout instead.
+
+    Moved here 24/08 from two near-identical copies in agent.py's and
+    monitor_exits.py's `finally` blocks -- they had already diverged in
+    wording on their first edit, which is the copy-paste-then-tweak
+    signature. This module is the right home because it already owns the
+    READ side of exactly this policy: read_log() warns and skips a corrupt
+    line rather than aborting its caller. Owning the write side too makes
+    the module's guarantee symmetric and stated once -- decision_log never
+    takes down its callers, in either direction -- instead of a contract
+    enforced from outside by every caller remembering to.
+
+    Dumping to stdout on failure means the trace survives wherever stdout
+    goes (launchd's log, a terminal) rather than nowhere. flush=True because
+    the situations that break the append (full disk, killed process) are
+    exactly the ones where a buffered dump never lands."""
+    try:
+        log_run(record)
+        return True
+    except Exception as log_error:
+        print(
+            f"WARNING: could not write to {LOG_FILE.name} "
+            f"({type(log_error).__name__}: {log_error}). "
+            + (context + " " if context else "")
+            + "Dumping the record here so it is not lost:",
+            flush=True,
+        )
+        print(json.dumps(record, indent=2, default=str), flush=True)
+        return False
+
+
 def read_log(limit: int = 30) -> List[Dict[str, Any]]:
     """Most recent `limit` records, newest first. Empty list if no log yet.
 

@@ -98,6 +98,8 @@ class SymbolVerdict:
     tradeable: bool
     reason: str
     direction: Optional[int] = None
+    last_close: Optional[float] = None  # already fetched in evaluate_symbol; passed to
+    # find_near_the_money_contract so it doesn't re-spawn a bars call for the same symbol
 
 
 def evaluate_symbol(symbol: str, sharpe_threshold: float) -> SymbolVerdict:
@@ -137,7 +139,8 @@ def evaluate_symbol(symbol: str, sharpe_threshold: float) -> SymbolVerdict:
             return SymbolVerdict(symbol, False, f"volatility not cheap today (HV rank {hv_rank:.1f})")
 
         signal = direction_tiebreak(bars)
-        return SymbolVerdict(symbol, True, "cheap-vol regime confirmed, hindsight_guard clean", direction=signal)
+        return SymbolVerdict(symbol, True, "cheap-vol regime confirmed, hindsight_guard clean",
+                             direction=signal, last_close=bars[-1].close if bars else None)
     except Exception as e:
         print(f"  ERROR evaluating {symbol}: {type(e).__name__}: {e} -- skipping this symbol today")
         return SymbolVerdict(symbol, False, f"error evaluating symbol: {type(e).__name__}: {e}")
@@ -200,18 +203,10 @@ def main() -> None:
         # wherever stdout goes (launchd's log, a terminal, CI output) instead
         # of nowhere. Not re-raising from the finally lets a real error from
         # _run() propagate as itself.
-        try:
-            decision_log.log_run(record)
-        except Exception as log_error:
-            print(
-                f"WARNING: could not write this run to decision_log.jsonl "
-                f"({type(log_error).__name__}: {log_error}). The run itself is unaffected -- "
-                f"any order submitted above is real. Dumping the record here so it is not lost:"
-            )
-            try:
-                print(json.dumps(record, indent=2, default=str))
-            except Exception:
-                print(repr(record))
+        decision_log.log_run_or_dump(
+            record,
+            context="The run itself is unaffected -- any order submitted above is real.",
+        )
 
 
 def _run(args, symbols, record: dict) -> None:
@@ -328,7 +323,9 @@ def _run(args, symbols, record: dict) -> None:
         # symbols. Not yet triggered for real -- found by re-reading, not by
         # a live crash.
         try:
-            contract = alpaca_cli.find_near_the_money_contract(tradeable.symbol, tradeable.direction)
+            contract = alpaca_cli.find_near_the_money_contract(
+                tradeable.symbol, tradeable.direction, spot=tradeable.last_close
+            )
             trade_record["contract"] = contract
             if contract is None:
                 print("  No matching option contract found (check market hours / symbol / expiry window).")

@@ -74,6 +74,18 @@ from typing import Dict, List, Optional
 
 import alpaca_cli
 
+class StateNotPersisted(Exception):
+    """Raised by the bookkeeping writers when _save_state() refused to write
+    (corrupted state.json). Added 24/08 after a cleanup review: _save_state
+    used to return None on refusal exactly as it did on success, so the
+    caller-side guards written earlier the same day COULD NEVER FIRE on a
+    corrupted file -- agent.py would log outcome="order_submitted" with no
+    caveat while the duplicate-order guard was never armed, and manage_exits
+    would state "consecutive losses now N" as fact with N not on disk. The
+    choke point protected the evidence but dropped the signal that it had --
+    the same family as the five bugs those guards were written for."""
+
+
 STATE_FILE = Path(__file__).parent / "state.json"
 HALT_FILE = Path(__file__).parent / "HALT"  # manual pause switch -- see is_halted()
 
@@ -157,7 +169,7 @@ def _load_state() -> dict:
         return {"_corrupted": True}
 
 
-def _save_state(state: dict) -> None:
+def _save_state(state: dict) -> bool:
     """Refuses to write a state carrying the _corrupted sentinel -- found
     24/08, "cherche encore", by reproducing it rather than by inspection.
 
@@ -193,7 +205,7 @@ def _save_state(state: dict) -> None:
             "lock, a consecutive-loss count). Bookkeeping for this action was NOT persisted. "
             "New entries stay refused until a human deletes or repairs the file by hand."
         )
-        return
+        return False
 
     # Atomic write -- found 24/08, "cherche encore", and demonstrated rather
     # than assumed: Path.write_text() opens in mode "w", which truncates the
@@ -211,19 +223,34 @@ def _save_state(state: dict) -> None:
     #     longer a transient annoyance -- it stops the agent for the rest of
     #     an unattended week.
     #   - monitor_exits.py is now scheduled every 15 minutes (launchd), so a
-    #     SECOND process calls this function far more often than agent.py's
-    #     once-a-day run ever did, and the two can overlap.
+    #     SECOND process can reach this function at all, and the two can
+    #     overlap. (Corrected 24/08 by a cleanup review: an earlier version
+    #     of this note claimed the 15-minute cadence made writes happen "far
+    #     more often". It does not -- manage_exits only reaches _save_state
+    #     when a close actually fires, so the routine 15-minute path writes
+    #     nothing. The overlap risk is real; the frequency claim was not.)
     #
     # Writing to a temp file in the same directory and os.replace()-ing it in
     # is atomic on POSIX: a reader (or a crash) sees either the complete old
     # file or the complete new one, never a half-written one. fsync before
     # the swap so the content is durable before it becomes visible.
-    tmp = STATE_FILE.with_suffix(STATE_FILE.suffix + ".tmp")
-    with open(tmp, "w") as fh:
-        fh.write(json.dumps(state, indent=2))
-        fh.flush()
-        os.fsync(fh.fileno())
-    os.replace(tmp, STATE_FILE)
+    tmp = STATE_FILE.with_name(STATE_FILE.name + ".tmp")
+    try:
+        with open(tmp, "w") as fh:
+            fh.write(json.dumps(state, indent=2))
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, STATE_FILE)
+    except Exception:
+        # Leave no partial sidecar behind: a human doing the post-crash
+        # forensics the _corrupted sentinel exists to force should find the
+        # damaged state.json, not a second half-written file next to it.
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        raise
+    return True
 
 
 def _record_starting_equity(equity: float, state: dict, account_id: Optional[str]) -> dict:
@@ -388,7 +415,8 @@ def record_order_submitted(underlying: str) -> None:
     if underlying.upper() not in record["symbols"]:
         record["symbols"].append(underlying.upper())
     state["traded_today"] = record
-    _save_state(state)
+    if not _save_state(state):
+        raise StateNotPersisted("state.json is corrupted; the duplicate-order guard was NOT armed for this order")
 
 
 def is_halted() -> tuple:
@@ -452,7 +480,8 @@ def _record_exit_outcome(is_win: bool) -> int:
     state = _load_state()
     count = 0 if is_win else state.get("consecutive_losses", 0) + 1
     state["consecutive_losses"] = count
-    _save_state(state)
+    if not _save_state(state):
+        raise StateNotPersisted(f"state.json is corrupted; the consecutive-loss count ({count}) was NOT persisted")
     return count
 
 

@@ -95,11 +95,10 @@ def main() -> None:
         record["error"] = f"{type(e).__name__}: {e}"
         raise
     finally:
-        # Only append to decision_log.jsonl when something worth a judge's
-        # attention actually happened -- a real close, an attempted close
-        # (dry-run), or an error. NOT on every routine "nothing to close"
-        # check. Found 24/08, in a "cherche encore" re-read right after
-        # writing this file: publish_dashboard.py's dashboard shows only
+        # Why filter at all (the criteria themselves are defined once, just
+        # below -- an earlier version of this comment also listed them here,
+        # and that duplicate list went stale the moment the test was
+        # inverted): publish_dashboard.py's dashboard shows only
         # the most recent 30 decision_log records (decision_log.read_log
         # (limit=30)). Scheduled every 15 minutes over a ~6.5-hour trading
         # day, an unconditional log_run() here would write up to ~26 pure
@@ -124,11 +123,12 @@ def main() -> None:
         # So a position that hit its stop-loss and COULD NOT BE CLOSED was
         # classified as a routine non-event and never written to
         # decision_log.jsonl -- while printing "(nothing closed)", which was
-        # actively false. Under launchd that print goes to monitor_exits.log,
-        # which is gitignored and unread, so an unattended agent could leave a
-        # losing position open indefinitely with no durable trace anywhere,
-        # and nothing on the public dashboard. The single most important event
-        # this script exists to catch was the one it stayed quiet about.
+        # actively false. Under launchd that print goes only to
+        # monitor_exits.log (gitignored since 24/08, and not something anyone
+        # watches), so an unattended agent could leave a losing position open
+        # indefinitely with no durable trace anywhere and nothing on the
+        # public dashboard. The single most important event this script
+        # exists to catch was the one it stayed quiet about.
         #
         # Matching the one genuinely routine line instead ("holding") and
         # treating everything else as noteworthy makes the default SAFE: any
@@ -138,23 +138,14 @@ def main() -> None:
         # update. Same failure family as the three fixed earlier today -- a
         # real event losing its trace in the bookkeeping that follows it.
         actions = record.get("exit_actions", [])
-        routine = [a for a in actions if ": holding (" in a]
-        noteworthy = record["outcome"] == "error" or len(routine) != len(actions)
+        noteworthy = record["outcome"] == "error" or any(": holding (" not in a for a in actions)
         if noteworthy:
             # Same resilience as agent.py's finally, and for the same reason:
             # a logging failure must not destroy the only durable trace of a
             # real close (or a failed one), nor displace a genuine error as
             # the exception that surfaces. Dump the record to stdout instead,
             # where launchd's log will keep it.
-            try:
-                decision_log.log_run(record)
-            except Exception as log_error:
-                print(f"WARNING: could not write to decision_log.jsonl "
-                      f"({type(log_error).__name__}: {log_error}). Dumping the record so it is not lost:")
-                try:
-                    print(json.dumps(record, indent=2, default=str))
-                except Exception:
-                    print(repr(record))
+            decision_log.log_run_or_dump(record)
         else:
             print("  (nothing closed -- not adding a routine no-op entry to decision_log.jsonl)")
 

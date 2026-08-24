@@ -274,8 +274,8 @@ with real credentials in `.env`), writes a plain JSON snapshot, and that
 snapshot — not a live connection — is what gets committed and served.
 Nothing publicly reachable ever touches Alpaca directly.
 
-Setup (once, in a real terminal — see `BRIEF_MULTI_POSITION_ET_COMPARAISON.md`,
-the current terminal handoff):
+Setup (once, in a real terminal — already done; see `BRIEF_DEBLOQUER_MONITOR_ET_KICKOFF.md`
+for the current terminal handoff):
 
 ```bash
 python publish_dashboard.py         # writes docs/data.json
@@ -347,22 +347,36 @@ section for the exact order IDs and what was found and fixed along the way
 (four real code/API mismatches, including one — the options-contracts
 pagination bug — that would have silently refused every trade forever).
 
+**Update, later on 24/08**: the multi-position controls above (sector cap,
+data-quality gate, HALT switch, duplicate-order guard, consecutive-loss
+breaker) and a batch of resilience fixes from later "cherche encore" passes
+*were* then run for real against the live API, not just mocked. A real paper
+option order filled (`2e7ba582-3784-4c80-8abb-d1e4eb0a79eb`, 2 puts
+`SPY260831P00764000` at $4.69), `HALT` blocked new entries without blocking
+an in-progress exit, the duplicate-order guard fired for real, and
+`hindsight_guard` genuinely rejected XLK live. Five more real bugs turned up
+in that same session's "cherche encore" passes, all one family — *the code
+carefully protects the action, then treats its own trace of that action as
+a detail* — see `PLAN_SPRINT.md` for the full list, in order, most recent
+first.
+
 **Not yet done, the real remaining gap**: the *dedicated* hackathon account
 (`.env.hackathon`) has never been connected — everything above ran on dev,
 on purpose, per the hackathon's own rule allowing any paper account during
-development. Also not yet run against the live API (only compiled + tested
-with mocks): every control added later on 24/08 — multi-position sizing,
-the sector cap, the data-quality gate, the manual HALT switch, the
-duplicate-order guard, the consecutive-loss breaker, `monitor_exits.py`, and
-a batch of resilience fixes found in later "cherche encore" passes
-(per-symbol exception isolation in `agent.py`'s entry loop, `backtest.py`,
-and `compare_strategies.py`; corrupted-line tolerance in `decision_log.py`).
+development. And `monitor_exits.py` — the script meant to catch a stop-loss
+between `agent.py`'s once-daily runs — is not actually running on schedule
+yet: the `launchd` job is installed with the right cadence, but macOS's TCC
+privacy protection on `~/Desktop` is blocking it from reading the script at
+all. Fixing that needs a real person clicking through System Settings
+(Full Disk Access), which is outside what this session can do.
 
 Several terminal-handoff briefs exist from different points in the same
 day (`BRIEF_TEST_AGENT_TERMINAL.md`, `BRIEF_GIT_DASHBOARD_PUBLICATION.md`,
 `BRIEF_PUSH_GITHUB_PAGES.md`, `BRIEF_BACKTEST_REEL.md`,
-`BRIEF_COMMIT_FIXES_ET_BACKTEST.md`) — **`BRIEF_MULTI_POSITION_ET_COMPARAISON.md`
-is the current one**, kept synchronized with the actual state of the code
-throughout the day; the others are earlier snapshots, mostly superseded.
+`BRIEF_COMMIT_FIXES_ET_BACKTEST.md`, `BRIEF_MULTI_POSITION_ET_COMPARAISON.md`,
+`BRIEF_VERIFICATION_FINALE_ET_COMMIT.md`) — **`BRIEF_DEBLOQUER_MONITOR_ET_KICKOFF.md`
+is the current one**, waiting on the TCC fix above before the rest of its
+checklist (28/08 account-switch procedure, real backtest re-run) can close
+out. The others are earlier snapshots, all superseded.
 See `PLAN_SPRINT.md` for the full day-by-day plan and complete history of
 what was found and fixed.

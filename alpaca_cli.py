@@ -315,12 +315,19 @@ def find_near_the_money_contract(
     direction: int,
     min_days_out: int = 7,
     max_days_out: int = 21,
+    spot: Optional[float] = None,
 ) -> Optional[str]:
     """direction=+1 -> call, direction=-1 -> put. Uses the raw `alpaca api`
     passthrough (rather than guessing subcommand flag names for options
     contract filtering) so all the REST API's real query params are
     available: underlying_symbols, status, type, expiration_date_gte/lte."""
-    spot = get_last_price(underlying)
+    # spot is passed in by agent.py, which already fetched this symbol's bars
+    # in evaluate_symbol() -- without it, get_last_price() spawns a SECOND
+    # `alpaca data bars` subprocess for the same symbol purely to read the
+    # last close the caller is already holding. Kept optional so the function
+    # still stands alone (backtest/manual use).
+    if spot is None:
+        spot = get_last_price(underlying)
     contract_type = "call" if direction > 0 else "put"
     today = datetime.utcnow().date()
     gte = (today + timedelta(days=min_days_out)).isoformat()
