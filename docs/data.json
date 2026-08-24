@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-08-24T20:01:19.531432+00:00",
+  "generated_at": "2026-08-24T20:39:46.843566+00:00",
   "team": "Hindsight Alpha",
   "account": {
     "id": "523f7f05-1d67-4219-a96e-e65276f1dcf3",
@@ -37,6 +37,67 @@
     }
   ],
   "recent_decisions": [
+    {
+      "timestamp": "2026-08-24T20:32:31.810818+00:00",
+      "dry_run": true,
+      "symbols": [
+        "SPY",
+        "GLD",
+        "XLK",
+        "XLV"
+      ],
+      "outcome": "dry_run_tradeable",
+      "market_open": null,
+      "exit_actions": [
+        {
+          "symbol": "SPY260831P00764000",
+          "kind": "holding",
+          "text": "SPY260831P00764000: holding (+2.8%, thresholds are +50%/-50%)",
+          "pnl_pct": 0.0277
+        }
+      ],
+      "verdicts": [
+        {
+          "symbol": "SPY",
+          "tradeable": true,
+          "reason": "cheap-vol regime confirmed, hindsight_guard clean",
+          "direction": -1
+        },
+        {
+          "symbol": "GLD",
+          "tradeable": false,
+          "reason": "volatility not cheap today (HV rank 57.9)",
+          "direction": null
+        },
+        {
+          "symbol": "XLK",
+          "tradeable": false,
+          "reason": "hindsight_guard: winning HV window doesn't hold up in-sample",
+          "direction": null
+        },
+        {
+          "symbol": "XLV",
+          "tradeable": false,
+          "reason": "volatility not cheap today (HV rank 98.4)",
+          "direction": null
+        }
+      ],
+      "tradeable_symbols": [
+        "SPY"
+      ]
+    },
+    {
+      "timestamp": "2026-08-24T20:32:03.887854+00:00",
+      "dry_run": true,
+      "symbols": [
+        "SPY",
+        "GLD",
+        "XLK",
+        "XLV"
+      ],
+      "outcome": "market_closed",
+      "market_open": false
+    },
     {
       "timestamp": "2026-08-24T20:01:18.264499+00:00",
       "dry_run": true,
