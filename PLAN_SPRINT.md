@@ -561,3 +561,59 @@ Cette passe ne vient pas d'une relecture de code déjà "ancien" (écrit plus t�
 **README.md resynchronisé au passage** : la section "## Status" citait encore l'ancien brief (`BRIEF_MULTI_POSITION_ET_COMPARAISON.md`) comme handoff courant et disait "not yet run against the live API" pour des contrôles qui, d'après ce brief, ont depuis tourné pour de vrai (ordre rempli, HALT vérifié en direct, anti-doublon déclenché, `hindsight_guard` ayant rejeté XLK en direct, cinq bugs de plus trouvés contre l'API réelle). Même famille d'écart doc/réalité que la 19e passe, retrouvée une deuxième fois au même endroit précis. Corrigé : statut à jour, pointeur vers `BRIEF_DEBLOQUER_MONITOR_ET_KICKOFF.md` comme brief courant, liste des huit briefs maintenant tous nommés (les sept précédents marqués dépassés).
 
 **Non traité ici, explicitement hors de portée de Cowork** : point A (déblocage TCC/launchd — nécessite Réglages Système, main humaine) et point B6 (garder ou fermer la position de test `SPY260831P00764000` sur le compte de dev — décision de Spap, et de toute façon une fermeture réelle nécessite le vrai CLI). Les deux restent tels quels dans `BRIEF_DEBLOQUER_MONITOR_ET_KICKOFF.md`, prêts pour la prochaine session terminal.
+
+---
+
+# 🏁 CLÔTURE DU 24/08 — l'état réel en fin de journée
+
+*Ajoutée en fin de fichier, exprès : les sections « cherche encore » ci-dessus ont été insérées au fil de l'eau, certaines en haut, d'autres au milieu, et ne se lisent plus dans l'ordre. Celle-ci ne remplace rien — c'est la synthèse à lire en premier pour savoir où on en est.*
+
+## 🔴 Le dépôt a changé d'emplacement
+
+**`~/Desktop/CERVEAU/hindsight-alpha` → `~/hindsight-alpha`.** Décidé par Spap le 24/08 au soir pour lever le blocage TCC. Le dépôt GitHub, la remote et Pages ne changent pas. Si un chemin en dur traîne quelque part, c'est celui-là qu'il faut corriger.
+
+## Ce qui a tourné contre l'API RÉELLE (pas en mocks)
+
+Pipeline complet de bout en bout · ordre paper **`2e7ba582-3784-4c80-8abb-d1e4eb0a79eb`** (2 puts `SPY260831P00764000`, rempli à 4,69 $) · `hindsight_guard` a réellement **rejeté XLK** en direct · l'interrupteur `HALT` bloque les entrées sans bloquer les sorties · l'anti-double-soumission se déclenche · dépôt public et GitHub Pages en ligne et vérifiés visuellement · backtest et `compare_strategies` exécutés sur données réelles.
+
+## Bugs : 5 trouvés et corrigés, tous de la même famille
+
+*Chacun reproduit par un test AVANT d'être déclaré. Racine commune : **le code protège soigneusement l'action, puis traite sa trace comme un détail**.*
+
+| # | défaut | direction |
+|---|---|---|
+| ① | accumulateurs perdus si la comptabilité échoue après soumission | 🔴 sur-exposition |
+| ② | écrasement d'un `state.json` corrompu par le chemin de sortie | 🟠 forensique |
+| ③ | `_save_state` non atomique (tronque avant d'écrire) | 🔴 indisponibilité |
+| ④ | échec de fermeture jamais journalisé | 🔴 angle mort |
+| ⑤ | trace d'ordre perdue si `log_run` échoue | 🟠 angle mort |
+
+**Audités et déclarés sains** *(vérifiés, pas supposés)* : contrôle de qualité des données · `hindsight_guard` · `decision_log.read_log` · `publish_dashboard` · le chemin « commit ok, push échoué » · et l'alignement d'indices de `vol_strategy` (invariant désormais écrit dans le code).
+
+⚠️ **Et 3 FAUX positifs de mon propre fait**, tous nés de mes montages de test ou d'un raisonnement algébrique, jamais du code. **Le prochain lecteur doit vérifier mes conclusions, pas les reprendre.**
+
+## 🟢 `monitor_exits` : DÉBLOQUÉ
+
+**Cause, prouvée par sonde contrôlée** : macOS (TCC) refusait à tout process lancé par launchd l'accès à `~/Desktop`. Ni un chemin, ni un droit de fichier, ni le `PATH`.
+
+**Résolu par le déplacement du dépôt.** La même sonde qui renvoyait `REFUSE` depuis `~/Desktop` renvoie **`LISIBLE`** depuis `~/hindsight-alpha`, et la tâche launchd exécute réellement le script (zéro `Operation not permitted` dans `monitor_exits.log`, le script produit sa propre sortie). Tâche chargée : **140 créneaux, lun-ven, 15h–21h45 locale** = les heures de marché US, avec le `PATH` incluant `~/.local/bin`.
+
+⚠️ *Piège déjà payé, à ne pas réintroduire : le cron documenté à l'origine (`*/15 9-16`) était en heure **locale**, pas ET — il aurait tourné 03h–10h ET, soit 30 minutes utiles sur 6h30.*
+
+## Position de test : GARDÉE, délibérément
+
+**Une seule position ouverte** sur le compte de dev : `SPY260831P00764000`, qty 2, coût 938 $, ~+3 %. *(Le `traded_today: ["SPY"]` de `state.json` correspond à ce même ordre, pas à un second run — vérifié.)*
+
+**Gardée exprès** : elle donne au moniteur fraîchement débloqué quelque chose de réel à surveiller pendant les 3 jours avant le kickoff. C'est la seule façon de vérifier le chemin de sortie en conditions réelles avant que ça compte. Échéance 31/08, sans effet sur la soumission (mauvais compte).
+
+## `StateNotPersisted` : pas de rattrapage nommé, et c'est testé
+
+Les deux points de levée ont été **reproduits**. Le message n'est pas noyé : côté entrée il atterrit sous une **clé dédiée** (`record_order_submitted_failed`), côté sortie il est **accolé à la ligne d'action** (« CLOSED — stop-loss hit (-60,0 %) (consecutive-loss count NOT updated: StateNotPersisted: …) »). Un `except` nommé dupliquerait le traitement sans rien apporter. Raisonnement écrit dans la docstring de la classe.
+
+## Ce qui reste ouvert pour le 28
+
+🔴 **Basculer sur le compte dédié `PA3K8MP3MF0U`** (`.env.hackathon`) — **jamais touché à ce jour, et à ne pas toucher avant le kickoff**. Le re-calibrage automatique sur changement d'`account_id` couvre `starting_equity`, `locked`, `traded_today` et `consecutive_losses` ; testé en mocks uniquement.
+
+⬜ **Décision de méthode qui appartient à Spap** : `vol_strategy` devance `momentum` sur le Sharpe in-sample des 4 symboles, mais `momentum` est plus propre côté garde-fou (4/4 contre 3/4). Aucune bascule décidée.
+
+⬜ **Deux améliorations identifiées, non faites** *(changements de comportement, pas du nettoyage)* : dédoublonner les échecs persistants dans le journal (une panne structurelle serait journalisée ~26×/jour et évincerait le dashboard public en ~1,2 jour), et remplacer le `List[str]` de `manage_exits` par un type structuré — **c'est le dernier endroit du code où une chaîne lisible par un humain décide du flux de contrôle**.

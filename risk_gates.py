@@ -83,7 +83,23 @@ class StateNotPersisted(Exception):
     caveat while the duplicate-order guard was never armed, and manage_exits
     would state "consecutive losses now N" as fact with N not on disk. The
     choke point protected the evidence but dropped the signal that it had --
-    the same family as the five bugs those guards were written for."""
+    the same family as the five bugs those guards were written for.
+
+    Deliberately NOT caught by name anywhere -- checked 24/08 by reproducing
+    both raise sites rather than by reading. The two generic handlers that
+    already wrap these calls surface the message better than a named catch
+    would:
+      - agent.py puts it under its own key, record_order_submitted_failed,
+        so decision_log.jsonl carries "StateNotPersisted: ... the
+        duplicate-order guard was NOT armed for this order" as a dedicated
+        field next to outcome="order_submitted", not buried in prose.
+      - manage_exits appends it to the action line, which then reads
+        "... CLOSED -- stop-loss hit (-60.0%) (consecutive-loss count NOT
+        updated: StateNotPersisted: ...)" -- the close and the failed
+        bookkeeping stated together, which is exactly what a human needs.
+    A named except at either site would duplicate handling for no gain. The
+    class earns its keep by making the message specific and greppable, not
+    by being caught separately."""
 
 
 STATE_FILE = Path(__file__).parent / "state.json"
