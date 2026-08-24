@@ -1,3 +1,18 @@
+# 🔗 URLS DE SOUMISSION — requises par le formulaire du hackathon
+
+| champ du formulaire | valeur |
+|---|---|
+| **Public GitHub repository** | **https://github.com/s-papy/hindsight-alpha** |
+| **Application URL** | **https://s-papy.github.io/hindsight-alpha/** |
+
+*Dépôt créé et poussé le 24/08/2026. Visibilité **PUBLIC** vérifiée par l'API. Licence détectée par GitHub : **MIT** (exigence « Submissions must be original and MIT-compliant »). Pages servi depuis `main` → `/docs`, statut `built`, HTTP 200 sur la page ET sur `data.json`.*
+
+*Vérification visuelle réelle sur l'URL publique : les 3 sections s'affichent, **zéro message console**, et les chiffres correspondent exactement au `data.json` servi (equity 99 875,90 · 0 position → « No open positions right now. » · 1 décision « dry-run: would trade », SPY bearish (put), verdicts SPY/QQQ/IWM).*
+
+🔴 **Reste à faire pour la soumission : rebrancher le compte dédié.** Tout ce qui précède tourne sur le compte de DEV (`.env`). Le compte de soumission (`.env.hackathon`) n'a **toujours jamais été touché** — à activer au kickoff du 28/08, pas avant.
+
+---
+
 # Plan de sprint — Hindsight Alpha (Alpaca AI Trading Agents Hackathon)
 
 *Rédigé le 24/08/2026. Kickoff : ven 28/08 15:00 UTC (17:00 CEST). Fin des soumissions : ven 04/09 15:00 UTC (17:00 CEST). Déjà fait : équipe créée, enregistrement confirmé ("Enrolled"), Discord rejoint.*
