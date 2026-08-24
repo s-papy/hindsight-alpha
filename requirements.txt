@@ -1,0 +1,6 @@
+python-dotenv>=1.0.0
+
+# The Alpaca CLI itself is NOT a pip package -- install it separately:
+#   brew install alpacahq/tap/cli          (macOS/Linux)
+#   go install github.com/alpacahq/cli/cmd/alpaca@latest
+# See README.md.

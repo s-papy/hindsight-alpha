@@ -1,0 +1,22 @@
+{
+  "generated_at": "2026-01-01T00:00:00+00:00",
+  "team": "Hindsight Alpha",
+  "account": {
+    "id": "PLACEHOLDER",
+    "status": "ACTIVE",
+    "equity": 100000.0,
+    "cash": 100000.0,
+    "buying_power": 200000.0,
+    "portfolio_value": 100000.0
+  },
+  "positions": [],
+  "recent_decisions": [
+    {
+      "timestamp": "2026-01-01T00:00:00+00:00",
+      "outcome": "no_edge",
+      "verdicts": [
+        {"symbol": "SPY", "tradeable": false, "reason": "example placeholder row -- replaced by publish_dashboard.py on first real run"}
+      ]
+    }
+  ]
+}
