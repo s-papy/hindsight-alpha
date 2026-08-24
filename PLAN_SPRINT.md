@@ -617,3 +617,63 @@ Les deux points de levée ont été **reproduits**. Le message n'est pas noyé :
 ⬜ **Décision de méthode qui appartient à Spap** : `vol_strategy` devance `momentum` sur le Sharpe in-sample des 4 symboles, mais `momentum` est plus propre côté garde-fou (4/4 contre 3/4). Aucune bascule décidée.
 
 ⬜ **Deux améliorations identifiées, non faites** *(changements de comportement, pas du nettoyage)* : dédoublonner les échecs persistants dans le journal (une panne structurelle serait journalisée ~26×/jour et évincerait le dashboard public en ~1,2 jour), et remplacer le `List[str]` de `manage_exits` par un type structuré — **c'est le dernier endroit du code où une chaîne lisible par un humain décide du flux de contrôle**.
+
+---
+
+## 🟢 24/08 (Cowork) — les deux améliorations laissées ouvertes, faites : type structuré + dédoublonnage
+
+*Fait depuis Cowork sur `~/hindsight-alpha` (accès reconnecté après le déplacement) pendant qu'une session terminal semblait avoir déjà tourné dessus (`ad8609e`, arbre propre au moment de commencer) — code et tests uniquement, aucune commande git lancée ici, comme d'habitude.*
+
+**`risk_gates.manage_exits()` retourne maintenant `List[ExitAction]`**, un dataclass (`symbol`, `kind: ExitKind`, `pnl_pct`, `label`, `consecutive_losses`, `bookkeeping_error`, `error`) au lieu de chaînes brutes. `ExitKind` est un `str, Enum` (`holding` / `closed` / `would_close` / `unreadable` / `error`) — comparer `action.kind == "holding"` marche sans importer la classe. `str(action)` reproduit **byte pour byte** les cinq formats de phrase d'origine (vérifié par test, pas par relecture) — `monitor_exits.log` et l'affichage terminal ne changent pas de forme. `to_dict()` produit un dict JSON-sérialisable avec un champ `text` (la même phrase) plus les champs structurés — c'est ça qui part dans `decision_log.jsonl`, jamais l'objet lui-même. `agent.py` et `monitor_exits.py` mis à jour pour appeler `.to_dict()` avant d'assigner à `record["exit_actions"]`. `docs/index.html` mis à jour pour accepter les deux formes (`typeof a === "string" ? a : a.text`) — `decision_log.jsonl` est committé, jamais réécrit, donc les entrées d'avant ce changement restent des chaînes brutes pour toujours.
+
+**Dédoublonnage des échecs persistants, dans `monitor_exits.py`** : `_filter_for_logging()` compare la signature de chaque échec (`symbol`, `kind`, `error`) contre un nouveau fichier `monitor_exits_dedup.json` (gitignored, séparé de `state.json` — délibérément, pour ne pas mélanger cette bookkeeping cosmétique avec l'état risque qui, lui, refuse toute écriture une fois corrompu). Une fermeture (`CLOSED`/`WOULD_CLOSE`) est toujours journalisée — elle ne peut pas se répéter par construction. Un échec est journalisé la première fois, puis au plus une fois par heure (`HEARTBEAT_SECONDS = 3600`) tant qu'il persiste inchangé ; s'il disparaît, sa signature est purgée, donc une récidive plus tard est traitée comme neuve, pas silencieusement supprimée pour toujours.
+
+**Vérifié, pas juste écrit** : suite de tests (supprimée après coup, comme d'habitude) reproduisant le scénario concret cité dans le brief précédent — 26 checks simulés sur ~6h30 de séance avec le même échec `unreadable` à chaque fois. Sans filtre : 26 écritures. Avec : **7**, à la fréquence attendue (1re fois immédiatement, puis toutes les heures). Testé aussi : une fermeture jamais dédoublonnée même répétée immédiatement ; une signature purgée quand l'échec disparaît puis re-déclenchée immédiatement dès qu'il revient ; `manage_exits()` rejoué pour de vrai (pas réimplémenté) contre des positions mockées confirme que `close_position()` n'est appelé que sur la position qui dépasse vraiment son seuil et que les 7 formats de phrase (dont les deux variantes de `CLOSED`, gain et perte, bookkeeping réussi ou en échec) matchent exactement l'original ; `agent.py`, exécuté réellement avec `manage_exits()` mocké au niveau `alpaca_cli`, confirme que `record["exit_actions"]` sérialise en JSON sans erreur ; `docs/index.html` (le vrai `<script>` extrait, pas une réécriture) confirme qu'une ancienne entrée en chaîne brute ET une nouvelle entrée en dict s'affichent toutes les deux correctement, sans jamais produire `[object Object]`. `state.json`, `HALT` et le nouveau `monitor_exits_dedup.json` du vrai projet vérifiés intacts après coup. `py_compile` propre sur les 9 fichiers `.py` du dépôt.
+
+**Non fait ici, comme toujours** : aucun `git add`/`commit`/`push` — les fichiers modifiés (`risk_gates.py`, `monitor_exits.py`, `agent.py`, `docs/index.html`, `.gitignore`) restent tels quels sur disque pour la prochaine session terminal.
+
+---
+
+## 🔴 24/08 (Cowork) — cherche encore : un vrai bug trouvé dans MON PROPRE code, minutes après l'avoir écrit
+
+**`ExitAction.failure_signature()` (juste ajoutée pour le dédoublonnage ci-dessus) utilisait le texte brut de l'exception comme identité de signature — `self.error` en entier.** Tous mes tests passaient parce qu'ils utilisaient des messages d'erreur statiques, inventés à la main. En relisant `alpaca_cli.py` pour vérifier honnêtement à quoi ressemble une vraie erreur (`_run_cli`, ligne ~101) : `AlpacaCLIError` est construit avec `result.stderr.strip() or result.stdout.strip()` — pour une vraie panne réseau/API, ce texte contient presque toujours du contenu qui varie d'un appel à l'autre (timing de connexion, détail de socket) **même quand c'est exactement le même problème qui persiste**.
+
+**Reproduit avant de corriger** : deux `ExitAction` construites avec deux messages représentant la MÊME panne réseau sous-jacente, différant seulement par le timing exact (`"...timeout after 30.001s"` vs `"...timeout after 30.014s"`) — `failure_signature()` renvoyait deux tuples différents. Conséquence concrète : contre une vraie panne persistante, le dédoublonnage tout juste écrit (voir passe précédente) **ne se serait jamais déclenché** — chaque vérification à 15 minutes d'intervalle aurait semblé être une "nouvelle" panne, et le problème de saturation du journal que ce dédoublonnage existe pour corriger serait resté entier, silencieusement, malgré un code qui a l'air correct et une suite de tests entièrement verte.
+
+**Corrigé** : la signature n'utilise plus que le préfixe avant le premier `": "` du message d'erreur (le nom de la classe d'exception, `type(e).__name__`, format que tous les points de levée du dépôt suivent déjà — vérifié par `grep`, pas supposé), pas le message entier. `AlpacaCLIError: dial tcp ...: timeout after 30.001s` et `AlpacaCLIError: dial tcp ...: timeout after 30.014s` partagent maintenant la même signature ; `AlpacaCLIError` et `DataQualityError` restent bien distincts ; le message fixe et sans deux-points d'`UNREADABLE` n'est pas affecté.
+
+**Vérifié** : le cas reproduit ci-dessus donne maintenant la même signature pour les deux occurrences ; deux classes d'exception différentes restent différenciées ; deux symboles différents ne collisionnent jamais ; le scénario complet de la passe précédente (26 checks simulés sur ~6h30) rejoué avec un message d'erreur qui **change à chaque appel** (comme en vrai) — toujours seulement 7 écritures sur 26, à la cadence attendue, au lieu de 26 si le bug n'avait pas été trouvé. `py_compile` propre.
+
+Même famille que les bugs trouvés plus tôt aujourd'hui dans du code écrit par d'autres passes — cette fois trouvé par relecture immédiate de mon propre travail, dans la continuité de la 23e passe du matin.
+
+---
+
+## 🟢 24/08 (Cowork, sur demande explicite) — `publish_dashboard.py` écrit `docs/data.json` de façon atomique
+
+**Revisite une décision déjà prise et journalisée** (3e passe "cherche encore" du matin : "même forme que le bug `state.json` (④), mais exposition bien moindre — signalé, pas corrigé"). Ce raisonnement portait sur la PROBABILITÉ d'une écriture tronquée ici, pas sur la CONSÉQUENCE si elle survient — et la conséquence est réelle : contrairement à `state.json` (du code que ce projet exécute lui-même, protégé par le sentinel `_corrupted`), `docs/data.json` est du contenu qu'un navigateur de juge parse avec `JSON.parse()` via GitHub Pages. Un fichier tronqué ici casse le dashboard public pour tout visiteur jusqu'au prochain run réussi — pas une histoire de forensique interne.
+
+**Même mécanisme que le bug `state.json`, reprouvé sur ce fichier précis** : `Path.write_text()` ouvre en mode `"w"`, qui tronque à 0 octet avant d'écrire quoi que ce soit — sondé directement sur `docs/data.json` (40 octets → 0 dès l'`open()`, avant tout `write()`).
+
+**Corrigé avec le même correctif que `_save_state()`** (`risk_gates.py`) : écriture dans un fichier temporaire du même répertoire (`docs/data.json.tmp`, ajouté au `.gitignore`), `fsync`, puis `os.replace()` — atomique sur POSIX, un lecteur ne voit jamais qu'un ancien snapshot complet ou un nouveau snapshot complet, jamais un fichier à moitié écrit.
+
+**Vérifié en reproduisant le crash, pas en relisant le code** : une écriture normale reste un JSON valide, sans résidu `.tmp` ; un crash simulé pendant l'écriture (`os.fsync` patché pour lever une exception, au milieu de la fenêtre dangereuse) laisse `docs/data.json` **strictement inchangé** — toujours l'ancien snapshot valide, encore parseable, sans fichier `.tmp` orphelin. `main()` avec `--git-push` non demandé rejoué de bout en bout contre des mocks (`alpaca_cli.get_account/list_positions`, `decision_log.read_log`) confirme que le snapshot réel contient bien `account_number`. Le vrai `docs/data.json` du dépôt vérifié intact après coup (`git status --short` ne le montre pas modifié). `py_compile` propre.
+
+---
+
+## 🟢 24/08 (nuit, session terminal) — les trois passes Cowork vérifiées contre l'API réelle
+
+*Tout ce qui suit n'avait tourné qu'en mocks. Vérifié ici en conditions réelles, sur le compte de dev, depuis le nouveau chemin `~/hindsight-alpha`.*
+
+**① Type structuré `ExitAction` — les 5 formats de phrase reproduits AU CARACTÈRE PRÈS.** Testés un par un contre les chaînes d'origine : `HOLDING`, `CLOSED`, `WOULD_CLOSE`, `UNREADABLE`, `ERROR`, plus la variante « fermeture + échec de comptabilité ». Confirmé en direct sur la vraie position ouverte : `SPY260831P00764000: holding (+2.8%, thresholds are +50%/-50%)` — **identique à la sortie relevée avant le refactor**. `to_dict()` sérialisable, et le journal contient bien **les deux formes en même temps** (7 anciennes chaînes brutes, 1 nouveau dict) : le JS du dashboard accepte les deux, vérifié visuellement, **zéro erreur console**.
+
+**② Dédoublonnage — et surtout, le bug de signature vraiment corrigé.** Testé avec deux messages `AlpacaCLIError` réalistes ne différant que par le timing réseau (`i/o timeout after 30.114s` vs `29.887s`) — le cas exact où l'ancienne version n'aurait jamais dédoublonné. **Signature obtenue : `('SPY260831P00764000', 'error', 'AlpacaCLIError')` — identique pour les deux.** Battement horaire vérifié sur une horloge simulée : journalisé à t=0, **muet à 15 et 45 min**, re-journalisé à 61 min. Une panne d'une **autre** classe (`DataQualityError`) reste journalisée ; une ligne `holding` routinière ne l'est jamais ; une vraie fermeture l'est toujours.
+
+⚠️ **Le dédoublonnage n'a PAS été observé sur une panne réelle** — aucune n'est survenue pendant la séance, et `monitor_exits_dedup.json` est resté à `{}`, ce qui est correct : il ne vise que les échecs persistants, et une position en `holding` n'est de toute façon jamais journalisée. Mécanisme prouvé sur des données réalistes, pas sur une panne vécue.
+
+**③ Écriture atomique de `docs/data.json`** — `temp + fsync + os.replace`, comme `state.json`. Régénéré, JSON valide, aucun résidu `.tmp`. *Ce correctif avait été écarté dans une passe précédente au motif que l'exposition était faible ; l'argument portait sur la **probabilité**, pas sur la **conséquence** — un fichier tronqué ici casse le dashboard public pour tout visiteur, alors que `state.json` est protégé par le sentinel `_corrupted`. Reconsidéré à raison.*
+
+**Non-régression :** `agent.py --dry-run` (évaluation forcée, marché fermé) rend exactement les mêmes verdicts qu'avant — SPY tradeable, GLD et XLV écartés pour volatilité non bon marché, **XLK toujours rejeté par `hindsight_guard`**. `monitor_exits --dry-run` propre. 14 fichiers compilent.
+
+**Position de test :** toujours ouverte, `SPY260831P00764000`, qty 2, ~+2,8 %. Gardée, inchangé.
+
+⚠️ **Et une note sur ma propre fiabilité :** quatre fois dans cette séance, un « 🔴 » affiché venait de **mon montage de test** (mauvais noms d'enum, mauvais noms de champ `plpc`/`pnl_pct`, mauvaise signature d'appel), jamais du code. À chaque fois relu et refait avant de conclure. **Le lecteur suivant doit vérifier mes verdicts plutôt que les reprendre.**

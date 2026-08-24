@@ -47,11 +47,101 @@ from __future__ import annotations
 import argparse
 import json
 from datetime import datetime, timezone
+from pathlib import Path
+from typing import Dict, List, Tuple
 
 import alpaca_cli
 import config
 import decision_log
 import risk_gates
+from risk_gates import ExitAction
+
+# Sidecar file for the persistent-failure dedup below -- deliberately
+# separate from state.json (risk_gates.STATE_FILE), which refuses ALL
+# writes once corrupted so a bad weekly-lock/consecutive-loss value is never
+# silently "healed". That guarantee is specifically about risk state; mixing
+# this purely-cosmetic logging bookkeeping into the same file would mean a
+# corrupted state.json also disables dedup -- harmless in one direction
+# (falls back to logging every occurrence, the safe/noisy side) but still an
+# unrelated concern living somewhere it doesn't belong. Gitignored: it is
+# run-machine-specific bookkeeping, same category as state.json itself.
+DEDUP_FILE = Path(__file__).parent / "monitor_exits_dedup.json"
+
+# How often a STILL-UNRESOLVED failure gets re-logged to decision_log.jsonl
+# (and therefore onto the public dashboard) while it persists unchanged.
+# Chosen against the concrete number this was written to fix: unfiltered,
+# monitor_exits' 15-minute schedule could write ~26 identical entries across
+# one ~6.5h trading day, evicting agent.py's once-daily entry decision from
+# the dashboard's most-recent-30 window in about 1.2 days. At one heartbeat
+# per hour, the same stuck failure produces at most ~7 entries/day -- still
+# impossible to miss, but no longer capable of drowning out everything else
+# within a day and a half.
+HEARTBEAT_SECONDS = 3600
+
+
+def _load_dedup_state() -> Dict[str, str]:
+    """{signature_key: ISO timestamp last actually WRITTEN to decision_log}.
+    Missing or corrupt file -> empty dict, same "first run" fallback as
+    risk_gates._load_state() for the missing case -- but unlike that
+    function, a corrupted file here is NOT sticky: this bookkeeping isn't
+    risk-critical, so the safe default on a bad read is simply "treat every
+    current failure as new," which just means one extra log line, not a
+    silently-cleared safety lock."""
+    try:
+        return json.loads(DEDUP_FILE.read_text())
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _save_dedup_state(state: Dict[str, str]) -> None:
+    try:
+        DEDUP_FILE.write_text(json.dumps(state))
+    except OSError as e:
+        print(f"  WARNING: could not persist {DEDUP_FILE.name} ({type(e).__name__}: {e}) -- "
+              "a persistent failure may get re-logged more often than the usual heartbeat until this is fixed.")
+
+
+def _filter_for_logging(
+    actions: List[ExitAction], dedup_state: Dict[str, str], now: datetime
+) -> Tuple[List[ExitAction], Dict[str, str]]:
+    """Decides which of this run's actions are worth writing to
+    decision_log.jsonl, and returns the dedup state to persist afterward.
+
+    A CLOSE or WOULD-CLOSE is always surfaced -- by construction it can't
+    repeat (a closed position leaves list_positions()), so there's nothing
+    to deduplicate. A failure (ERROR / UNREADABLE) is surfaced the first
+    time its signature (symbol, kind, error text) is seen, and again once
+    HEARTBEAT_SECONDS has passed since it was last actually logged --
+    otherwise it's suppressed THIS run (still printed to stdout/
+    monitor_exits.log every time, just not written to the public-facing
+    log). A signature that stops appearing (the position closed, or the
+    error resolved on its own) is dropped from dedup_state, so if the exact
+    same failure recurs later it's treated as new again rather than staying
+    silenced forever by a stale timestamp."""
+    surfaced: List[ExitAction] = []
+    still_failing: Dict[str, str] = {}
+    for action in actions:
+        sig = action.failure_signature()
+        if sig is None:
+            if not action.is_routine():
+                surfaced.append(action)
+            continue
+        key = json.dumps(sig, sort_keys=True)
+        last_logged = dedup_state.get(key)
+        if last_logged is None:
+            surfaced.append(action)
+            still_failing[key] = now.isoformat()
+            continue
+        try:
+            elapsed = (now - datetime.fromisoformat(last_logged)).total_seconds()
+        except ValueError:
+            elapsed = HEARTBEAT_SECONDS  # unparseable timestamp -- treat as due, don't get stuck silent
+        if elapsed >= HEARTBEAT_SECONDS:
+            surfaced.append(action)
+            still_failing[key] = now.isoformat()
+        else:
+            still_failing[key] = last_logged  # unchanged: still failing, not re-logged yet
+    return surfaced, still_failing
 
 
 def main() -> None:
@@ -71,6 +161,12 @@ def main() -> None:
     config.require_credentials()
 
     record: dict = {"run_type": "exit_monitor", "dry_run": args.dry_run, "outcome": "unknown"}
+    # Bound before the try, same reason `record` is: if manage_exits() itself
+    # raises (not a per-position failure -- those are already caught inside
+    # it -- but e.g. list_positions() failing outright), the finally block
+    # below still needs a defined List[ExitAction] to filter, not a NameError
+    # on top of the real one.
+    actions: List[ExitAction] = []
     try:
         if not args.skip_market_check:
             clock = alpaca_cli.get_clock()
@@ -84,7 +180,13 @@ def main() -> None:
 
         print(f"[{datetime.now(timezone.utc).isoformat()}] Checking open positions for take-profit / stop-loss...")
         actions = risk_gates.manage_exits(dry_run=args.dry_run)
-        record["exit_actions"] = actions
+        # actions is a List[risk_gates.ExitAction] (structured, since 24/08).
+        # record["exit_actions"] is what actually gets serialized to
+        # decision_log.jsonl -- always the FULL picture of this check
+        # (including anything the dedup filter below decides to suppress
+        # from logging), so a run that DOES get logged is never a partial
+        # view of what was actually seen.
+        record["exit_actions"] = [a.to_dict() for a in actions]
         if not actions:
             print("  No open option positions to check.")
         for action in actions:
@@ -130,15 +232,36 @@ def main() -> None:
         # public dashboard. The single most important event this script
         # exists to catch was the one it stayed quiet about.
         #
-        # Matching the one genuinely routine line instead ("holding") and
-        # treating everything else as noteworthy makes the default SAFE: any
-        # action string added to manage_exits() later gets logged unless
-        # someone deliberately classifies it as routine, rather than being
+        # Treating everything except ExitKind.HOLDING as noteworthy (via
+        # action.is_routine(), not string matching -- see risk_gates.py)
+        # keeps the default SAFE: any new ExitKind added later gets logged
+        # unless someone deliberately marks it routine, rather than being
         # silently dropped for not matching a whitelist nobody remembered to
         # update. Same failure family as the three fixed earlier today -- a
         # real event losing its trace in the bookkeeping that follows it.
-        actions = record.get("exit_actions", [])
-        noteworthy = record["outcome"] == "error" or any(": holding (" not in a for a in actions)
+        #
+        # Extended 24/08: "noteworthy" alone wasn't enough once monitor_exits
+        # had actually run unblocked for a while -- a STUCK failure (same
+        # position, same error, run after run) is noteworthy every single
+        # time by the rule above, which is correct the first time and just
+        # noise every time after. _filter_for_logging() (see its docstring)
+        # separates "worth deciding to log" from "worth writing THIS run":
+        # closes/would-closes are never deduplicated (they can't repeat by
+        # construction), a failure is logged the first time and then at most
+        # once per HEARTBEAT_SECONDS while it persists unchanged, and a
+        # resolved-then-recurring failure is treated as new again. This is
+        # exactly the same "carefully protects the action, then treats its
+        # own trace as a detail" shape as the five bugs fixed earlier the
+        # same day, but pre-empted here rather than reproduced after the
+        # fact -- this dedup layer is new, not a bug being fixed in existing
+        # behavior.
+        now = datetime.now(timezone.utc)
+        dedup_state = _load_dedup_state()
+        surfaced, dedup_state = _filter_for_logging(actions, dedup_state, now)
+        _save_dedup_state(dedup_state)  # persisted even when nothing is logged, so pruning a
+        # resolved failure's signature isn't itself lost between runs.
+
+        noteworthy = record["outcome"] == "error" or bool(surfaced)
         if noteworthy:
             # Same resilience as agent.py's finally, and for the same reason:
             # a logging failure must not destroy the only durable trace of a
@@ -147,7 +270,7 @@ def main() -> None:
             # where launchd's log will keep it.
             decision_log.log_run_or_dump(record)
         else:
-            print("  (nothing closed -- not adding a routine no-op entry to decision_log.jsonl)")
+            print("  (nothing new to report -- not adding a routine or already-logged no-op entry to decision_log.jsonl)")
 
 
 if __name__ == "__main__":

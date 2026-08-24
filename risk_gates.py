@@ -69,6 +69,7 @@ import json
 import os
 from dataclasses import dataclass
 from datetime import datetime
+from enum import Enum
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -501,12 +502,123 @@ def _record_exit_outcome(is_win: bool) -> int:
     return count
 
 
-def manage_exits(dry_run: bool = False) -> List[str]:
+class ExitKind(str, Enum):
+    """What happened to one position during a manage_exits() pass. A str
+    Enum on purpose: `action.kind == "holding"` still reads naturally at
+    every call site, no import of this class required just to compare."""
+    HOLDING = "holding"
+    CLOSED = "closed"
+    WOULD_CLOSE = "would_close"
+    UNREADABLE = "unreadable"  # position present, but its P&L% couldn't be read
+    ERROR = "error"            # the close attempt itself raised
+
+
+@dataclass
+class ExitAction:
+    """Structured replacement (24/08) for the plain human-readable strings
+    manage_exits() used to return. Found while writing the persistent-
+    failure dedup logic in monitor_exits.py: deciding "is this the same
+    problem as last time" by re-parsing a sentence built for a human to
+    read (matching ": holding (" as the one routine substring) was already
+    fragile -- the exact gap PLAN_SPRINT.md flagged as "the last place in
+    the code where a human-readable string decides control flow" once the
+    other four were fixed earlier. `kind` and the structured fields below
+    are what callers should branch on; `text` / `__str__` exist purely for
+    display and are kept byte-for-byte identical to the original sentences
+    so `monitor_exits.log` and printed output don't change shape.
+
+    `to_dict()` is what actually lands in decision_log.jsonl and therefore
+    docs/data.json -- a plain, JSON-serializable dict, never this class
+    itself. docs/index.html was updated alongside this to accept either
+    shape, since decision_log.jsonl is committed (never rewritten) and
+    already holds thousands of exit_actions entries as bare strings from
+    before this change."""
+    symbol: str
+    kind: ExitKind
+    pnl_pct: Optional[float] = None
+    label: Optional[str] = None  # "take-profit" / "stop-loss", set for CLOSED/WOULD_CLOSE
+    consecutive_losses: Optional[int] = None  # set only on a successful stop-loss CLOSE
+    bookkeeping_error: Optional[str] = None   # set only if that same streak update then failed
+    error: Optional[str] = None               # exception text, for UNREADABLE / ERROR
+
+    def __str__(self) -> str:
+        if self.kind == ExitKind.HOLDING:
+            return (f"{self.symbol}: holding ({self.pnl_pct:+.1%}, thresholds are "
+                     f"+{TAKE_PROFIT_PCT:.0%}/-{STOP_LOSS_PCT:.0%})")
+        if self.kind == ExitKind.UNREADABLE:
+            return f"{self.symbol}: could not read unrealized P&L% — leaving position open"
+        if self.kind == ExitKind.WOULD_CLOSE:
+            return f"{self.symbol}: WOULD CLOSE — {self.label} hit ({self.pnl_pct:+.1%})"
+        if self.kind == ExitKind.CLOSED:
+            if self.consecutive_losses is not None:
+                streak_note = f", consecutive losses now {self.consecutive_losses}"
+            elif self.bookkeeping_error is not None:
+                streak_note = f" (consecutive-loss count NOT updated: {self.bookkeeping_error})"
+            else:
+                streak_note = ""
+            return f"{self.symbol}: CLOSED — {self.label} hit ({self.pnl_pct:+.1%}){streak_note}"
+        if self.kind == ExitKind.ERROR:
+            return f"{self.symbol}: ERROR managing this position ({self.error}) — left open, check manually"
+        return f"{self.symbol}: {self.kind.value}"  # unreachable in practice; never silently blank
+
+    def to_dict(self) -> dict:
+        d: dict = {"symbol": self.symbol, "kind": self.kind.value, "text": str(self)}
+        if self.pnl_pct is not None:
+            d["pnl_pct"] = round(self.pnl_pct, 4)
+        if self.label is not None:
+            d["label"] = self.label
+        if self.consecutive_losses is not None:
+            d["consecutive_losses"] = self.consecutive_losses
+        if self.bookkeeping_error is not None:
+            d["bookkeeping_error"] = self.bookkeeping_error
+        if self.error is not None:
+            d["error"] = self.error
+        return d
+
+    def is_routine(self) -> bool:
+        return self.kind == ExitKind.HOLDING
+
+    def failure_signature(self) -> Optional[tuple]:
+        """Identity used by monitor_exits.py to recognize "this is the same
+        stuck problem as last time" rather than a fresh one. None for
+        anything that isn't a failure (holding/closed/would_close never
+        need dedup: holding is filtered before logging anyway, and a close
+        can't repeat -- the position leaves list_positions() once it's
+        closed).
+
+        Uses only the leading "ExceptionType" prefix of `error`, not the
+        full text -- found minutes after writing the first version, by
+        reproducing against a realistic error message instead of trusting
+        the mocked static strings every test up to that point had used.
+        alpaca_cli.py builds AlpacaCLIError from `result.stderr` (see its
+        _run_cli, subprocess error path), which for a real transient network
+        failure varies call to call (connection timing, a retry count the
+        CLI itself reports) even when it's the exact same underlying
+        problem recurring. Keying on the full string meant the SAME stuck
+        failure produced a DIFFERENT signature almost every 15-minute check
+        -- monitor_exits.py's heartbeat throttle would never engage against
+        the one case (a persistent network/API issue) it exists to catch,
+        silently reverting to logging every occurrence, the exact flooding
+        this dedup layer was built to prevent. `type(e).__name__: message`
+        is the format every raise site in this codebase already follows
+        (grepped, not assumed), so splitting on the first ": " reliably
+        recovers a stable exception-class identity; a message with no colon
+        (e.g. UNREADABLE's fixed string, which has none) falls back to the
+        whole string unchanged, so that case is unaffected."""
+        if self.kind in (ExitKind.ERROR, ExitKind.UNREADABLE):
+            error_kind = (self.error or "").split(":", 1)[0].strip() or (self.error or "")
+            return (self.symbol, self.kind.value, error_kind)
+        return None
+
+
+def manage_exits(dry_run: bool = False) -> List[ExitAction]:
     """Checks every open option position and closes any that have hit the
     take-profit or stop-loss threshold on unrealized P&L. Called once at
     the start of each run, before evaluating any new entry — position
     management isn't conditional on whether a new trade looks good today.
-    Returns a human-readable action log line per position, for printing.
+    Returns one structured ExitAction per position (see that class) --
+    `str(action)` reproduces the original human-readable line, for
+    printing and for anything reading old decision_log.jsonl entries.
 
     dry_run=True never calls close_position (a real order), only reports
     what it would have done — same contract as agent.py's --dry-run for
@@ -534,7 +646,7 @@ def manage_exits(dry_run: bool = False) -> List[str]:
     earlier in the same loop. Not yet triggered for real -- found by
     re-reading this function immediately after fixing the same-shaped gap
     in check_gates(), not by a live failure."""
-    actions: List[str] = []
+    actions: List[ExitAction] = []
     for pos in alpaca_cli.list_positions():
         asset_class = str(pos.get("asset_class", "")).lower()
         symbol = str(pos.get("symbol", ""))
@@ -544,7 +656,8 @@ def manage_exits(dry_run: bool = False) -> List[str]:
         try:
             plpc = _extract_unrealized_plpc(pos)
             if plpc is None:
-                actions.append(f"{symbol}: could not read unrealized P&L% — leaving position open")
+                actions.append(ExitAction(symbol, ExitKind.UNREADABLE,
+                                           error="unrealized_plpc missing or unparseable in `alpaca position list` output"))
                 continue
 
             would_close_profit = plpc >= TAKE_PROFIT_PCT
@@ -553,7 +666,7 @@ def manage_exits(dry_run: bool = False) -> List[str]:
             if would_close_profit or would_close_loss:
                 label = "take-profit" if would_close_profit else "stop-loss"
                 if dry_run:
-                    actions.append(f"{symbol}: WOULD CLOSE — {label} hit ({plpc:+.1%})")
+                    actions.append(ExitAction(symbol, ExitKind.WOULD_CLOSE, pnl_pct=plpc, label=label))
                 else:
                     alpaca_cli.close_position(symbol)
                     # _record_exit_outcome() is bookkeeping AFTER the close
@@ -569,13 +682,13 @@ def manage_exits(dry_run: bool = False) -> List[str]:
                     # opposite would be actively misleading, not just
                     # unhelpful, on the one action (a real stop-loss firing)
                     # this project cares most about being honest about.
-                    streak_note = ""
+                    consecutive_losses = None
+                    bookkeeping_error = None
                     if not would_close_profit:
                         try:
-                            streak = _record_exit_outcome(is_win=False)
-                            streak_note = f", consecutive losses now {streak}"
+                            consecutive_losses = _record_exit_outcome(is_win=False)
                         except Exception as e:
-                            streak_note = f" (consecutive-loss count NOT updated: {type(e).__name__}: {e})"
+                            bookkeeping_error = f"{type(e).__name__}: {e}"
                     else:
                         try:
                             _record_exit_outcome(is_win=True)
@@ -583,11 +696,13 @@ def manage_exits(dry_run: bool = False) -> List[str]:
                             print(f"  WARNING: {symbol} closed on a win but failed to reset the "
                                   f"consecutive-loss counter ({type(e).__name__}: {e}) -- the close "
                                   "itself is unaffected.")
-                    actions.append(f"{symbol}: CLOSED — {label} hit ({plpc:+.1%}){streak_note}")
+                    actions.append(ExitAction(symbol, ExitKind.CLOSED, pnl_pct=plpc, label=label,
+                                               consecutive_losses=consecutive_losses,
+                                               bookkeeping_error=bookkeeping_error))
             else:
-                actions.append(f"{symbol}: holding ({plpc:+.1%}, thresholds are +{TAKE_PROFIT_PCT:.0%}/-{STOP_LOSS_PCT:.0%})")
+                actions.append(ExitAction(symbol, ExitKind.HOLDING, pnl_pct=plpc))
         except Exception as e:
-            actions.append(f"{symbol}: ERROR managing this position ({type(e).__name__}: {e}) — left open, check manually")
+            actions.append(ExitAction(symbol, ExitKind.ERROR, error=f"{type(e).__name__}: {e}"))
     return actions
 
 

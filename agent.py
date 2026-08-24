@@ -230,7 +230,11 @@ def _run(args, symbols, record: dict) -> None:
     if args.dry_run:
         print("  --dry-run set: not closing anything, but here's what a real run would see:")
     exit_actions = risk_gates.manage_exits(dry_run=args.dry_run)
-    record["exit_actions"] = exit_actions
+    # exit_actions is a List[risk_gates.ExitAction] (structured, since 24/08)
+    # -- .to_dict() for the record so json.dumps in decision_log doesn't choke
+    # on a dataclass; the print loop below keeps using the objects directly,
+    # since ExitAction.__str__ reproduces the exact original sentence.
+    record["exit_actions"] = [a.to_dict() for a in exit_actions]
     for action in exit_actions:
         print(f"  {action}")
 

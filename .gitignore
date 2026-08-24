@@ -7,4 +7,6 @@ state.json
 HALT
 .DS_Store
 state.json.tmp
+docs/data.json.tmp
 monitor_exits.log
+monitor_exits_dedup.json

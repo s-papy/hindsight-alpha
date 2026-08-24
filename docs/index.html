@@ -295,7 +295,14 @@ function renderTrade(d) {
   // ever rendered it. The whole point of only logging monitor_exits.py's
   // noteworthy runs is so a judge sees the close on the dashboard; without
   // this, that close was in the JSON but invisible on the page itself.
-  const lines = (d.exit_actions || []).map(a => `↩ ${a}`);
+  //
+  // Each entry used to always be a plain string. Since 24/08 (risk_gates.py's
+  // manage_exits() moved to a structured ExitAction type) it's a dict with a
+  // .text field carrying that exact same sentence, plus structured fields
+  // (kind, pnl_pct, ...) nothing here needs yet. decision_log.jsonl is
+  // committed, never rewritten, so old rows keep the plain-string shape
+  // forever -- both have to render, not just the new one.
+  const lines = (d.exit_actions || []).map(a => `↩ ${typeof a === "string" ? a : (a && a.text) || JSON.stringify(a)}`);
   if (Array.isArray(d.trades) && d.trades.length) {
     for (const t of d.trades) {
       if (t.order_id) {

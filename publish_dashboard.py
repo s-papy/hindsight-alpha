@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
@@ -71,7 +72,39 @@ def build_snapshot() -> dict:
 def write_snapshot() -> Path:
     DOCS_DIR.mkdir(exist_ok=True)
     snapshot = build_snapshot()
-    DATA_FILE.write_text(json.dumps(snapshot, indent=2))
+    # Atomic write -- flagged but deliberately left alone in a "cherche
+    # encore" pass earlier the same day ("same shape as state.json's [fixed]
+    # torn-write bug, but exposure is lower: this script isn't scheduled,
+    # write and commit happen in the same process, and the next run
+    # overwrites the file"). Revisited and fixed on request: that reasoning
+    # was about how LIKELY a torn write is here, not about the CONSEQUENCE
+    # if one happens, and the consequence is real -- unlike state.json,
+    # which is code this project runs, docs/data.json is content a judge's
+    # browser parses with JSON.parse(). Path.write_text() opens in mode "w",
+    # which truncates to 0 bytes before writing a single byte of the new
+    # content (probed directly on this exact file, same mechanism as the
+    # state.json bug: 40 bytes -> 0 the instant the file is opened) -- a
+    # process killed mid-write (or a --git-push mid-commit interrupted the
+    # same way) would leave docs/data.json invalid, and GitHub Pages would
+    # serve that broken file to every visitor, including a judge, until the
+    # next successful run overwrites it. Same fix as _save_state() in
+    # risk_gates.py: write to a temp file in the same directory, fsync, then
+    # os.replace() -- atomic on POSIX, so a reader always sees either the
+    # complete old snapshot or the complete new one, never a half-written
+    # file.
+    tmp = DATA_FILE.with_name(DATA_FILE.name + ".tmp")
+    try:
+        with open(tmp, "w") as fh:
+            fh.write(json.dumps(snapshot, indent=2))
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, DATA_FILE)
+    except Exception:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        raise
     return DATA_FILE
 
 
