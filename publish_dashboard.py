@@ -47,6 +47,16 @@ def build_snapshot() -> dict:
         "team": "Hindsight Alpha",
         "account": {
             "id": account.get("id"),
+            # account_number ("PA..." on paper accounts) is the human-visible
+            # identifier -- what the hackathon submission form's "Alpaca
+            # account ID" field almost certainly means, per Alpaca's own docs
+            # distinguishing it from the internal UUID `id`. Surfaced
+            # separately so the dashboard shows the SAME identifier that's
+            # declared in the submission, not just the UUID -- a mismatch
+            # here would make the "does this dashboard match the submitted
+            # account" cross-check (the whole reason the dashboard shows an
+            # account ID at all) confusing instead of reassuring.
+            "account_number": account.get("account_number"),
             "status": account.get("status"),
             "equity": account.get("equity"),
             "cash": account.get("cash"),

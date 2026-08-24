@@ -23,11 +23,28 @@ def main() -> None:
         if key in account:
             print(f"  {key}: {account[key]}")
 
-    if config.ACCOUNT_ID and account.get("id") != config.ACCOUNT_ID:
+    # Alpaca returns two different identifiers for the same account: `id`
+    # (an internal UUID) and `account_number` (the human-visible "PA..."
+    # number shown on the dashboard's account switcher -- exactly what
+    # .env.example tells you to paste here, and what .env.hackathon already
+    # holds: PA3K8MP3MF0U). Comparing ALPACA_ACCOUNT_ID against `id` would
+    # compare a "PA..." string against a UUID -- never equal by construction,
+    # so this check would print a false "mismatch" warning on every single
+    # correctly-configured run. Compare against account_number instead (see
+    # PLAN_SPRINT.md, 24/08 pass -- the same id/account_number confusion was
+    # just found and fixed in publish_dashboard.py's dashboard display).
+    actual_account_number = account.get("account_number")
+    if config.ACCOUNT_ID and actual_account_number and actual_account_number != config.ACCOUNT_ID:
         print(
             f"\nWARNING: ALPACA_ACCOUNT_ID in .env ({config.ACCOUNT_ID}) does not match "
-            f"the account these keys authenticate as ({account.get('id')}). Double-check "
+            f"the account these keys authenticate as ({actual_account_number}). Double-check "
             "you're pointed at the right account before the real hackathon run."
+        )
+    elif config.ACCOUNT_ID and not actual_account_number:
+        print(
+            "\nNOTE: could not read account_number from this account to verify against "
+            f"ALPACA_ACCOUNT_ID ({config.ACCOUNT_ID}) -- CLI may name this field differently. "
+            f"Full account id was: {account.get('id')}. Not a hard failure, just unverified."
         )
 
     print("\nAll good — you can now run: python agent.py --dry-run")

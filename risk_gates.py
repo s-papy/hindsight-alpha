@@ -65,8 +65,28 @@ def _save_state(state: dict) -> None:
     STATE_FILE.write_text(json.dumps(state, indent=2))
 
 
-def _record_starting_equity(equity: float, state: dict) -> dict:
-    if "starting_equity" not in state:
+def _record_starting_equity(equity: float, state: dict, account_id: Optional[str]) -> dict:
+    """Sets the baseline the weekly lock measures drawdown against — once,
+    the first time this account is seen.
+
+    account_id is compared against whatever is already saved in state.json.
+    Without this check, switching .env from the dev account to the dedicated
+    hackathon account at kickoff (a planned step, see PLAN_SPRINT.md) would
+    silently compare the new account's real equity against the OLD account's
+    starting_equity -- two unrelated numbers, since state.json is a single
+    shared file with no account awareness. That could either falsely trip
+    the weekly loss lock on the very first real run, or (worse) mis-size
+    trades against a wrong baseline, depending on which account happened to
+    have more equity. Re-baselining whenever the account_id changes makes
+    the forgetting-to-wipe-state.json failure mode self-correcting instead
+    of relying on remembering a manual step during the kickoff handoff."""
+    if state.get("account_id") != account_id or "starting_equity" not in state:
+        if state.get("account_id") not in (None, account_id):
+            print(
+                f"NOTE: state.json was for account {state.get('account_id')!r}, "
+                f"now running as {account_id!r} -- re-baselining starting_equity and clearing any lock."
+            )
+        state["account_id"] = account_id
         state["starting_equity"] = equity
         state["locked"] = False
         state["lock_reason"] = None
@@ -152,8 +172,9 @@ def check_gates(option_symbol: str) -> RiskDecision:
     if equity <= 0:
         return RiskDecision(False, "could not read a usable equity figure from the account")
 
+    account_id = account.get("id")
     state = _load_state()
-    state = _record_starting_equity(equity, state)
+    state = _record_starting_equity(equity, state, account_id)
 
     if state.get("locked"):
         return RiskDecision(False, f"weekly loss lock already active: {state.get('lock_reason')}")

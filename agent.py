@@ -82,29 +82,44 @@ class SymbolVerdict:
 def evaluate_symbol(symbol: str, sharpe_threshold: float) -> SymbolVerdict:
     """Runs the full sweep -> hindsight_guard -> regime check for one symbol.
     Never touches risk_gates or submits anything — that happens once, in
-    main(), only for whichever symbol (if any) comes back tradeable first."""
+    main(), only for whichever symbol (if any) comes back tradeable first.
+
+    Any exception raised while evaluating THIS symbol (a transient API
+    hiccup on `data bars`, an option-chain lookup failure, too few bars for
+    a window, etc.) is caught here and turned into a "skip" verdict rather
+    than left to propagate. Without this, one bad symbol out of the universe
+    would crash the whole run via main()'s top-level try/except -- silently
+    throwing away verdicts already computed for the other symbols and
+    undermining the entire point of evaluating a universe instead of just
+    SPY (see the module docstring: multiple chances per day to avoid a
+    zero-trade week). A single flaky symbol should cost that one symbol's
+    chance today, not the whole day's chance across all three."""
     print(f"\n--- {symbol} ---")
-    bars = alpaca_cli.get_daily_bars(symbol)
-    print(f"  got {len(bars)} bars")
+    try:
+        bars = alpaca_cli.get_daily_bars(symbol)
+        print(f"  got {len(bars)} bars")
 
-    def score_fn(window: int, split: str) -> float:
-        return score_hv_window(window, split, bars)
+        def score_fn(window: int, split: str) -> float:
+            return score_hv_window(window, split, bars)
 
-    report = check_selection_leakage(CANDIDATE_HV_WINDOWS, score_fn, threshold=sharpe_threshold)
-    print(f"  hindsight_guard: {'OK' if report.agrees else 'LEAK DETECTED'} (winner: {report.full_winner})")
+        report = check_selection_leakage(CANDIDATE_HV_WINDOWS, score_fn, threshold=sharpe_threshold)
+        print(f"  hindsight_guard: {'OK' if report.agrees else 'LEAK DETECTED'} (winner: {report.full_winner})")
 
-    if not report.agrees:
-        return SymbolVerdict(symbol, False, "hindsight_guard: winning HV window doesn't hold up in-sample")
+        if not report.agrees:
+            return SymbolVerdict(symbol, False, "hindsight_guard: winning HV window doesn't hold up in-sample")
 
-    vetted_window = report.full_winner
-    is_cheap, hv_rank = today_regime(bars, vetted_window)
-    print(f"  HV window={vetted_window}d, today's HV rank={hv_rank:.1f} (need < {CHEAP_VOL_PERCENTILE})")
+        vetted_window = report.full_winner
+        is_cheap, hv_rank = today_regime(bars, vetted_window)
+        print(f"  HV window={vetted_window}d, today's HV rank={hv_rank:.1f} (need < {CHEAP_VOL_PERCENTILE})")
 
-    if not is_cheap:
-        return SymbolVerdict(symbol, False, f"volatility not cheap today (HV rank {hv_rank:.1f})")
+        if not is_cheap:
+            return SymbolVerdict(symbol, False, f"volatility not cheap today (HV rank {hv_rank:.1f})")
 
-    signal = direction_tiebreak(bars)
-    return SymbolVerdict(symbol, True, "cheap-vol regime confirmed, hindsight_guard clean", direction=signal)
+        signal = direction_tiebreak(bars)
+        return SymbolVerdict(symbol, True, "cheap-vol regime confirmed, hindsight_guard clean", direction=signal)
+    except Exception as e:
+        print(f"  ERROR evaluating {symbol}: {type(e).__name__}: {e} -- skipping this symbol today")
+        return SymbolVerdict(symbol, False, f"error evaluating symbol: {type(e).__name__}: {e}")
 
 
 def main() -> None:

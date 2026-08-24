@@ -1,0 +1,153 @@
+"""Real backtest of the HV-rank strategy against real historical bars.
+
+Why this exists: the agent's own honest disclosure (README, PLAN_SPRINT) was
+"we verified the mechanism works, not that the underlying thesis makes
+money" -- true, but unverified either way until now. This script actually
+answers "is this strategy historically profitable, and by how much" using
+the project's own scoring code (vol_strategy.py), not a new implementation
+that could quietly disagree with what the live agent does.
+
+Requires network access to Alpaca's data API via the CLI (alpaca_cli.py) --
+same reason this can't run inside Cowork's sandbox as everything else that
+touches the real API. Run from a real terminal:
+
+    python backtest.py                      # default universe SPY,QQQ,IWM
+    python backtest.py --symbols SPY,QQQ,IWM,DIA
+
+IMPORTANT, read before quoting any number from this script anywhere public:
+the "proxy payoff" computed here (see vol_strategy._vol_strategy_returns'
+docstring) is abs(next-day return) minus a cost term scaled by realized vol
+at entry. It is a deliberate simplification used because Alpaca does not
+expose historical option-IV data to backtest against -- NOT a real options
+premium simulation. It ignores bid-ask spread, time decay (theta) between
+entry and the next bar, and the actual strike/expiry chosen at trade time.
+Treat every number below as "does the regime call have any historical
+edge at all", not "this is what $976 in real premium would have returned".
+Report both, honestly labeled, in the write-up -- don't quietly drop this
+paragraph when it's time to make a slide.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+from datetime import datetime, timezone
+from pathlib import Path
+from statistics import mean
+from typing import List
+
+import alpaca_cli
+import hindsight_guard
+from vol_strategy import (
+    CANDIDATE_HV_WINDOWS,
+    MIN_TRADING_DAYS_FOR_SWEEP,
+    Bar,
+    _vol_strategy_returns,
+    daily_returns,
+    score_hv_window,
+)
+
+RESULTS_FILE = Path(__file__).parent / "BACKTEST_RESULTS.md"
+
+
+def max_drawdown(cumulative: List[float]) -> float:
+    """Largest peak-to-trough drop in a cumulative proxy-payoff curve."""
+    if not cumulative:
+        return 0.0
+    peak = cumulative[0]
+    worst = 0.0
+    for v in cumulative:
+        peak = max(peak, v)
+        worst = min(worst, v - peak)
+    return worst
+
+
+def buy_and_hold_return(bars: List[Bar]) -> float:
+    if len(bars) < 2 or bars[0].close == 0:
+        return 0.0
+    return (bars[-1].close - bars[0].close) / bars[0].close
+
+
+def backtest_symbol(symbol: str, bars: List[Bar]) -> dict:
+    result: dict = {"symbol": symbol, "bars_used": len(bars), "windows": {}}
+
+    for window in CANDIDATE_HV_WINDOWS:
+        strat_rets = _vol_strategy_returns(bars, window)
+        trade_days = [r for r in strat_rets if r != 0.0]
+        cumulative, running = [], 0.0
+        for r in strat_rets:
+            running += r
+            cumulative.append(running)
+
+        result["windows"][window] = {
+            "total_days_scored": len(strat_rets),
+            "trade_days": len(trade_days),
+            "trade_frequency_pct": round(100 * len(trade_days) / len(strat_rets), 1) if strat_rets else 0.0,
+            "cumulative_proxy_payoff": round(cumulative[-1], 4) if cumulative else 0.0,
+            "win_rate_on_trade_days_pct": round(100 * sum(1 for r in trade_days if r > 0) / len(trade_days), 1) if trade_days else 0.0,
+            "avg_payoff_per_trade": round(mean(trade_days), 5) if trade_days else 0.0,
+            "max_drawdown_proxy": round(max_drawdown(cumulative), 4),
+        }
+
+    # Replay what the live agent's own leak check would have picked, honestly
+    # (same call agent.py makes) -- not a separate hand-picked "best window".
+    def score_fn(window: int, split: str) -> float:
+        return score_hv_window(window, split, bars)
+
+    report = hindsight_guard.check_selection_leakage(CANDIDATE_HV_WINDOWS, score_fn, threshold=0.0)
+    result["hindsight_guard_verdict"] = {
+        "agrees": report.agrees,
+        "full_winner": report.full_winner,
+        "in_sample_winner": report.in_sample_winner,
+        "summary": report.summary(),
+    }
+
+    result["buy_and_hold_return_pct"] = round(100 * buy_and_hold_return(bars), 2)
+    return result
+
+
+def format_report(results: List[dict]) -> str:
+    lines = [
+        "# Backtest results — HV-rank strategy vs real historical bars",
+        "",
+        f"*Generated {datetime.now(timezone.utc).isoformat()}. Proxy payoff, not real options P&L — see backtest.py's module docstring for exactly what is and isn't simulated.*",
+        "",
+    ]
+    for r in results:
+        lines.append(f"## {r['symbol']} ({r['bars_used']} bars used, buy-and-hold over the period: {r['buy_and_hold_return_pct']}%)")
+        lines.append("")
+        lines.append("| window (days) | trade days | freq | cum. proxy payoff | win rate on trades | avg payoff/trade | max drawdown |")
+        lines.append("|---|---|---|---|---|---|---|")
+        for w, d in r["windows"].items():
+            lines.append(
+                f"| {w} | {d['trade_days']}/{d['total_days_scored']} | {d['trade_frequency_pct']}% "
+                f"| {d['cumulative_proxy_payoff']} | {d['win_rate_on_trade_days_pct']}% "
+                f"| {d['avg_payoff_per_trade']} | {d['max_drawdown_proxy']} |"
+            )
+        lines.append("")
+        lines.append(f"**hindsight_guard verdict for this symbol:** {'agrees (no leak)' if r['hindsight_guard_verdict']['agrees'] else 'LEAK DETECTED'} — full-window winner: {r['hindsight_guard_verdict']['full_winner']} days, in-sample winner: {r['hindsight_guard_verdict']['in_sample_winner']} days.")
+        lines.append("")
+    return "\n".join(lines)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--symbols", default="SPY,QQQ,IWM", help="comma-separated symbols")
+    args = parser.parse_args()
+    symbols = [s.strip().upper() for s in args.symbols.split(",") if s.strip()]
+
+    results = []
+    for symbol in symbols:
+        print(f"Fetching {MIN_TRADING_DAYS_FOR_SWEEP}+ trading days of bars for {symbol}...")
+        bars = alpaca_cli.get_daily_bars(symbol)
+        print(f"  got {len(bars)} bars, backtesting {len(CANDIDATE_HV_WINDOWS)} windows...")
+        results.append(backtest_symbol(symbol, bars))
+
+    report = format_report(results)
+    RESULTS_FILE.write_text(report)
+    print(f"\nWrote {RESULTS_FILE}")
+    print(report)
+
+
+if __name__ == "__main__":
+    main()

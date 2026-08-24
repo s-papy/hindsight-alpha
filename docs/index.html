@@ -213,6 +213,7 @@ function renderAccount(account) {
   const el = document.getElementById('account-cards');
   if (!account) { el.innerHTML = '<div class="empty">No account data yet</div>'; return; }
   const cards = [
+    ['Account ID', account.account_number || account.id || '—'],
     ['Equity', fmtMoney(account.equity)],
     ['Cash', fmtMoney(account.cash)],
     ['Buying Power', fmtMoney(account.buying_power)],
