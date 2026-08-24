@@ -1,8 +1,8 @@
 """Hindsight Alpha — an options-trading agent that refuses to trust its own
 parameter selection until it's checked for hindsight leakage.
 
-Flow, per symbol in the universe (default SPY, QQQ, IWM — see "Why a
-universe" below):
+Flow, per symbol in the universe (default SPY, GLD, XLK, XLV — see "Why
+these four symbols" below):
   1. Fetch daily bars for the underlying.
   2. Sweep candidate historical-volatility windows (vol_strategy.CANDIDATE_HV_WINDOWS)
      for a "buy optionality when realized vol is cheap relative to its own
@@ -24,20 +24,40 @@ closes anything that's hit +50% (take-profit) or -50% (stop-loss) on
 unrealized P&L, independent of whether a new entry looks good today —
 position management isn't conditional on today's signal.
 
-The first symbol in the universe that clears steps 2-5 is the one traded
-(subject to risk_gates.py, checked once, before that single order). Once one
-symbol has an open position, risk_gates.has_open_option_position() blocks
-any further symbol from also trading that day — the universe exists to
-raise the odds that *something* trades, not to open multiple positions.
+Since 24/08, EVERY symbol that clears steps 2-5 is attempted, not just the
+first one — the agent can hold several positions at once now. Each attempt
+still goes through risk_gates.check_gates(underlying, contract), which
+enforces, per Spap's explicit direction ("plusieurs symboles différents...
+jamais tous les mêmes, œuf dans le même panier"):
+  - never two open positions on the same underlying at once;
+  - a hard cap on the number of concurrent positions (risk_gates.MAX_OPEN_POSITIONS);
+  - a per-trade cap of 1% of equity (risk_gates.MAX_RISK_PCT_PER_TRADE);
+  - a TOTAL cap of 3% of equity committed across ALL open positions combined
+    (risk_gates.MAX_TOTAL_RISK_PCT) — so a second and third position shrink
+    the room left for further trades, they don't each get their own fresh 1%.
+  - the weekly -3% drawdown lock (risk_gates.WEEKLY_LOSS_LOCK_PCT) already
+    compares total account equity to the recorded starting equity, so it
+    was already measuring combined drawdown across all positions, not a
+    single isolated one — nothing needed to change there.
+So up to MAX_OPEN_POSITIONS positions can be open at once, each on a
+different underlying, with combined risk capped at 3% of equity regardless
+of how many are open.
 
-Why a universe, not just SPY: with three independent "no" gates (hindsight
-check, volatility regime, risk gates) stacked on a single low-volatility
-symbol like SPY, a genuinely realistic outcome is zero trades across the
-entire hackathon week — intellectually honest, but the judging explicitly
-includes "P&L Performance," and an agent that never acts has nothing to
-show there or in the demo video. Testing a short list of similarly liquid,
-optionable ETFs (SPY, QQQ, IWM) each day is the same honest gate applied
-more times, not a loosened one.
+Why these four symbols, not just SPY: with three independent "no" gates
+(hindsight check, volatility regime, risk gates) stacked on a single
+low-volatility symbol like SPY, a genuinely realistic outcome is zero trades
+across the entire hackathon week — intellectually honest, but the judging
+explicitly includes "P&L Performance," and an agent that never acts has
+nothing to show there or in the demo video. The universe used to be three
+broad-market ETFs (SPY, QQQ, IWM) that are highly correlated with each other
+(same macro driver, same days tend to be cheap/expensive vol for all three)
+— diversifying the number of *chances* per day without diversifying the
+*risk*. Since 24/08 the universe spans genuinely different sectors instead:
+SPY (broad market anchor), GLD (gold/commodities), XLK (technology), XLV
+(healthcare/pharma) — all deep, liquid, optionable ETFs, chosen over single
+stocks for tighter spreads and safer sizing during a live hackathon week.
+If two of these ever end up in open positions at once, they're exposed to
+different macro drivers, not the same trade twice under different tickers.
 
 All Alpaca calls go through alpaca_cli.py, a subprocess wrapper around
 Alpaca's official CLI (github.com/alpacahq/cli) — not the alpaca-py SDK.
@@ -46,7 +66,7 @@ See alpaca_cli.py's module docstring for why: it's the hackathon's explicit
 MCP server for exactly this shape of agent (one command per invocation,
 then exit — not a persistent AI-host session).
 
-Run: python agent.py [--symbols SPY,QQQ,IWM] [--dry-run]
+Run: python agent.py [--symbols SPY,GLD,XLK,XLV] [--dry-run]
 """
 
 from __future__ import annotations
@@ -68,7 +88,7 @@ from vol_strategy import (
     today_regime,
 )
 
-DEFAULT_UNIVERSE = ["SPY", "QQQ", "IWM"]
+DEFAULT_UNIVERSE = ["SPY", "GLD", "XLK", "XLV"]  # broad market, commodities, tech, pharma/healthcare — not all the same eggs in one basket
 
 
 @dataclass
@@ -184,6 +204,15 @@ def _run(args, symbols, record: dict) -> None:
     for action in exit_actions:
         print(f"  {action}")
 
+    halted, halt_reason = risk_gates.is_halted()
+    if halted:
+        print(f"\n[HALT] {halt_reason}")
+        print("Manual pause active (HALT file present) -- not evaluating or opening any new position today. "
+              "Exits above still ran; remove the HALT file to resume.")
+        record["outcome"] = "halted"
+        record["halt_reason"] = halt_reason
+        return
+
     print(f"\n[1] Evaluating universe: {symbols}")
     verdicts = [evaluate_symbol(sym, args.sharpe_threshold) for sym in symbols]
     record["verdicts"] = [
@@ -191,50 +220,132 @@ def _run(args, symbols, record: dict) -> None:
         for v in verdicts
     ]
 
-    tradeable = next((v for v in verdicts if v.tradeable), None)
+    tradeable_verdicts = [v for v in verdicts if v.tradeable]
 
     print("\n[2] Summary:")
     for v in verdicts:
         marker = "TRADEABLE" if v.tradeable else "skip"
         print(f"  {v.symbol}: {marker} — {v.reason}")
 
-    if tradeable is None:
+    if not tradeable_verdicts:
         print("\nNo symbol in the universe cleared both gates today. No order submitted.")
         record["outcome"] = "no_edge"
         return
 
-    direction_label = "bullish (call)" if tradeable.direction > 0 else "bearish (put)"
-    print(f"\nTrading {tradeable.symbol}, direction: {direction_label}")
-    record["chosen_symbol"] = tradeable.symbol
-    record["direction"] = direction_label
-
     if args.dry_run:
-        print("--dry-run set: not looking up a contract or submitting an order.")
+        print(f"\n--dry-run set: {len(tradeable_verdicts)} symbol(s) tradeable "
+              f"({', '.join(v.symbol for v in tradeable_verdicts)}), but not looking up "
+              "contracts or submitting orders.")
         record["outcome"] = "dry_run_tradeable"
+        record["tradeable_symbols"] = [v.symbol for v in tradeable_verdicts]
         return
 
-    contract = alpaca_cli.find_near_the_money_contract(tradeable.symbol, tradeable.direction)
-    record["contract"] = contract
-    if contract is None:
-        print("No matching option contract found (check market hours / symbol / expiry window).")
-        record["outcome"] = "no_contract_found"
-        return
+    # Every symbol that cleared steps 2-5 gets a real attempt, not just the
+    # first — risk_gates.check_gates() is what actually decides how many of
+    # these end up as orders (duplicate-underlying block, MAX_OPEN_POSITIONS,
+    # and the shared 3%-of-equity total-exposure cap all apply across this
+    # loop, so later attempts naturally get shrunk or blocked once earlier
+    # ones in the same run have committed budget).
+    #
+    # committed_this_run / opened_this_run track what THIS run has already
+    # spent, in memory -- passed into every check_gates() call after the
+    # first. Needed because check_gates() re-reads open positions from the
+    # live API each time, and a just-submitted paper order isn't guaranteed
+    # to show up there instantly (order submit returns on acceptance, not
+    # necessarily on fill). Without this, a second or third symbol in the
+    # same run could pass the total-exposure/position-count checks as if
+    # the earlier order(s) from this same run never happened.
+    print(f"\n[3] Attempting entry for {len(tradeable_verdicts)} tradeable symbol(s): "
+          f"{', '.join(v.symbol for v in tradeable_verdicts)}")
+    trades = []
+    orders_submitted = 0
+    # Keyed by underlying, not a running total/count -- fixed 24/08, second
+    # pass on this same-run tracking (see risk_gates.check_gates()'s
+    # docstring): a running float/count always got added in full, even if
+    # the live API happened to catch up on an earlier order before the next
+    # symbol's check, which would have double-counted that position.
+    # check_gates() now filters out underlyings it can already see live.
+    committed_this_run_by_underlying: dict = {}
+    opened_this_run_underlyings: set = set()
+    for tradeable in tradeable_verdicts:
+        direction_label = "bullish (call)" if tradeable.direction > 0 else "bearish (put)"
+        print(f"\n-- {tradeable.symbol} ({direction_label}) --")
+        trade_record: dict = {"symbol": tradeable.symbol, "direction": direction_label}
 
-    print(f"Selected contract: {contract}")
-    print("[3] Checking risk gates (open positions, per-trade cap, weekly loss lock)...")
-    decision = risk_gates.check_gates(contract)
-    record["risk_gate_reason"] = decision.reason
-    print(f"  {decision.reason}")
-    if not decision.allowed:
-        print("Risk gates blocked this trade. No order submitted.")
-        record["outcome"] = "risk_gate_blocked"
-        return
+        # Wrapped in try/except -- found 24/08, "cherche encore": this loop
+        # had NO per-symbol exception isolation, unlike evaluate_symbol()
+        # above (see that function's docstring for the exact same rationale,
+        # already written down there but never extended to this second loop
+        # over the SAME universe). find_near_the_money_contract() ->
+        # get_last_price() -> get_daily_bars() can raise DataQualityError
+        # (control #63, added earlier this session) or AlpacaCLIError on a
+        # transient API hiccup -- and so can check_gates() and
+        # submit_paper_option_order(). Unguarded, any of those on ANY ONE
+        # symbol mid-loop would propagate out of _run() entirely, hit only
+        # main()'s top-level except, and: (1) skip every symbol still left
+        # in tradeable_verdicts even if they had nothing wrong with them,
+        # and (2) worse, never reach `record["trades"] = trades` below --
+        # so even orders ALREADY submitted for earlier symbols in this same
+        # run would vanish from decision_log.jsonl entirely, not just get
+        # mislabeled. Same failure shape as the missing per-symbol isolation
+        # this project explicitly designed AROUND in evaluate_symbol(), just
+        # never carried over to this loop when it was rewritten for multiple
+        # symbols. Not yet triggered for real -- found by re-reading, not by
+        # a live crash.
+        try:
+            contract = alpaca_cli.find_near_the_money_contract(tradeable.symbol, tradeable.direction)
+            trade_record["contract"] = contract
+            if contract is None:
+                print("  No matching option contract found (check market hours / symbol / expiry window).")
+                trade_record["outcome"] = "no_contract_found"
+                trades.append(trade_record)
+                continue
 
-    order_id = alpaca_cli.submit_paper_option_order(contract, qty=decision.qty)
-    print(f"Paper order submitted (via `alpaca order submit`). qty={decision.qty} id={order_id}")
-    record["outcome"] = "order_submitted"
-    record["order_id"] = order_id
-    record["qty"] = decision.qty
+            print(f"  Selected contract: {contract}")
+            print("  Checking risk gates (duplicate underlying, sector cap, position cap, per-trade + total exposure cap, weekly loss lock)...")
+            decision = risk_gates.check_gates(
+                tradeable.symbol, contract,
+                already_committed_this_run_by_underlying=committed_this_run_by_underlying,
+                already_open_this_run_underlyings=opened_this_run_underlyings,
+            )
+            trade_record["risk_gate_reason"] = decision.reason
+            print(f"    {decision.reason}")
+            if not decision.allowed:
+                print("  Risk gates blocked this trade. No order submitted.")
+                trade_record["outcome"] = "risk_gate_blocked"
+                trades.append(trade_record)
+                continue
+
+            order_id = alpaca_cli.submit_paper_option_order(contract, qty=decision.qty)
+            risk_gates.record_order_submitted(tradeable.symbol)  # written synchronously, right away -- survives a crash on the next line
+            print(f"  Paper order submitted (via `alpaca order submit`). qty={decision.qty} id={order_id}")
+            trade_record["outcome"] = "order_submitted"
+            trade_record["order_id"] = order_id
+            trade_record["qty"] = decision.qty
+            trades.append(trade_record)
+            orders_submitted += 1
+            committed_this_run_by_underlying[tradeable.symbol.upper()] = decision.committed_dollars
+            opened_this_run_underlyings.add(tradeable.symbol.upper())
+        except Exception as e:
+            print(f"  ERROR attempting entry for {tradeable.symbol}: {type(e).__name__}: {e} -- skipping this symbol today")
+            trade_record["outcome"] = "error"
+            trade_record["error"] = f"{type(e).__name__}: {e}"
+            trades.append(trade_record)
+            continue
+
+    record["trades"] = trades
+    record["orders_submitted"] = orders_submitted
+    if orders_submitted > 0:
+        record["outcome"] = "order_submitted"
+    else:
+        # Aggregate outcome across every attempt today, for the top-level
+        # dashboard badge -- pick the reason that actually applied instead
+        # of defaulting to "risk_gate_blocked" when the real reason was
+        # e.g. every symbol failing contract lookup (misleading otherwise:
+        # a judge reading "blocked by risk gate" when no gate was ever
+        # reached would be reading the wrong story).
+        trade_outcomes = {t["outcome"] for t in trades}
+        record["outcome"] = trade_outcomes.pop() if len(trade_outcomes) == 1 else "risk_gate_blocked"
 
 
 if __name__ == "__main__":

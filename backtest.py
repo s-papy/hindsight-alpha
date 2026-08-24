@@ -11,8 +11,8 @@ Requires network access to Alpaca's data API via the CLI (alpaca_cli.py) --
 same reason this can't run inside Cowork's sandbox as everything else that
 touches the real API. Run from a real terminal:
 
-    python backtest.py                      # default universe SPY,QQQ,IWM
-    python backtest.py --symbols SPY,QQQ,IWM,DIA
+    python backtest.py                      # default universe SPY,GLD,XLK,XLV
+    python backtest.py --symbols SPY,GLD,XLK,XLV,QQQ
 
 IMPORTANT, read before quoting any number from this script anywhere public:
 the "proxy payoff" computed here (see vol_strategy._vol_strategy_returns'
@@ -132,16 +132,33 @@ def format_report(results: List[dict]) -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--symbols", default="SPY,QQQ,IWM", help="comma-separated symbols")
+    parser.add_argument("--symbols", default="SPY,GLD,XLK,XLV", help="comma-separated symbols")
     args = parser.parse_args()
     symbols = [s.strip().upper() for s in args.symbols.split(",") if s.strip()]
 
     results = []
     for symbol in symbols:
-        print(f"Fetching {MIN_TRADING_DAYS_FOR_SWEEP}+ trading days of bars for {symbol}...")
-        bars = alpaca_cli.get_daily_bars(symbol)
-        print(f"  got {len(bars)} bars, backtesting {len(CANDIDATE_HV_WINDOWS)} windows...")
-        results.append(backtest_symbol(symbol, bars))
+        # try/except added 24/08, "cherche encore" -- same unguarded pattern
+        # just found and fixed in agent.py's live entry loop (see
+        # PLAN_SPRINT.md, 16th pass): alpaca_cli.get_daily_bars() can raise
+        # DataQualityError (stale/implausible bars) or AlpacaCLIError (a CLI
+        # hiccup) for any ONE symbol. Unguarded, that would crash this whole
+        # script -- losing the results already computed for every symbol
+        # processed before it, and RESULTS_FILE would never get written at
+        # all, even partially. Same "one bad symbol shouldn't cost the whole
+        # report" principle, just never applied to this offline script when
+        # it was first written.
+        try:
+            print(f"Fetching {MIN_TRADING_DAYS_FOR_SWEEP}+ trading days of bars for {symbol}...")
+            bars = alpaca_cli.get_daily_bars(symbol)
+            print(f"  got {len(bars)} bars, backtesting {len(CANDIDATE_HV_WINDOWS)} windows...")
+            results.append(backtest_symbol(symbol, bars))
+        except Exception as e:
+            print(f"  ERROR backtesting {symbol}: {type(e).__name__}: {e} -- skipping this symbol, continuing with the rest")
+
+    if not results:
+        print("\nNo symbol produced a usable backtest result -- nothing to report.")
+        return
 
     report = format_report(results)
     RESULTS_FILE.write_text(report)

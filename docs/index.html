@@ -248,18 +248,74 @@ function renderPositions(positions) {
   </table>`;
 }
 
-function outcomeBadge(outcome) {
+function outcomeBadge(d) {
+  // Takes the full record, not just the outcome string -- monitor_exits.py
+  // (added 24/08) reuses the generic outcome "checked" for both a real dry
+  // run report and (since the same-day logging-hygiene fix) an actual or
+  // simulated position close, so the outcome string alone isn't enough to
+  // label it correctly. Found 24/08, "cherche encore": monitor_exits.py
+  // records were falling through to a generic muted "checked" badge with
+  // an empty Trade cell and no verdicts -- technically not broken, but
+  // uninformative exactly where a judge would want to see WHAT closed.
+  if (d.run_type === 'exit_monitor' && d.outcome === 'checked') {
+    return d.dry_run
+      ? '<span class="badge badge-yellow">would close (dry-run)</span>'
+      : '<span class="badge badge-green">position closed</span>';
+  }
   const map = {
     order_submitted: ['badge-green', 'traded'],
     no_edge: ['badge-muted', 'no edge'],
     market_closed: ['badge-muted', 'market closed'],
+    halted: ['badge-yellow', 'manually paused'],
     risk_gate_blocked: ['badge-yellow', 'blocked by risk gate'],
     no_contract_found: ['badge-yellow', 'no contract'],
     dry_run_tradeable: ['badge-yellow', 'dry-run: would trade'],
     error: ['badge-red', 'error'],
   };
-  const [cls, label] = map[outcome] || ['badge-muted', outcome || 'unknown'];
+  const [cls, label] = map[d.outcome] || ['badge-muted', d.outcome || 'unknown'];
   return `<span class="badge ${cls}">${label}</span>`;
+}
+
+function renderTrade(d) {
+  // Since 24/08 agent.py can attempt entry on several symbols in one run,
+  // so a single decision record can hold multiple trades. Newer records
+  // carry them in d.trades (a list, one entry per symbol attempted); a
+  // dry-run day carries d.tradeable_symbols instead (no orders attempted).
+  // Older records logged before 24/08 only ever had ONE trade's fields
+  // flattened directly onto the record (d.chosen_symbol / d.order_id /
+  // d.qty / d.direction) -- decision_log.jsonl is committed, not
+  // gitignored, so those old-shaped rows stay in the log forever and this
+  // has to keep rendering them, not just the new shape.
+  //
+  // d.exit_actions (found missing entirely from this file, 24/08 "cherche
+  // encore" pass right after the monitor_exits.py logging-hygiene fix):
+  // both agent.py's own manage_exits() call and monitor_exits.py write
+  // take-profit/stop-loss closes into this field, and publish_dashboard.py
+  // already passes it straight through into data.json -- but nothing here
+  // ever rendered it. The whole point of only logging monitor_exits.py's
+  // noteworthy runs is so a judge sees the close on the dashboard; without
+  // this, that close was in the JSON but invisible on the page itself.
+  const lines = (d.exit_actions || []).map(a => `↩ ${a}`);
+  if (Array.isArray(d.trades) && d.trades.length) {
+    for (const t of d.trades) {
+      if (t.order_id) {
+        lines.push(`${t.symbol} ${t.direction || ''} · qty ${t.qty || '?'} · order ${t.order_id}`);
+      } else {
+        const why = t.outcome === 'risk_gate_blocked' ? (t.risk_gate_reason || 'blocked')
+          : t.outcome === 'no_contract_found' ? 'no contract found'
+          : t.outcome === 'error' ? (t.error || 'error')
+          : (t.outcome || 'not submitted');
+        lines.push(`${t.symbol} ${t.direction || ''} (${why})`);
+      }
+    }
+  } else if (Array.isArray(d.tradeable_symbols) && d.tradeable_symbols.length) {
+    lines.push(`${d.tradeable_symbols.join(', ')} (dry-run: would attempt entry)`);
+  } else if (d.order_id) {
+    lines.push(`${d.chosen_symbol || ''} ${d.direction || ''} · qty ${d.qty || '?'} · order ${d.order_id}`);
+  } else if (d.chosen_symbol) {
+    lines.push(`${d.chosen_symbol} ${d.direction || ''} (not submitted)`);
+  }
+  return lines.length ? lines.join('<br>') : '—';
 }
 
 function renderDecisions(decisions) {
@@ -273,12 +329,10 @@ function renderDecisions(decisions) {
     const verdicts = (d.verdicts || []).map(v =>
       `<li>${v.symbol}: ${v.tradeable ? '✅' : '—'} ${v.reason}</li>`
     ).join('');
-    const trade = d.order_id
-      ? `${d.chosen_symbol || ''} ${d.direction || ''} · qty ${d.qty || '?'} · order ${d.order_id}`
-      : (d.chosen_symbol ? `${d.chosen_symbol} ${d.direction || ''} (not submitted)` : '—');
+    const trade = renderTrade(d);
     return `<tr>
       <td>${when}</td>
-      <td>${outcomeBadge(d.outcome)}</td>
+      <td>${outcomeBadge(d)}</td>
       <td>${trade}</td>
       <td><ul class="verdict-list">${verdicts}</ul></td>
     </tr>`;

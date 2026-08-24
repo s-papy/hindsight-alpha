@@ -50,6 +50,24 @@ class AlpacaCLIError(Exception):
     """Raised when the `alpaca` CLI exits non-zero or returns unparseable output."""
 
 
+class DataQualityError(Exception):
+    """Raised when the CLI call SUCCEEDED but the data it returned looks
+    wrong -- a different failure category from AlpacaCLIError on purpose,
+    so it's never confused with a network/auth/CLI problem in a log line.
+
+    Added 24/08, second pass, after external research (an Alpaca-published
+    reference architecture and a separate trading-agent architecture guide)
+    independently named "silent data feed failure" as a real failure mode:
+    "the feed does not error; it stops updating. The agent trades
+    confidently on a frozen picture." Nothing in this codebase checked for
+    that before -- evaluate_symbol() trusted every bar it got back. Callers
+    (agent.py's evaluate_symbol) already wrap the whole per-symbol body in
+    try/except Exception, so raising this here turns "trade blind on bad
+    data" into "skip this symbol today with a clear reason", the same
+    pattern already used for a leak-check failure or a regime that isn't
+    cheap -- a normal, logged refusal, not a crash."""
+
+
 def _require_binary() -> None:
     if shutil.which("alpaca") is None:
         raise AlpacaCLIError(
@@ -123,19 +141,44 @@ def list_positions() -> List[dict]:
 STRIKE_BAND_PCT = 0.05
 
 _OCC_PATTERN = re.compile(r"^[A-Z]+\d{6}[CP]\d{8}$")
+_OCC_ROOT_PATTERN = re.compile(r"^([A-Z]+)\d{6}[CP]\d{8}$")
+
+
+def is_option_position(pos: dict) -> bool:
+    """Checks asset_class first (Alpaca's convention: "us_option" for
+    options); falls back to an OCC-style symbol shape (root + 6-digit date +
+    C/P + 8-digit strike) in case asset_class is named differently by the CLI."""
+    asset_class = str(pos.get("asset_class", "")).lower()
+    symbol = str(pos.get("symbol", ""))
+    return "option" in asset_class or bool(_OCC_PATTERN.match(symbol))
 
 
 def has_open_option_position() -> bool:
     """True if any currently-held position looks like an options contract.
-    Checks asset_class first (Alpaca's convention: "us_option" for options);
-    falls back to an OCC-style symbol shape (root + 6-digit date + C/P +
-    8-digit strike) in case asset_class is named differently by the CLI."""
-    for pos in list_positions():
-        asset_class = str(pos.get("asset_class", "")).lower()
-        symbol = str(pos.get("symbol", ""))
-        if "option" in asset_class or _OCC_PATTERN.match(symbol):
-            return True
-    return False
+    Kept for backward compatibility; risk_gates.py now uses
+    list_open_option_positions() + option_underlying() for the per-underlying,
+    multi-position gate (see risk_gates.py, added 24/08 to support trading
+    several uncorrelated symbols concurrently instead of one at a time)."""
+    return any(is_option_position(pos) for pos in list_positions())
+
+
+def list_open_option_positions() -> List[dict]:
+    """All currently-held positions that look like options contracts."""
+    return [pos for pos in list_positions() if is_option_position(pos)]
+
+
+def option_underlying(pos: dict) -> Optional[str]:
+    """The underlying stock symbol for an option position, e.g. "SPY" for
+    SPY260831P00763000. Tries the `underlying_symbol` field first (present on
+    Alpaca's option-contract objects; not yet verified whether the CLI's
+    `position list` output includes it too), falls back to parsing the OCC
+    symbol's root -- which always works since every option position symbol
+    is OCC-formatted."""
+    underlying = pos.get("underlying_symbol")
+    if underlying:
+        return str(underlying).upper()
+    match = _OCC_ROOT_PATTERN.match(str(pos.get("symbol", "")))
+    return match.group(1) if match else None
 
 
 def get_option_ask_price(option_symbol: str) -> Optional[float]:
@@ -193,6 +236,47 @@ def _extract_bars(data: Any) -> List[dict]:
     return bars_field
 
 
+MAX_STALE_DAYS = 5           # refuse to trade if the most recent bar is older than this (calendar days)
+MAX_DAILY_JUMP_PCT = 0.50    # refuse to trade if any adjacent-day close moves more than this -- likely bad data, not a real move, for a liquid sector ETF
+
+
+def _check_bar_quality(symbol: str, rows: List[dict]) -> None:
+    """Raises DataQualityError instead of silently handing bad data to the
+    strategy layer. Two checks, both deliberately generous (long weekends,
+    holidays, and real market moves all need to pass without a false
+    alarm) -- the goal is catching a frozen/corrupted feed, not being
+    twitchy about ordinary volatility."""
+    if not rows:
+        raise DataQualityError(f"{symbol}: no bars returned at all")
+
+    last_ts_raw = rows[-1].get("t")
+    if last_ts_raw:
+        try:
+            last_ts = datetime.fromisoformat(str(last_ts_raw).replace("Z", "+00:00"))
+            age_days = (datetime.now(last_ts.tzinfo) - last_ts).total_seconds() / 86400
+            if age_days > MAX_STALE_DAYS:
+                raise DataQualityError(
+                    f"{symbol}: most recent bar is {age_days:.1f} days old (timestamp {last_ts_raw}), "
+                    f"> {MAX_STALE_DAYS}-day staleness limit -- feed may be frozen, refusing to trade on it"
+                )
+        except ValueError:
+            print(f"  WARNING: {symbol}: could not parse bar timestamp {last_ts_raw!r}, skipping staleness check")
+
+    closes = [row.get("c", row.get("close")) for row in rows]
+    closes = [float(c) for c in closes if c is not None]
+    for i in range(1, len(closes)):
+        prev = closes[i - 1]
+        if prev == 0:
+            continue
+        jump = abs(closes[i] - prev) / prev
+        if jump > MAX_DAILY_JUMP_PCT:
+            raise DataQualityError(
+                f"{symbol}: bar {i} moved {jump:.1%} from the previous close (${prev:.2f} -> ${closes[i]:.2f}), "
+                f"> {MAX_DAILY_JUMP_PCT:.0%} single-day sanity limit -- likely bad data (or an unhandled "
+                f"split/reverse-split), refusing to trade on it without a human checking first"
+            )
+
+
 def get_daily_bars(symbol: str, lookback_days: int = MIN_TRADING_DAYS_FOR_SWEEP) -> List[Bar]:
     """lookback_days is in *trading* days, not calendar days — the default
     is vol_strategy.MIN_TRADING_DAYS_FOR_SWEEP, not an arbitrary round
@@ -200,10 +284,17 @@ def get_daily_bars(symbol: str, lookback_days: int = MIN_TRADING_DAYS_FOR_SWEEP)
     score samples if fewer days than that are fetched (verified by
     simulation; see that constant's docstring for the exact failure it
     fixes). The *1.6 below converts the trading-day request into a calendar-
-    day date range for the API call, with a small buffer for weekends/holidays."""
+    day date range for the API call, with a small buffer for weekends/holidays.
+
+    Raises DataQualityError (see _check_bar_quality) if the returned bars
+    look stale or contain an implausible price jump -- checked here, once,
+    so every caller (vol_strategy, momentum_strategy, backtest.py,
+    compare_strategies.py) gets the same protection for free instead of
+    each needing to remember to check."""
     start = (datetime.utcnow() - timedelta(days=int(lookback_days * 1.6) + 10)).strftime("%Y-%m-%d")
     data = run(["data", "bars", "--symbol", symbol, "--start", start, "--timeframe", "1Day"])
     rows = _extract_bars(data)
+    _check_bar_quality(symbol, rows)
     bars = []
     for row in rows:
         close = row.get("c", row.get("close"))

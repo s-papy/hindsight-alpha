@@ -2,14 +2,31 @@
 when the underlying's realized volatility is cheap relative to its own
 recent history, skip when it's already expensive.
 
-Honesty note on what this is and isn't: Alpaca's market data does not expose
-a historical time series of *implied* volatility (option IV) that a backtest
-could sweep over — only a live snapshot of the current option chain's
-greeks. So instead of "IV rank", this uses **realized/historical volatility
-rank (HV rank)** computed purely from the underlying's daily closes, which
-is a standard practical proxy: cheap realized vol tends to precede cheap
-option premiums, and vice versa. Anyone reading this code or the pitch deck
-should see that distinction, not a claim of using real option IV history.
+Honesty note on what this is and isn't, corrected 24/08 after checking
+Alpaca's docs directly rather than assuming: Alpaca does NOT expose a
+historical time series of *implied* volatility (option IV) as a served
+field — that's a derived quantity nobody hands you precomputed, you'd have
+to reconstruct it yourself from historical option prices via a pricing
+model. That specific claim still holds. What's corrected here: Alpaca DOES
+offer historical option *price* data (bars/trades/quotes) via a dedicated
+endpoint, since February 2024 -- an earlier version of this docstring
+implied no historical option data existed at all, which overstated the
+limitation. Two real caveats on that data, not reasons to ignore it: only
+~2.5 years of history (Feb 2024 onward, vs. the multi-year stock history
+this agent actually fetches), and the free-tier "Indicative" feed's quotes
+are derivatives of the real OPRA feed with 15-minute-delayed trades, not
+real consolidated BBO (that requires a paid OPRA subscription). Using that
+option-price history to build a real premium-based backtest (actual entry/
+exit prices, real bid-ask spread) instead of the proxy below is a legitimate
+next step this project did not attempt -- out of scope for this build, not
+overlooked from not knowing the data existed. Say it that way in the
+write-up, not "the data doesn't exist."
+
+Given that, this uses **realized/historical volatility rank (HV rank)**
+computed purely from the underlying's daily closes, which is a standard
+practical proxy: cheap realized vol tends to precede cheap option premiums,
+and vice versa. Anyone reading this code or the pitch deck should see that
+distinction, not a claim of using real option IV history.
 
 The backtest payoff is also a deliberate simplification, not a Black-Scholes
 options-pricing model: on any day where HV rank was low at entry, the proxy
@@ -18,9 +35,10 @@ optionality — you profit from the *size* of the move, not its direction)
 minus a cost term proportional to the HV level at entry (options cost more
 when volatility is already elevated; here it's ~always low when we'd enter,
 but the term is kept so the score isn't free money by construction). This
-keeps the whole sweep computable from stock bars only — the same reliable,
-historically-available data source used everywhere else in this agent — and
-is honestly documented as a proxy rather than a real premium calculation.
+keeps the whole sweep computable from stock bars only, which is simpler and
+spans a much longer history than the ~2.5 years of option price data above
+would allow — a real tradeoff, documented as one, not a claim that stock
+bars were the only option available.
 
 This mirrors momentum_strategy.py's pattern exactly (candidate windows,
 full-vs-in-sample scoring for hindsight_guard) but is options-native: the

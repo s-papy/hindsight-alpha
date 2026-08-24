@@ -25,15 +25,25 @@ candidate scored negative.
 ## What the agent does
 
 Evaluates a small universe of liquid, optionable ETFs each run (default
-`SPY,QQQ,IWM` — configurable via `--symbols`), not just one. With three
-independent "no" gates stacked (hindsight check, volatility regime, risk
-gates) on a single low-volatility symbol, a real risk was zero trades across
-the whole hackathon week — honest, but the judging explicitly weighs "P&L
+`SPY,GLD,XLK,XLV` — broad market, commodities, tech, healthcare/pharma;
+configurable via `--symbols`), not just one. With three independent "no"
+gates stacked (hindsight check, volatility regime, risk gates) on a single
+low-volatility symbol, a real risk was zero trades across the whole
+hackathon week — honest, but the judging explicitly weighs "P&L
 Performance," and a silent agent has nothing to show there or in the demo.
 Testing several similarly-liquid symbols is the same honest gate applied
-more times, not a loosened one; the first symbol that clears every gate is
-the one traded, and `risk_gates.py`'s one-position cap stops any other
-symbol from also trading that day. See `agent.evaluate_symbol()`.
+more times, not a loosened one. Since 24/08 the agent can also hold several
+positions at once, one per underlying: *every* symbol that clears every gate
+gets a real entry attempt, not just the first. `risk_gates.py` enforces the
+diversification directly — never two open positions on the same underlying,
+a hard cap on concurrent positions (`MAX_OPEN_POSITIONS`), a 1%-of-equity
+per-trade cap, and a 3%-of-equity cap on TOTAL premium committed across all
+open positions combined, so stacking positions shrinks the room left for
+further ones rather than each getting its own fresh 1%. The universe itself
+was chosen to be genuinely uncorrelated across sectors (not three
+similarly-behaving broad-market ETFs) so that holding multiple positions at
+once means different macro exposure, not the same bet three times under
+different tickers. See `agent.evaluate_symbol()` and `risk_gates.check_gates()`.
 
 For each symbol:
 1. Fetches daily bars via Alpaca's Market Data API.
@@ -58,13 +68,18 @@ For each symbol:
    refusal — not a leakage problem). If it is cheap, a short-term momentum
    tiebreaker picks a direction and the agent finds a near-the-money option
    contract (call or put, 7–21 days to expiry) via Alpaca's options API.
-6. Before submitting anything, `risk_gates.py` checks: is the market open
-   (skips cleanly on weekends/holidays), is a position already open (never
-   stacks a second one), does 1 contract fit inside a 1%-of-equity per-trade
-   cap (sizes down or skips instead of trading blind), and has the account
-   dropped more than 3% from its recorded starting equity this week (a
-   sticky lock — once tripped, no more trades until state.json is reset).
-   Only if every gate clears does it submit a **paper** market order.
+6. Before submitting anything, `risk_gates.py` checks, for every symbol that
+   cleared the gates above (not just the first): is the market open (skips
+   cleanly on weekends/holidays), is a position already open on THIS
+   underlying (never stacks a second one on the same symbol), is the
+   concurrent-position cap already reached, does 1 contract fit inside the
+   smaller of the 1%-of-equity per-trade cap and whatever's left under the
+   3%-of-equity total exposure cap across all open positions (sizes down or
+   skips instead of trading blind), and has the account dropped more than 3%
+   from its recorded starting equity this week (a sticky lock — once
+   tripped, no more trades until state.json is reset). Only if every gate
+   clears does it submit a **paper** market order — and it can do this for
+   more than one symbol in the same run.
 
 ### Risk gates
 
@@ -74,16 +89,63 @@ can buy again every day with no cap on position count or capital at risk
 isn't a trading agent — it's a liability generator with a good idea buried
 inside it. See `risk_gates.py`:
 
-- **Entry side**: one open position at a time, a 1% of equity per-trade cap
-  (sized from the contract's live ask price, or skipped if even 1 contract
-  doesn't fit), and a 3% weekly drawdown lock that persists in `state.json`
-  across days so a bad stretch actually stops the agent instead of letting
-  it keep re-entering.
+- **Entry side**: up to `MAX_OPEN_POSITIONS` (4) open positions at once, one
+  per underlying — never two on the same symbol simultaneously. A 1% of
+  equity per-trade cap (sized from the contract's live ask price, or skipped
+  if even 1 contract doesn't fit) AND a 3% of equity cap on the TOTAL
+  premium committed across every open position combined, so a 2nd or 3rd
+  concurrent position shrinks the budget left for further ones instead of
+  each getting its own fresh 1%. A 3% weekly drawdown lock that persists in
+  `state.json` across days so a bad stretch actually stops the agent instead
+  of letting it keep re-entering — this compares total account equity
+  (already reflecting every open position combined) to the recorded
+  starting equity, so it was already measuring combined drawdown, not a
+  single isolated position.
 - **Exit side**: `manage_exits()` runs first, before any new-entry
   evaluation, and closes any open position at +50% (take-profit) or -50%
   (stop-loss) on unrealized P&L — added after noticing the first draft only
   ever bought and never managed a position afterward, which would have left
-  every trade unrealized (paper) until the judging window ended.
+  every trade unrealized (paper) until the judging window ended. Since 24/08
+  it can also run on its own via `monitor_exits.py`, schedulable every
+  15-30 minutes independent of the once-a-day entry cycle — see that file's
+  docstring for why and how to schedule it.
+
+### Agent-level controls (not strategy tweaks)
+
+Added 24/08, second pass, after asking directly "we improved the strategy,
+but the agent is the real deliverable — what improves the agent?" and
+researching both an Alpaca-published reference architecture and a separate
+trading-agent architecture guide for concrete answers, not generic ones.
+Four more controls, all in `risk_gates.py` unless noted, all with mocked
+regression tests:
+
+- **Sector concentration cap** (`MAX_SECTOR_EXPOSURE_PCT`, 1.5% of equity):
+  caps committed premium per sector (`SECTOR_MAP`), not just per underlying.
+  A no-op today (one symbol per sector, already covered by the duplicate-
+  underlying block) but stops being one the moment the universe grows past
+  one symbol per sector — coded now, while cheap to test, so diversification
+  stays an enforced control rather than a policy that quietly stops holding.
+- **Data-quality gate** (`alpaca_cli.get_daily_bars`): refuses to build a
+  signal off bars that are stale (most recent bar older than 5 days — a
+  frozen feed) or show an implausible single-day price jump (>50%, well
+  above any real historical move for these ETFs) instead of trusting every
+  fetch blindly. Raises `DataQualityError`, caught the same way any other
+  per-symbol failure already is (see `agent.evaluate_symbol`).
+- **Manual pause switch**: create a file named `HALT` next to the code and
+  the agent stops opening new positions (exits still run) until it's
+  removed — no code or credential changes needed to pause mid-week.
+  Gitignored; a local operational control, not something to publish.
+- **Duplicate-order guard**: a local record in `state.json` (independent of
+  the live API) remembers which underlyings already got an order submitted
+  today, so a crash-and-rerun of `agent.py` can't resubmit the same trade
+  twice while waiting for the API to catch up.
+- **Consecutive-loss circuit breaker** (`MAX_CONSECUTIVE_LOSSES`, 3): a
+  losing streak from the agent's own stop-losses pauses new entries even
+  before the weekly %-drawdown lock would trip — a fast losing streak is a
+  real signal on its own, not just a fraction of a bigger number. Sticky
+  like the weekly lock, cleared the same way, deliberately not
+  self-resetting (a blocked agent can't produce the win that would clear
+  it, which is the point — stop and let a human look, don't quietly retry).
 
 ### Why HV rank instead of momentum
 
@@ -154,8 +216,14 @@ python agent.py                # if vetted, places a real (paper) options order
   satisfies the hackathon's "MCP or CLI" requirement.
 - `agent.py` — main pipeline (market check → fetch → sweep → leakage check
   → risk gates → trade or refuse).
-- `risk_gates.py` — one-position cap, per-trade risk cap, weekly drawdown
-  lock. State persists in `state.json` (gitignored, created on first run).
+- `risk_gates.py` — concurrent-position cap (one per underlying), per-trade
+  risk cap, total-exposure cap across all open positions, sector
+  concentration cap, weekly drawdown lock, consecutive-loss circuit
+  breaker, manual pause switch, duplicate-order guard. State persists in
+  `state.json` (gitignored, created on first run).
+- `monitor_exits.py` — standalone exit-only monitor, schedulable
+  independently of `agent.py`'s once-a-day cycle. See its module docstring
+  for the "why" and cron/launchd setup.
 - `decision_log.py` — appends one JSON record per run to `decision_log.jsonl`
   (committed, not gitignored — it's evidence of what the agent decided and
   why, every day of the hackathon, not a secret).
@@ -165,6 +233,35 @@ python agent.py                # if vetted, places a real (paper) options order
   build step, no framework, fetches `./data.json` and renders it. Meant to
   be served by GitHub Pages from this repo's `docs/` folder — see "Hosted
   dashboard" below.
+- `test_connection.py` — run first; confirms CLI install + `.env` + network
+  access all work.
+- `config.py` — loads `.env`, hard-refuses to run against anything that
+  looks like a live-trading configuration.
+- `backtest.py` — real backtest of `vol_strategy.py` against real historical
+  bars (not a proxy re-implementation — reuses the project's own scoring
+  code). Writes `BACKTEST_RESULTS.md`. Run from a real terminal (needs
+  network access to Alpaca's data API).
+- `momentum_strategy.py` — a second strategy family (time-series momentum,
+  TSMOM), written earlier as a second demonstration of the same
+  hindsight_guard leak-check pattern. Not wired into `agent.py` (the live
+  agent only trades HV-rank, the options-native strategy), but not dead
+  code either — `compare_strategies.py` runs it against the same real bars
+  as `vol_strategy.py` for an honest head-to-head, per Spap's direction not
+  to keep the strategy that "tells the best story" without checking it's
+  also the one the data actually supports.
+- `compare_strategies.py` — real, side-by-side comparison of
+  `vol_strategy.py` vs `momentum_strategy.py` on the same real bars.
+  Writes `STRATEGY_COMPARISON.md`. See its module docstring for why the two
+  families' raw payoffs aren't directly comparable numbers, and what is.
+- `alpaca_client.py` — dead code from an earlier draft (alpaca-py SDK
+  version, superseded by `alpaca_cli.py` for the hackathon's "MCP or CLI"
+  requirement). Left in place because Cowork's sandbox can't delete files
+  in this shared folder; nothing imports it. Safe to delete by hand.
+
+*(Found 24/08, "cherche encore": this file list used to be split into two
+disconnected halves by the "Hosted dashboard" section sitting in between —
+the second half dangled with no heading, right after unrelated prose about
+browser verification. Merged back into one list here.)*
 
 ## Hosted dashboard
 
@@ -177,7 +274,8 @@ with real credentials in `.env`), writes a plain JSON snapshot, and that
 snapshot — not a live connection — is what gets committed and served.
 Nothing publicly reachable ever touches Alpaca directly.
 
-Setup (once, in a real terminal — see `BRIEF_TEST_AGENT_TERMINAL.md`):
+Setup (once, in a real terminal — see `BRIEF_MULTI_POSITION_ET_COMPARAISON.md`,
+the current terminal handoff):
 
 ```bash
 python publish_dashboard.py         # writes docs/data.json
@@ -193,29 +291,78 @@ opt-in on purpose — writing the snapshot is safe to automate, publishing to
 the public repo is a decision this project's own rules say should stay
 explicit each time, not a silent default.
 
-Checked without a live browser (the dev sandbox that wrote this can't open
-local files in Chrome): the HTML parses with no unclosed tags, the
-dashboard's embedded JS has valid syntax, and every field the JS reads
-(`account.equity`, `position.unrealized_plpc`, `decision.chosen_symbol`,
-etc.) was cross-checked line-by-line against what `publish_dashboard.py`
-and `agent.py`'s decision-log record actually produce — they match. Not
-the same as seeing it render; worth a quick look in an actual browser
-before recording the demo video.
-- `test_connection.py` — run first; confirms CLI install + `.env` + network
-  access all work.
-- `config.py` — loads `.env`, hard-refuses to run against anything that
-  looks like a live-trading configuration.
-- `alpaca_client.py`, `momentum_strategy.py` — dead code from earlier
-  drafts (alpaca-py SDK version, TSMOM strategy version). Left in place
-  because Cowork's sandbox can't delete files in this shared folder;
-  nothing imports them. Safe to delete by hand.
+**Verified for real in a real browser** (not just parsed offline): a local
+server + Chrome session confirmed all three sections render, zero console
+errors, and the figures match `docs/data.json` exactly (see PLAN_SPRINT.md,
+"session terminal n°2"). Every later change to `docs/index.html` (the
+multi-symbol `renderTrade()` rewrite, the `exit_actions` rendering fix, the
+`outcomeBadge()` signature change) was re-checked offline the same way the
+first version was before that live check — HTML tag balance, `node --check`
+on the extracted JS, and a mocked-record test proving each rendering
+function's actual output — but **not re-opened in a live browser after
+those later edits**. Worth one more quick look in an actual browser before
+recording the demo video, to catch anything only a real render would show.
+
+## License and privacy
+
+This repo is public and MIT-licensed (`LICENSE`) because the hackathon
+requires it — "Submissions must be original and MIT-compliant" is a
+non-negotiable rule of the competition, not a choice made for this project.
+Worth being direct about what that means in practice, since Spap intends to
+keep using this agent after the hackathon if it performs well: MIT lets
+*anyone*, including a commercial entity, copy, modify, and even sell this
+exact code without paying or asking permission — the only obligation is
+keeping the copyright notice. There is no way to submit to this hackathon
+and keep the code private; the two are mutually exclusive by the rules.
+
+Agreed plan, given that:
+- After the hackathon, Spap keeps running his own private copy of this
+  agent (a separate local/private clone, not the public repo) even though
+  the public repo's history — everything committed during the hackathon
+  window — stays public forever. Nothing about that history can be made
+  private retroactively once submitted.
+- Any real improvement developed *after* the hackathon that Spap wants to
+  keep proprietary (a better strategy, a materially different risk model,
+  etc.) goes into a new, separate, non-public repository — not committed
+  here. This repo stays frozen as "the hackathon submission," not a living
+  codebase for anything Spap later wants to protect.
 
 ## Status
 
+*This section was stale until 24/08 evening — it still said "not yet run
+end-to-end," found and corrected in a "cherche encore" pass after noticing
+`PLAN_SPRINT.md` already documented a real run. Worth remembering: a status
+paragraph that isn't updated when reality changes is exactly the kind of
+silent code/doc gap this project exists to catch elsewhere — including in
+itself.*
+
 Zero real funds at risk — paper trading only, enforced in `config.py`.
-Not yet run end-to-end (blocked on both network access and CLI install from
-the dev sandbox); next step is running `test_connection.py` and
-`agent.py --dry-run` from a real terminal to confirm the pipeline works
-against live Alpaca data before recording the hackathon demo video. See
-`PLAN_SPRINT.md` for the full day-by-day plan and `BRIEF_TEST_AGENT_TERMINAL.md`
-for the terminal handoff.
+
+**Already run end-to-end for real, on the DEV account** (`.env`, not the
+dedicated hackathon account): CLI installed and verified, a real paper
+option order was submitted and later closed via a real take-profit/stop-loss
+check, and the hosted dashboard was visually confirmed in a real browser
+showing that real data. See `PLAN_SPRINT.md`'s "Premier test réel réussi"
+section for the exact order IDs and what was found and fixed along the way
+(four real code/API mismatches, including one — the options-contracts
+pagination bug — that would have silently refused every trade forever).
+
+**Not yet done, the real remaining gap**: the *dedicated* hackathon account
+(`.env.hackathon`) has never been connected — everything above ran on dev,
+on purpose, per the hackathon's own rule allowing any paper account during
+development. Also not yet run against the live API (only compiled + tested
+with mocks): every control added later on 24/08 — multi-position sizing,
+the sector cap, the data-quality gate, the manual HALT switch, the
+duplicate-order guard, the consecutive-loss breaker, `monitor_exits.py`, and
+a batch of resilience fixes found in later "cherche encore" passes
+(per-symbol exception isolation in `agent.py`'s entry loop, `backtest.py`,
+and `compare_strategies.py`; corrupted-line tolerance in `decision_log.py`).
+
+Several terminal-handoff briefs exist from different points in the same
+day (`BRIEF_TEST_AGENT_TERMINAL.md`, `BRIEF_GIT_DASHBOARD_PUBLICATION.md`,
+`BRIEF_PUSH_GITHUB_PAGES.md`, `BRIEF_BACKTEST_REEL.md`,
+`BRIEF_COMMIT_FIXES_ET_BACKTEST.md`) — **`BRIEF_MULTI_POSITION_ET_COMPARAISON.md`
+is the current one**, kept synchronized with the actual state of the code
+throughout the day; the others are earlier snapshots, mostly superseded.
+See `PLAN_SPRINT.md` for the full day-by-day plan and complete history of
+what was found and fixed.

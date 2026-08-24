@@ -4,4 +4,5 @@
 __pycache__/
 *.pyc
 state.json
+HALT
 .DS_Store
