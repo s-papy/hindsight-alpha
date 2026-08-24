@@ -43,7 +43,7 @@ from __future__ import annotations
 import argparse
 from datetime import datetime, timezone
 from pathlib import Path
-from statistics import mean
+from statistics import mean, pstdev
 from typing import List
 
 import alpaca_cli
@@ -90,6 +90,11 @@ def compare_symbol(symbol: str, bars) -> dict:
         "win_rate_pct": round(_win_rate(vol_rets), 1),
         "avg_payoff_per_trade": round(mean(vol_trade_rets), 5) if vol_trade_rets else 0.0,
         "cumulative_proxy_payoff": round(sum(vol_rets), 4),
+        # Per-CALENDAR-day mean and sd -- the two numbers the Sharpe is built
+        # from. Printed because the Sharpe comparison is easy to over-read:
+        # see the caveat above the summary table.
+        "mean_daily": round(mean(vol_rets), 5) if vol_rets else 0.0,
+        "stdev_daily": round(pstdev(vol_rets), 5) if len(vol_rets) > 1 else 0.0,
     }
 
     # --- momentum_strategy: same leak-check pattern, real returns ---
@@ -107,6 +112,8 @@ def compare_symbol(symbol: str, bars) -> dict:
         "win_rate_pct": round(_win_rate(mom_rets), 1),
         "avg_return_per_day": round(mean(mom_rets), 5) if mom_rets else 0.0,
         "cumulative_return_pct": round(100 * sum(mom_rets), 2),
+        "mean_daily": round(mean(mom_rets), 5) if mom_rets else 0.0,
+        "stdev_daily": round(pstdev(mom_rets), 5) if len(mom_rets) > 1 else 0.0,
     }
 
     return result
@@ -124,7 +131,20 @@ def format_report(results: List[dict]) -> str:
         "as raw magnitudes. What IS comparable per symbol: hindsight_guard "
         "agreement (is either one's winner an actual leak), and the in-sample "
         "Sharpe of each vetted parameter (same statistic, same holdout window "
-        "length, same computation) — that's the fairest apples-to-apples number.",
+        "length, same computation).",
+        "",
+        "🔴 **But do not read that Sharpe column as a verdict on its own.** An earlier "
+        "version of this file called it \"the fairest apples-to-apples number\"; measuring "
+        "it showed that overclaims. The two Sharpes share a FORMULA, not a quantity: "
+        "vol_strategy's payoff is built on `abs(next-day return)` — non-negative by "
+        "construction, and ~25% less variable than the signed return — and it is flat on "
+        "roughly three days out of four, which shrinks its standard deviation again. "
+        "momentum's is a signed return, in the market almost every day. Measured on the "
+        "24/08 bars: momentum had the HIGHER mean daily figure on 3 of the 4 symbols, "
+        "while vol_strategy had the higher Sharpe on 4 of 4 — the ranking inverts with the "
+        "statistic you pick, because vol_strategy's advantage here is variance structure, "
+        "not superior returns. The mean and standard-deviation columns below are printed "
+        "so that is visible instead of buried.",
         "",
         "| symbol | vol_strategy: window | agrees? | in-sample Sharpe | win rate | momentum: lookback | agrees? | in-sample Sharpe | win rate |",
         "|---|---|---|---|---|---|---|---|---|",
@@ -149,14 +169,16 @@ def format_report(results: List[dict]) -> str:
         lines.append(
             f"- **vol_strategy** — vetted window {v['vetted_window_days']}d, "
             f"hindsight_guard {'agrees (no leak)' if v['hindsight_guard_agrees'] else 'LEAK DETECTED'}, "
-            f"in-sample Sharpe {v['in_sample_sharpe_of_winner']}, "
+            f"in-sample Sharpe {v['in_sample_sharpe_of_winner']} "
+            f"(mean/day {v['mean_daily']:+}, sd/day {v['stdev_daily']}), "
             f"{v['trade_days']}/{v['total_days_scored']} days traded ({v['win_rate_pct']}% win rate on those days), "
             f"cumulative proxy payoff {v['cumulative_proxy_payoff']}."
         )
         lines.append(
             f"- **momentum_strategy** — vetted lookback {m['vetted_lookback_days']}d, "
             f"hindsight_guard {'agrees (no leak)' if m['hindsight_guard_agrees'] else 'LEAK DETECTED'}, "
-            f"in-sample Sharpe {m['in_sample_sharpe_of_winner']}, "
+            f"in-sample Sharpe {m['in_sample_sharpe_of_winner']} "
+            f"(mean/day {m['mean_daily']:+}, sd/day {m['stdev_daily']}), "
             f"{m['trade_days']} days traded (always in the market), {m['win_rate_pct']}% win rate, "
             f"cumulative return {m['cumulative_return_pct']}%."
         )

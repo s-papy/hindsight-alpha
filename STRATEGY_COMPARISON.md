@@ -1,8 +1,10 @@
 # Strategy comparison — vol_strategy (HV-rank) vs momentum_strategy (TSMOM)
 
-*Generated 2026-08-24T19:08:40.963000+00:00, real bars via alpaca_cli.get_daily_bars.*
+*Generated 2026-08-24T21:07:59.847672+00:00, real bars via alpaca_cli.get_daily_bars.*
 
-**Read compare_strategies.py's module docstring before quoting any single number below** — the two families' payoffs are different units (options proxy vs real stock return) and are not directly summable or comparable as raw magnitudes. What IS comparable per symbol: hindsight_guard agreement (is either one's winner an actual leak), and the in-sample Sharpe of each vetted parameter (same statistic, same holdout window length, same computation) — that's the fairest apples-to-apples number.
+**Read compare_strategies.py's module docstring before quoting any single number below** — the two families' payoffs are different units (options proxy vs real stock return) and are not directly summable or comparable as raw magnitudes. What IS comparable per symbol: hindsight_guard agreement (is either one's winner an actual leak), and the in-sample Sharpe of each vetted parameter (same statistic, same holdout window length, same computation).
+
+🔴 **But do not read that Sharpe column as a verdict on its own.** An earlier version of this file called it "the fairest apples-to-apples number"; measuring it showed that overclaims. The two Sharpes share a FORMULA, not a quantity: vol_strategy's payoff is built on `abs(next-day return)` — non-negative by construction, and ~25% less variable than the signed return — and it is flat on roughly three days out of four, which shrinks its standard deviation again. momentum's is a signed return, in the market almost every day. Measured on the 24/08 bars: momentum had the HIGHER mean daily figure on 3 of the 4 symbols, while vol_strategy had the higher Sharpe on 4 of 4 — the ranking inverts with the statistic you pick, because vol_strategy's advantage here is variance structure, not superior returns. The mean and standard-deviation columns below are printed so that is visible instead of buried.
 
 | symbol | vol_strategy: window | agrees? | in-sample Sharpe | win rate | momentum: lookback | agrees? | in-sample Sharpe | win rate |
 |---|---|---|---|---|---|---|---|---|
@@ -15,37 +17,38 @@
 
 ### SPY (657 bars used)
 
-- **vol_strategy** — vetted window 10d, hindsight_guard agrees (no leak), in-sample Sharpe 1.598, 102/393 days traded (45.1% win rate on those days), cumulative proxy payoff 0.1073.
-- **momentum_strategy** — vetted lookback 60d, hindsight_guard agrees (no leak), in-sample Sharpe 0.63, 596 days traded (always in the market), 54.4% win rate, cumulative return 26.83%.
+- **vol_strategy** — vetted window 10d, hindsight_guard agrees (no leak), in-sample Sharpe 1.598 (mean/day +0.00027, sd/day 0.00276), 102/393 days traded (45.1% win rate on those days), cumulative proxy payoff 0.108.
+- **momentum_strategy** — vetted lookback 60d, hindsight_guard agrees (no leak), in-sample Sharpe 0.63 (mean/day +0.00045, sd/day 0.0102), 596 days traded (always in the market), 54.4% win rate, cumulative return 26.76%.
 
 ### GLD (657 bars used)
 
-- **vol_strategy** — vetted window 20d, hindsight_guard agrees (no leak), in-sample Sharpe 1.956, 56/383 days traded (57.1% win rate on those days), cumulative proxy payoff 0.1467.
-- **momentum_strategy** — vetted lookback 60d, hindsight_guard agrees (no leak), in-sample Sharpe 1.407, 596 days traded (always in the market), 54.5% win rate, cumulative return 65.52%.
+- **vol_strategy** — vetted window 20d, hindsight_guard agrees (no leak), in-sample Sharpe 1.956 (mean/day +0.00038, sd/day 0.00319), 56/383 days traded (57.1% win rate on those days), cumulative proxy payoff 0.1467.
+- **momentum_strategy** — vetted lookback 60d, hindsight_guard agrees (no leak), in-sample Sharpe 1.407 (mean/day +0.0011, sd/day 0.01441), 596 days traded (always in the market), 54.5% win rate, cumulative return 65.83%.
 
 ### XLK (657 bars used)
 
-- **vol_strategy** — vetted window 90d, hindsight_guard LEAK DETECTED, in-sample Sharpe 0.789, 76/313 days traded (36.8% win rate on those days), cumulative proxy payoff 0.416.
-- **momentum_strategy** — vetted lookback 20d, hindsight_guard agrees (no leak), in-sample Sharpe 0.593, 636 days traded (always in the market), 51.4% win rate, cumulative return 48.88%.
+- **vol_strategy** — vetted window 90d, hindsight_guard LEAK DETECTED, in-sample Sharpe 0.789 (mean/day +0.00133, sd/day 0.02763), 76/313 days traded (36.8% win rate on those days), cumulative proxy payoff 0.416.
+- **momentum_strategy** — vetted lookback 20d, hindsight_guard agrees (no leak), in-sample Sharpe 0.593 (mean/day +0.00076, sd/day 0.02573), 636 days traded (always in the market), 51.4% win rate, cumulative return 48.57%.
 
 ### XLV (657 bars used)
 
-- **vol_strategy** — vetted window 10d, hindsight_guard agrees (no leak), in-sample Sharpe 1.442, 52/393 days traded (50.0% win rate on those days), cumulative proxy payoff 0.1289.
-- **momentum_strategy** — vetted lookback 40d, hindsight_guard agrees (no leak), in-sample Sharpe 0.812, 616 days traded (always in the market), 50.2% win rate, cumulative return 36.03%.
+- **vol_strategy** — vetted window 10d, hindsight_guard agrees (no leak), in-sample Sharpe 1.442 (mean/day +0.00033, sd/day 0.00293), 52/393 days traded (50.0% win rate on those days), cumulative proxy payoff 0.1289.
+- **momentum_strategy** — vetted lookback 40d, hindsight_guard agrees (no leak), in-sample Sharpe 0.812 (mean/day +0.00059, sd/day 0.00971), 616 days traded (always in the market), 50.2% win rate, cumulative return 36.07%.
 
-## Honest verdict — written 24/08 AFTER the first real run, not before
+## Honest verdict — écrit le 24/08 APRÈS la mesure, corrigé le même soir
 
-**Sur le seul chiffre comparable (Sharpe in-sample du paramètre vetté, même statistique, même holdout) : `vol_strategy` gagne sur les 4 symboles.**
+**Le classement s'inverse selon la statistique choisie. C'est le fait le plus important de ce tableau.**
 
-| symbole | vol_strategy | momentum | écart |
+| | vol_strategy | momentum | |
 |---|---|---|---|
-| SPY | **1,598** | 0,630 | +0,97 |
-| GLD | **1,956** | 1,407 | +0,55 |
-| XLK | 0,789 🔴 *(fuite)* | 0,593 | — *(vol disqualifié)* |
-| XLV | **1,442** | 0,812 | +0,63 |
+| **Sharpe in-sample du paramètre vetté** | plus haut sur **4 symboles sur 4** | — | |
+| **moyenne par jour calendaire** | — | plus haute sur **3 symboles sur 4** | 🔴 |
+| **propreté `hindsight_guard`** | 3 / 4 *(XLK fuit)* | **4 / 4** | 🔴 |
 
-🔴 **Mais `momentum` est plus PROPRE : `hindsight_guard` l'approuve 4 fois sur 4, contre 3 sur 4 pour `vol_strategy`** (XLK fuit). *Un score plus haut sur trois symboles, contre une discipline de sélection parfaite sur quatre — ce n'est pas la même chose, et ça ne se tranche pas au seul Sharpe.*
+🔴 **Correction d'une version antérieure de ce verdict.** J'avais écrit que `vol_strategy` gagne sur le Sharpe et présenté ce chiffre comme *« le seul comparable »*. **Mesuré, ça surestime.** Sur SPY : `momentum` a la moyenne quotidienne la plus haute (+0,00045 contre +0,00027) et perd malgré tout le Sharpe, parce que son écart-type est **3,7× plus grand** (0,0102 contre 0,00276).
 
-⚠️ **Ce qu'il ne faut SURTOUT pas faire avec ce tableau** : comparer les rendements cumulés. `momentum` est **en permanence dans le marché** (596 à 636 jours sur ~650), donc son « +65,52 % » sur GLD est essentiellement du buy-and-hold avec un filtre de tendance — sur la même période, GLD seul a fait **+126,96 %**. `vol_strategy` n'est en position que 10 à 28 % des jours, avec un payoff proxy en unités différentes. **Les deux colonnes de rendement ne sont pas commensurables**, et les additionner ou les classer serait une faute.
+**D'où vient cet écart-type minuscule ?** De deux effets qui n'ont rien à voir avec la qualité du signal : `vol_strategy` est **à plat ~3 jours sur 4**, et son payoff repose sur `abs(rendement)` — non négatif par construction, et **~25 % moins variable** que le rendement signé. **Son avantage au Sharpe est structurel, pas une supériorité de rendement.**
 
-**Décision : aucune.** *Le brief interdit explicitement de basculer l'agent sur `momentum` sur la foi de ce tableau — c'est une décision de méthode qui appartient à Spap. Elle est simplement documentée ici, avec le chiffre qui la motiverait dans un sens (Sharpe) et celui qui la motiverait dans l'autre (propreté du garde-fou).*
+⚠️ **Et surtout, ne jamais classer les rendements cumulés** : `momentum` est en permanence dans le marché, donc son « +65,83 % » sur GLD est essentiellement du buy-and-hold filtré — GLD seul a fait **+126,96 %** sur la même période.
+
+**Décision : aucune.** *Basculer la stratégie appartient à Spap. Ce document donne désormais les trois chiffres qui tirent dans des sens différents, plutôt qu'un seul qui tranche à sa place.*

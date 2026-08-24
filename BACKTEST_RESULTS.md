@@ -1,12 +1,12 @@
 # Backtest results — HV-rank strategy vs real historical bars
 
-*Generated 2026-08-24T19:38:16.843846+00:00. Proxy payoff, not real options P&L — see backtest.py's module docstring for exactly what is and isn't simulated.*
+*Generated 2026-08-24T21:08:33.851395+00:00. Proxy payoff, not real options P&L — see backtest.py's module docstring for exactly what is and isn't simulated.*
 
-## SPY (657 bars used, buy-and-hold over the period: 60.27%)
+## SPY (657 bars used, buy-and-hold over the period: 60.2%)
 
 | window (days) | trade days | freq | cum. proxy payoff | win rate on trades | avg payoff/trade | max drawdown |
 |---|---|---|---|---|---|---|
-| 10 | 102/393 | 26.0% | 0.1076 | 45.1% | 0.00106 | -0.0241 |
+| 10 | 102/393 | 26.0% | 0.108 | 45.1% | 0.00106 | -0.0241 |
 | 20 | 106/383 | 27.7% | -0.0341 | 32.1% | -0.00032 | -0.0877 |
 | 30 | 111/373 | 29.8% | -0.1054 | 23.4% | -0.00095 | -0.1273 |
 | 60 | 102/343 | 29.7% | -0.0977 | 29.4% | -0.00096 | -0.1262 |
@@ -14,7 +14,7 @@
 
 **hindsight_guard verdict for this symbol:** agrees (no leak) — full-window winner: 10 days, in-sample winner: 10 days.
 
-## GLD (657 bars used, buy-and-hold over the period: 127.24%)
+## GLD (657 bars used, buy-and-hold over the period: 127.57%)
 
 | window (days) | trade days | freq | cum. proxy payoff | win rate on trades | avg payoff/trade | max drawdown |
 |---|---|---|---|---|---|---|
@@ -26,11 +26,11 @@
 
 **hindsight_guard verdict for this symbol:** agrees (no leak) — full-window winner: 20 days, in-sample winner: 20 days.
 
-## XLK (657 bars used, buy-and-hold over the period: -5.44%)
+## XLK (657 bars used, buy-and-hold over the period: -5.56%)
 
 | window (days) | trade days | freq | cum. proxy payoff | win rate on trades | avg payoff/trade | max drawdown |
 |---|---|---|---|---|---|---|
-| 10 | 109/393 | 27.7% | 0.0699 | 43.1% | 0.00064 | -0.0532 |
+| 10 | 109/393 | 27.7% | 0.0711 | 43.1% | 0.00065 | -0.0532 |
 | 20 | 90/383 | 23.5% | -0.048 | 38.9% | -0.00053 | -0.1151 |
 | 30 | 85/373 | 22.8% | -0.0815 | 36.5% | -0.00096 | -0.1448 |
 | 60 | 84/343 | 24.5% | -0.1475 | 31.0% | -0.00176 | -0.1648 |
@@ -38,7 +38,7 @@
 
 **hindsight_guard verdict for this symbol:** LEAK DETECTED — full-window winner: 90 days, in-sample winner: 10 days.
 
-## XLV (657 bars used, buy-and-hold over the period: 23.85%)
+## XLV (657 bars used, buy-and-hold over the period: 23.93%)
 
 | window (days) | trade days | freq | cum. proxy payoff | win rate on trades | avg payoff/trade | max drawdown |
 |---|---|---|---|---|---|---|

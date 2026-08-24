@@ -768,3 +768,35 @@ Trois endroits d'`alpaca_cli.py` portent *« VERIFIED 24/08 against CLI v0.0.13 
 **Ajouté** : `_check_cli_version()`, une fois par processus, **avertit sans bloquer** *(refuser de trader sur une chaîne de version serait pire que la dérive qu'on veut attraper)*. Vérifié : silence quand la version correspond · **un seul** avertissement sur 3 appels quand elle diffère · **un seul sous-processus en plus par processus**, pas par appel.
 
 *Contexte du jour : v0.0.13 installée = dernière publiée, et `alpaca update` est manuel. Aucune dérive possible aujourd'hui — le contrôle est là pour la semaine à venir.*
+
+---
+
+## 🔴 24/08 (nuit) — un chiffre PUBLIC corrigé : le classement des deux stratégies s'inverse selon la statistique
+
+*Passe sur les outils de rapport, annoncée comme à faible enjeu. Elle ne l'était pas : ces fichiers produisent les chiffres de la soumission, et j'y avais écrit un verdict.*
+
+### Ce qui est symétrique, vérifié d'abord
+
+`compare_strategies.py` traite bien les deux familles à égalité : **même garde-fou** (`check_selection_leakage`), **même seuil** (0.0), **même holdout** (`IN_SAMPLE_HOLDOUT_DAYS = 20` dans les deux modules), **même nombre de candidats** (5), **même `_sharpe`**. Aucun biais de traitement. 🟢
+
+### 🔴 Mais « même statistique » était un abus, et je l'avais écrit
+
+Les deux Sharpe partagent une **formule**, pas une **quantité** :
+- `vol_strategy` : payoff bâti sur `abs(rendement)` — **non négatif par construction**, et **~25 % moins variable** que le rendement signé (mesuré : écart-type 0,00742 contre 0,00994) — et **à plat ~3 jours sur 4**, ce qui réduit encore l'écart-type.
+- `momentum` : rendement **signé**, en marché quasiment tous les jours.
+
+**Mesuré sur les 4 symboles :**
+
+| | vol_strategy | momentum |
+|---|---|---|
+| Sharpe le plus haut | **4 / 4** | — |
+| **moyenne quotidienne la plus haute** | — | **3 / 4** |
+| `hindsight_guard` propre | 3 / 4 | **4 / 4** |
+
+Sur SPY : `momentum` gagne la moyenne (+0,00045 contre +0,00027) et **perd quand même le Sharpe**, parce que son écart-type est **3,7× plus grand**. **L'avantage de `vol_strategy` au Sharpe est structurel — une variance plus faible — pas un rendement supérieur.**
+
+### Corrigé dans le SCRIPT, pas à la main
+
+La mise en garde est désormais **générée** par `compare_strategies.py` (une correction écrite à la main aurait été écrasée au run suivant — elle l'avait d'ailleurs été), et les colonnes **moyenne/jour et écart-type/jour** sont calculées et affichées pour les deux familles, **pour que l'affirmation soit vérifiable au lieu d'être crue**. Le verdict de `STRATEGY_COMPARISON.md` est réécrit : il donne les **trois** chiffres qui tirent dans des sens différents, au lieu d'un seul qui tranche à la place de Spap.
+
+**Aucune bascule de stratégie décidée** — hors périmètre, et c'est précisément le genre de décision que ce document ne doit pas préempter.
