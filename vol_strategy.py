@@ -104,7 +104,40 @@ def _realized_vol(returns: Sequence[float]) -> float:
 
 def _hv_series(returns: Sequence[float], window: int) -> List[float]:
     """Rolling realized vol at each point in time (index i = vol computed
-    from returns[i-window:i]). Length = len(returns) - window."""
+    from returns[i-window:i]). Length = len(returns) - window.
+
+    🔒 ALIGNMENT INVARIANT -- verified numerically 24/08, "cherche encore",
+    and load-bearing. Do not "fix" the range below without re-checking both
+    sides together.
+
+    Two consequences of this indexing, neither obvious from the one-liner:
+
+    1. hv[k]'s LAST observed return is returns[window+k-1], so the final
+       return is never used by any element: hv[-1] is computed WITHOUT the
+       most recent day's move. The volatility estimate is therefore one day
+       stale, by construction.
+
+    2. That staleness is IDENTICAL on both paths, which is what actually
+       matters:
+         - backtest (_vol_strategy_returns): decides on hv[i] (last info
+           returns[window+i-1]) and takes its payoff from returns[window+i+1]
+           -- one day skipped.
+         - live (today_regime -> agent.py): decides on hv[-1] (last info
+           returns[-2]) and buys now, capturing the NEXT move -- also one
+           day skipped.
+       Measured side by side on a synthetic series: gap of exactly 1 on
+       both. So the backtest models the rule the agent actually trades,
+       including its staleness -- it is not measuring a different, more
+       favourable rule.
+
+    This was checked because it is exactly the failure this whole project is
+    named after, and an audit that took it on faith would be worthless. The
+    first reading of it looked like a mismatch (backtest capturing a later
+    day than live); working it through numerically showed both sides carry
+    the same offset. Written down because a future edit that makes
+    range(window, len(returns)+1) -- so hv[-1] finally uses the last return
+    -- would silently break the correspondence on ONE side only, and the
+    numbers would still look plausible."""
     return [_realized_vol(returns[i - window:i]) for i in range(window, len(returns))]
 
 

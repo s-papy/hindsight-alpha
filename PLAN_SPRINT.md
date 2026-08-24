@@ -61,6 +61,26 @@ Mais en cherchant plus loin (forum communautaire Alpaca, pas juste la doc), trou
 
 ---
 
+## 🟢 24/08 (nuit, 5e « cherche encore ») — l'arithmétique des décisions : AUCUN bug, et un faux positif évité de justesse
+
+**Zone jamais auditée jusqu'ici, et la plus lourde de conséquences : les maths qui décident les trades** (`vol_strategy.py`). Un décalage d'indice y serait du look-ahead — dans un projet dont c'est précisément le sujet.
+
+**Résultat honnête : aucun bug.** Mais la vérification valait d'être faite, et elle a failli produire une fausse alerte publique.
+
+### Ce que j'ai cru trouver, et pourquoi c'était faux
+
+`hv[k]` est calculé sur `returns[k : window+k]`, donc son **dernier rendement observé est `returns[window+k-1]`**. Le « lendemain » naturel serait `returns[window+k]`. Or le backtest consomme **`returns[window+k+1]`** — un jour est sauté. J'allais conclure : *« le backtest mesure une règle différente de celle que l'agent trade »* — une affirmation grave, sur des chiffres déjà **publics** (`BACKTEST_RESULTS.md`, `STRATEGY_COMPARISON.md`).
+
+**Vérifié numériquement plutôt qu'algébriquement : c'était faux.** `_hv_series` n'utilise **jamais** le dernier rendement, donc le chemin EN DIRECT porte exactement le même retard : `today_regime` décide sur `hv[-1]` (dernière info `returns[-2]`) et achète pour capter le mouvement suivant — **saut de 1 jour, des deux côtés, mesuré côte à côte**. Le backtest modélise donc fidèlement la règle vécue, staleness comprise. **Les chiffres publiés tiennent.**
+
+### Ce qui reste vrai et méritait d'être écrit
+
+L'estimation de volatilité est **stale d'un jour par construction**, en direct comme en backtest. Ce n'est pas un défaut (aucune information future n'entre dans la décision, et la correspondance est exacte) mais c'était **totalement non documenté** — et une « correction » future de `_hv_series` en `range(window, len(returns)+1)` casserait la correspondance **d'un seul côté**, avec des chiffres qui resteraient plausibles. **Invariant désormais écrit dans le code**, avec la façon de le revérifier.
+
+**Deux autres points vérifiés, cohérents** : la fenêtre d'historique du rang est la même tranche des deux côtés ; `_percentile_rank` utilise `<=`, ce qui gonfle légèrement le rang et produit donc **moins** de trades — conservateur, pas un biais favorable.
+
+---
+
 ## 🔴 24/08 (nuit, 4e « cherche encore ») — la piste que la passe précédente avait nommée
 
 **Cette passe a suivi la piste écrite en clair à la fin de la précédente** (« le prochain endroit où regarder, c'est le `finally` d'`agent.py` : que se passe-t-il si `log_run` échoue après un ordre réellement passé ? »). Elle était juste.
