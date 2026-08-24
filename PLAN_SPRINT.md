@@ -61,6 +61,31 @@ Mais en cherchant plus loin (forum communautaire Alpaca, pas juste la doc), trou
 
 ---
 
+## 🔴 24/08 (nuit, 3e « cherche encore ») — la chasse au MOTIF, plutôt qu'aux bugs isolés
+
+**Point de départ : les trois bugs de la passe précédente étaient du même genre — *une action réelle dont la trace se perd parce que la comptabilité qui la suit échoue*. Trois occurrences, ce n'est plus une coïncidence.** Cette passe recense donc systématiquement tout ce qui produit un effet irréversible (ordre soumis, position fermée, fichier écrit) et vérifie, pour chacun, si sa trace peut disparaître. **Le motif a livré un quatrième bug.**
+
+### ⑦ Un échec de fermeture n'était PAS journalisé — le pire événement possible, silencieux
+
+`monitor_exits.py` décidait quoi journaliser en cherchant les chaînes `"CLOSED"` / `"WOULD CLOSE"` dans les lignes rendues par `manage_exits()`. **Mais `manage_exits()` produit aussi deux lignes d'ÉCHEC qui ne contiennent ni l'une ni l'autre :**
+
+    <sym>: ERROR managing this position (...) -- left open, check manually
+    <sym>: could not read unrealized P&L% -- leaving position open
+
+et dans les deux cas `record["outcome"]` vaut `"checked"`, pas `"error"` — parce que `manage_exits` rattrape les exceptions par position **à dessein**, pour qu'une position défaillante n'en bloque pas d'autres.
+
+**Reproduit :** une position ayant touché son stop-loss et **n'ayant pas pu être fermée** était classée non-événement, **rien n'était écrit dans `decision_log.jsonl`**, et le programme affichait *« nothing closed »* — activement faux. Sous launchd cet affichage part dans `monitor_exits.log`, ignoré par git et jamais lu. **Un agent sans surveillance pouvait donc laisser une position perdante ouverte indéfiniment, sans aucune trace durable ni rien sur le dashboard public.** L'événement le plus important que ce script existe pour attraper était précisément celui sur lequel il se taisait.
+
+**Corrigé en INVERSANT le test** : on identifie désormais la seule ligne réellement routinière (`": holding ("`) et **tout le reste est journalisé par défaut**. Une chaîne d'action ajoutée plus tard à `manage_exits()` sera tracée sauf classement délibéré en routine — au lieu d'être silencieusement perdue faute de figurer dans une liste blanche que personne n'a pensé à mettre à jour. **9 cas de test, dont les mélanges** (une gardée + un échec → journalisé ; deux gardées → non).
+
+### Tracé et ÉCARTÉ, sans correctif inutile
+
+- **`publish_dashboard.py` écrit `docs/data.json` avec `write_text` non atomique** — même forme que ④, mais l'exposition est bien moindre : le script **n'est pas planifié** (seul `monitor_exits` l'est), écriture et commit sont dans le même processus, et le run suivant réécrit le fichier. **Signalé, pas corrigé.**
+- **« commit réussi, push échoué »** dans `git_publish()` : semble laisser un commit orphelin jamais poussé. **Vérifié : se rattrape tout seul** — `generated_at` change à chaque run, donc le run suivant recommite et `git push` envoie aussi le commit précédent. **Pas un bug.**
+- **`git add` avec `check=True` sur `decision_log.jsonl`** lèverait une exception si le fichier n'existait pas. Il existe ; latent seulement sur un clone neuf. **Noté.**
+
+---
+
 ## 🔴 24/08 (nuit, 2e « cherche encore ») — l'écriture d'état n'était pas atomique
 
 **Un bug de plus, démontré en deux temps plutôt qu'affirmé. Deux autres candidats examinés et innocentés.**

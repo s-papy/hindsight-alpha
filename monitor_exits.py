@@ -108,9 +108,37 @@ def main() -> None:
         # dashboard, exactly what a judge would look at. Logging remains
         # complete and honest (nothing hidden -- see PLAN_SPRINT.md for the
         # reasoning), it's just not logging routine non-events.
-        noteworthy = record["outcome"] == "error" or any(
-            "CLOSED" in a or "WOULD CLOSE" in a for a in record.get("exit_actions", [])
-        )
+        # The test is INVERTED on purpose -- fixed 24/08, third "cherche
+        # encore" pass, after reproducing what the original version dropped.
+        #
+        # It used to look for the interesting strings ("CLOSED", "WOULD
+        # CLOSE") and log only those. manage_exits() also returns two FAILURE
+        # lines that contain neither:
+        #     "<sym>: ERROR managing this position (...) -- left open, check manually"
+        #     "<sym>: could not read unrealized P&L% -- leaving position open"
+        # and in both cases record["outcome"] is "checked", not "error",
+        # because manage_exits catches per-position exceptions internally (by
+        # design, so one bad position doesn't block the others).
+        #
+        # So a position that hit its stop-loss and COULD NOT BE CLOSED was
+        # classified as a routine non-event and never written to
+        # decision_log.jsonl -- while printing "(nothing closed)", which was
+        # actively false. Under launchd that print goes to monitor_exits.log,
+        # which is gitignored and unread, so an unattended agent could leave a
+        # losing position open indefinitely with no durable trace anywhere,
+        # and nothing on the public dashboard. The single most important event
+        # this script exists to catch was the one it stayed quiet about.
+        #
+        # Matching the one genuinely routine line instead ("holding") and
+        # treating everything else as noteworthy makes the default SAFE: any
+        # action string added to manage_exits() later gets logged unless
+        # someone deliberately classifies it as routine, rather than being
+        # silently dropped for not matching a whitelist nobody remembered to
+        # update. Same failure family as the three fixed earlier today -- a
+        # real event losing its trace in the bookkeeping that follows it.
+        actions = record.get("exit_actions", [])
+        routine = [a for a in actions if ": holding (" in a]
+        noteworthy = record["outcome"] == "error" or len(routine) != len(actions)
         if noteworthy:
             decision_log.log_run(record)
         else:
