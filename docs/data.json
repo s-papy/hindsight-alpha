@@ -1,22 +1,51 @@
 {
-  "generated_at": "2026-01-01T00:00:00+00:00",
+  "generated_at": "2026-08-24T15:40:40.190529+00:00",
   "team": "Hindsight Alpha",
   "account": {
-    "id": "PLACEHOLDER",
+    "id": "523f7f05-1d67-4219-a96e-e65276f1dcf3",
     "status": "ACTIVE",
-    "equity": 100000.0,
-    "cash": 100000.0,
-    "buying_power": 200000.0,
-    "portfolio_value": 100000.0
+    "equity": "99875.9",
+    "cash": "99875.9",
+    "buying_power": "399503.6",
+    "portfolio_value": "99875.9"
   },
   "positions": [],
   "recent_decisions": [
     {
-      "timestamp": "2026-01-01T00:00:00+00:00",
-      "outcome": "no_edge",
+      "timestamp": "2026-08-24T15:37:10.744347+00:00",
+      "dry_run": true,
+      "symbols": [
+        "SPY",
+        "QQQ",
+        "IWM"
+      ],
+      "outcome": "dry_run_tradeable",
+      "market_open": true,
+      "exit_actions": [
+        "SPY260831P00763000: holding (-10.5%, thresholds are +50%/-50%)"
+      ],
       "verdicts": [
-        {"symbol": "SPY", "tradeable": false, "reason": "example placeholder row -- replaced by publish_dashboard.py on first real run"}
-      ]
+        {
+          "symbol": "SPY",
+          "tradeable": true,
+          "reason": "cheap-vol regime confirmed, hindsight_guard clean",
+          "direction": -1
+        },
+        {
+          "symbol": "QQQ",
+          "tradeable": true,
+          "reason": "cheap-vol regime confirmed, hindsight_guard clean",
+          "direction": -1
+        },
+        {
+          "symbol": "IWM",
+          "tradeable": true,
+          "reason": "cheap-vol regime confirmed, hindsight_guard clean",
+          "direction": -1
+        }
+      ],
+      "chosen_symbol": "SPY",
+      "direction": "bearish (put)"
     }
   ]
 }

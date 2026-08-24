@@ -260,7 +260,13 @@ def find_near_the_money_contract(
 
 
 def close_position(symbol: str) -> Any:
-    return run(["position", "close", "--symbol", symbol])
+    """VERIFIED 24/08 against CLI v0.0.13 by actually closing a live paper
+    position: the flag is --symbol-or-asset-id, NOT --symbol. The wrong form
+    exits 1 with {"error": "unknown flag: --symbol"}, which run() turns into
+    an AlpacaCLIError -- meaning manage_exits() would have raised every time
+    a take-profit or stop-loss actually fired. This is the one branch mocks
+    could never catch, and it sat in the risk system, not a nice-to-have."""
+    return run(["position", "close", "--symbol-or-asset-id", symbol])
 
 
 def submit_paper_option_order(option_symbol: str, qty: int = 1) -> str:
