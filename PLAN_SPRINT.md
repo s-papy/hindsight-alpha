@@ -703,3 +703,41 @@ Même famille que les bugs trouvés plus tôt aujourd'hui dans du code écrit pa
 **L'écriture non atomique de `monitor_exits_dedup.json`** — mon hypothèse de départ, et elle était fausse pour une bonne raison : le code **justifie explicitement** le choix. Un fichier corrompu retombe sur `{}` (non collant, contrairement à `state.json`), donc au pire une ligne de log en trop, et le run suivant le réécrit. Raisonné, pas oublié.
 
 *Note : le « 🔴 avertissement non émis » de mon premier test était correct — le cas naïf est désormais traité par le garde **local**, donc n'atteint jamais l'enveloppe externe. Mon test cherchait au mauvais endroit.*
+
+---
+
+## 🟢 24/08 (nuit) — le re-calibrage de compte, PROUVÉ contre l'API réelle
+
+*Le dernier point vraiment ouvert avant le 28. Fermé — mais pas par la procédure prévue.*
+
+### 🔴 D'abord : la procédure du brief n'aurait rien testé
+
+Le brief supposait que `python agent.py --dry-run` suffisait à exercer le re-calibrage (« `check_gates()` lit l'équité réelle que `--dry-run` n'empêche pas »). **Vérifié : c'est faux.** En `--dry-run`, l'agent s'arrête à *« not looking up contracts or submitting orders »* — **`check_gates()` n'est jamais appelé, donc `_record_starting_equity()` non plus**. Testé en forçant un `account_id` bidon dans `state.json` puis en lançant un dry-run : le fichier est resté **inchangé**.
+
+**Conséquence : même avec un troisième compte paper créé, les étapes 6 et 7 auraient montré un `state.json` figé** — et on en aurait conclu soit que le re-calibrage est cassé, soit, pire, qu'il fonctionne alors qu'on ne l'avait pas exercé.
+
+### Ce qui a été fait à la place — et qui prouve davantage
+
+**Aucun compte supplémentaire n'était nécessaire.** Le re-calibrage se déclenche sur un **changement d'`account_id`**, pas sur un changement de clés : il suffit d'un `account_id` différent dans `state.json` et d'un appel **réel** à `check_gates()`, qui lit l'équité **live** via l'API. *(Créer un compte et générer des clés API sont par ailleurs des actions que Claude ne fait pas.)*
+
+**① Aller — état hérité d'un « autre compte », avec un verrou ACTIF et 3 pertes d'affilée** *(plus sévère que le brief : un compte neuf n'aurait rien eu à effacer)* :
+
+| champ | avant | après | |
+|---|---|---|---|
+| `account_id` | `11111111-…-555555555555` | `523f7f05-…` *(UUID réel)* | 🟢 |
+| `starting_equity` | 12 345,0 | **99 901,84** *(équité LIVE, pas un report)* | 🟢 |
+| `locked` | **true** | false *(+ `lock_reason` effacé)* | 🟢 |
+| `traded_today` | `[SPY, GLD, XLK]` | `[]` | 🟢 |
+| `consecutive_losses` | **3** | 0 | 🟢 |
+
+La NOTE de re-calibrage est bien émise, nommant les deux comptes.
+
+**② La moitié que le brief ne couvrait pas — MÊME compte, verrou LÉGITIME** : les cinq champs sont **conservés**, aucune NOTE émise, et `check_gates` refuse correctement (*« weekly loss lock already active »*). **Le re-calibrage ne se déclenche donc pas à tort — sinon il effacerait un verrou hebdomadaire à chaque run.**
+
+**③ Retour** — un second changement d'`account_id` re-déclenche le mécanisme, dans l'autre sens. 🟢
+
+### État après le test
+
+`state.json` **restauré à l'identique**, y compris `traded_today: ["SPY"]` — c'est la garde anti-doublon du jour, la perdre aurait rouvert une porte. `.env` intact, `.env.hackathon` toujours à sa date de création, jamais touché. Aucun `.env.test2` ni `.env.dev.bak` n'a été créé. Non-régression propre.
+
+**Ce qui reste non prouvé, dit honnêtement :** que *l'échange des fichiers `.env`* désigne bien le bon compte. Ce n'est pas le mécanisme risqué — c'est une copie de fichier, et `test_connection.py` vérifie déjà l'`account_number` obtenu. **Le code qui pouvait mal se comporter est celui qui vient d'être exercé.**

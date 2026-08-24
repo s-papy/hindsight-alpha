@@ -277,8 +277,10 @@ def main() -> None:
             print(f"  WARNING: exit-log deduplication failed ({type(dedup_error).__name__}: "
                   f"{dedup_error}) -- logging every non-routine action this run instead of "
                   f"throttling. Delete {DEDUP_FILE.name} if this persists.", flush=True)
-            surfaced = [a for a in actions if not a.is_routine()]  # persisted even when nothing is logged, so pruning a
-        # resolved failure's signature isn't itself lost between runs.
+            # dedup_state deliberately left untouched on this path -- nothing was
+            # loaded/pruned/saved, so next run starts from whatever was last
+            # persisted, same as if this run had simply not happened.
+            surfaced = [a for a in actions if not a.is_routine()]
 
         noteworthy = record["outcome"] == "error" or bool(surfaced)
         if noteworthy:
