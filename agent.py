@@ -72,6 +72,7 @@ Run: python agent.py [--symbols SPY,GLD,XLK,XLV] [--dry-run]
 from __future__ import annotations
 
 import argparse
+import json
 from dataclasses import dataclass
 from typing import Optional
 
@@ -176,7 +177,41 @@ def main() -> None:
         record["error"] = f"{type(e).__name__}: {e}"
         raise
     finally:
-        decision_log.log_run(record)
+        # A logging failure must not (a) destroy the only trace of a run that
+        # really placed an order, nor (b) displace a genuine error as the one
+        # that surfaces. Found 24/08, fourth "cherche encore" pass, following
+        # the same pattern as the other four fixed today.
+        #
+        # Measured, not assumed:
+        #   - order placed + log_run() raises -> the whole run exited with the
+        #     logging error and decision_log.jsonl got NOTHING. The order
+        #     exists at Alpaca; the agent's own decision log, and therefore
+        #     the public dashboard, has no record of it.
+        #   - _run() raises a real error AND log_run() raises -> the logging
+        #     error is what surfaces. The original IS still reachable via
+        #     __context__ (verified -- an earlier version of this note claimed
+        #     it was lost, which was wrong: that came from how the test raised
+        #     the exception, not from this code). So this half is cosmetic,
+        #     not data loss -- but a traceback headed by "disk full" instead of
+        #     the actual failure is still the wrong thing to hand a human at
+        #     2am.
+        #
+        # Dumping the record to stdout on failure means the trace survives
+        # wherever stdout goes (launchd's log, a terminal, CI output) instead
+        # of nowhere. Not re-raising from the finally lets a real error from
+        # _run() propagate as itself.
+        try:
+            decision_log.log_run(record)
+        except Exception as log_error:
+            print(
+                f"WARNING: could not write this run to decision_log.jsonl "
+                f"({type(log_error).__name__}: {log_error}). The run itself is unaffected -- "
+                f"any order submitted above is real. Dumping the record here so it is not lost:"
+            )
+            try:
+                print(json.dumps(record, indent=2, default=str))
+            except Exception:
+                print(repr(record))
 
 
 def _run(args, symbols, record: dict) -> None:

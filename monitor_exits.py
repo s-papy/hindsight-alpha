@@ -45,6 +45,7 @@ set up a persistent scheduled job on Spap's machine):
 from __future__ import annotations
 
 import argparse
+import json
 from datetime import datetime, timezone
 
 import alpaca_cli
@@ -140,7 +141,20 @@ def main() -> None:
         routine = [a for a in actions if ": holding (" in a]
         noteworthy = record["outcome"] == "error" or len(routine) != len(actions)
         if noteworthy:
-            decision_log.log_run(record)
+            # Same resilience as agent.py's finally, and for the same reason:
+            # a logging failure must not destroy the only durable trace of a
+            # real close (or a failed one), nor displace a genuine error as
+            # the exception that surfaces. Dump the record to stdout instead,
+            # where launchd's log will keep it.
+            try:
+                decision_log.log_run(record)
+            except Exception as log_error:
+                print(f"WARNING: could not write to decision_log.jsonl "
+                      f"({type(log_error).__name__}: {log_error}). Dumping the record so it is not lost:")
+                try:
+                    print(json.dumps(record, indent=2, default=str))
+                except Exception:
+                    print(repr(record))
         else:
             print("  (nothing closed -- not adding a routine no-op entry to decision_log.jsonl)")
 

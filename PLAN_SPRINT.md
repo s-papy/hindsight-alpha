@@ -61,6 +61,22 @@ Mais en cherchant plus loin (forum communautaire Alpaca, pas juste la doc), trou
 
 ---
 
+## 🔴 24/08 (nuit, 4e « cherche encore ») — la piste que la passe précédente avait nommée
+
+**Cette passe a suivi la piste écrite en clair à la fin de la précédente** (« le prochain endroit où regarder, c'est le `finally` d'`agent.py` : que se passe-t-il si `log_run` échoue après un ordre réellement passé ? »). Elle était juste.
+
+### ⑧ Un ordre passé pouvait ne laisser AUCUNE trace dans le journal de décision
+
+`main()` appelle `decision_log.log_run(record)` dans un `finally`, sans protection. **Mesuré :** ordre réellement soumis + `log_run` qui échoue → **le run entier sort en erreur et `decision_log.jsonl` ne reçoit rien**. L'ordre existe chez Alpaca ; le journal de l'agent, et donc le dashboard public, n'en ont aucune trace.
+
+*Atténuation partielle qui existait déjà* : `record_order_submitted()` écrit `state.json` de façon synchrone juste après la soumission (isolé plus tôt dans la journée), donc `traded_today` garde le symbole. La trace n'est pas nulle — mais elle est absente de là où un juge regarde.
+
+**🔴 Et une correction de ma propre analyse, faite en cours de route.** J'avais d'abord conclu qu'une vraie panne d'`_run` était **perdue** quand `log_run` échouait aussi. **C'était faux** : l'erreur d'origine est bien conservée dans `__context__`. Le premier test le montrait « perdue » à cause de **la façon dont MON test levait l'exception** (`(_ for _ in ()).throw(...)` dans une lambda), pas à cause du code. Refait avec une vraie fonction : la chaîne Python est intacte. **Le défaut réel est donc plus étroit que je ne l'ai cru une minute : masquage cosmétique, pas perte de données.** Écrit ici parce qu'une analyse corrigée en silence ne vaut rien.
+
+**Corrigé, dans `agent.py` ET `monitor_exits.py`** : le `log_run` du `finally` est enveloppé ; en cas d'échec, un avertissement s'affiche **et le record complet est dompé en JSON sur stdout** — donc la trace survit là où va stdout (log launchd, terminal, CI) au lieu de nulle part. Et comme le `finally` ne relève plus, **une vraie panne d'`_run` remonte désormais telle quelle** au lieu d'être déplacée par l'erreur de journalisation. Vérifié sur les trois cas, plus le témoin.
+
+---
+
 ## 🔴 24/08 (nuit, 3e « cherche encore ») — la chasse au MOTIF, plutôt qu'aux bugs isolés
 
 **Point de départ : les trois bugs de la passe précédente étaient du même genre — *une action réelle dont la trace se perd parce que la comptabilité qui la suit échoue*. Trois occurrences, ce n'est plus une coïncidence.** Cette passe recense donc systématiquement tout ce qui produit un effet irréversible (ordre soumis, position fermée, fichier écrit) et vérifie, pour chacun, si sa trace peut disparaître. **Le motif a livré un quatrième bug.**
