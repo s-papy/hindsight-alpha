@@ -61,6 +61,38 @@ Mais en cherchant plus loin (forum communautaire Alpaca, pas juste la doc), trou
 
 ---
 
+## 🔴 24/08 (nuit) — « cherche encore » : deux bugs de plus, reproduits avant d'être déclarés
+
+**Deux vrais défauts trouvés dans le code écrit quelques heures plus tôt, chacun reproduit par un test AVANT correction.** Un troisième candidat examiné et **innocenté**.
+
+### ① Un ordre réellement passé pouvait disparaître des accumulateurs — côté DANGEREUX
+
+`agent.py` soumettait l'ordre, **puis** mettait à jour `committed_this_run_by_underlying` / `opened_this_run_underlyings`. Entre les deux : `record_order_submitted()`, qui écrit `state.json` — donc exactement le scénario de crash-en-écriture pour lequel la gestion de corruption a été écrite. En cas d'échec, le `except` de la boucle avalait tout et passait au symbole suivant **sans jamais enregistrer que la position existait**.
+
+**Reproduit :** témoin sain → `check_gates(GLD)` reçoit `committed={'SPY': 950.0}, open={'SPY'}`. Avec l'échec → **les deux ordres partent quand même**, mais GLD est évalué avec `committed={}, open=set()`. La position SPY devient invisible pour le garde-fou suivant, précisément dans la fenêtre de latence API que ces accumulateurs existent pour couvrir → `MAX_TOTAL_RISK_PCT`, `MAX_SECTOR_EXPOSURE_PCT` et `MAX_OPEN_POSITIONS` franchissables en agrégat.
+
+**Même forme que le correctif `manage_exits` de la passe précédente** (« une position réellement fermée ne doit pas être rapportée comme laissée ouverte parce que le compteur a échoué après ») — mais sur le chemin d'**entrée**, et contrairement à la plupart des trous d'isolation trouvés aujourd'hui, celui-ci échouait **du mauvais côté** : sur-exposition, pas un trade refusé pour rien.
+
+**Corrigé** : les accumulateurs bougent **en premier**, juste après la soumission ; `record_order_submitted` est isolé dans son propre `try/except`, avec avertissement affiché et trace dans le journal de décision. Vérifié : l'ordre est désormais rapporté `order_submitted` (plus « error ») et la position reste visible.
+
+### ② Le chemin de SORTIE écrasait un `state.json` corrompu
+
+`_load_state()` promet dans sa propre docstring qu'un fichier corrompu est « laissé intact jusqu'à intervention humaine ». `check_gates()` respecte scrupuleusement cette promesse. **Mais le chemin de sortie ne passe pas par `check_gates`** — par conception, les sorties doivent tourner sous verrou — donc `manage_exits() → _record_exit_outcome()` atteignait `_load_state()` + `_save_state()` **sans aucun contrôle de corruption**.
+
+**Reproduit, sur un fichier corrompu qui cachait `locked: true`** : après un stop-loss, le fichier est écrasé par `{"_corrupted": true, "consecutive_losses": 1}` — **`starting_equity` et `locked: true` perdus**.
+
+⚠️ **Gravité, dite précisément : ça n'ouvrait PAS de trou de trading.** Le drapeau `_corrupted` survit au passage, donc `check_gates` continue de refuser toute entrée. Ce qui était détruit, c'est la **preuve** — les octets dont un humain a besoin pour savoir si un verrou était actif avant le crash — alors que le module affirmait le contraire.
+
+**Corrigé au point de passage unique** (`_save_state`) plutôt que dans chaque appelant : ça couvre aussi `record_order_submitted` (même forme latente, seulement inatteignable parce que `check_gates` refuse d'abord) et tout écrivain ajouté plus tard. Non-régression vérifiée : l'écriture normale fonctionne toujours.
+
+### ③ Contrôle de qualité des données — examiné, **innocenté**
+
+Le `raise DataQualityError` est imbriqué dans un `try/except ValueError` : si `DataQualityError` héritait de `ValueError`, le contrôle de fraîcheur serait avalé par son propre `except`. **Testé : il hérite d'`Exception`, il s'échappe correctement.** Les deux seuils mordent pour de vrai (barre de 30 j > limite 5 j ; saut de 80 % > limite 50 %) et un horodatage illisible est signalé, pas sauté en silence. **Aucun bug — vérifié plutôt que supposé.**
+
+**Non-régression contre l'API réelle** après les deux correctifs : pipeline complet OK, l'anti-double-soumission bloque correctement le second passage sur SPY (`already submitted an order for SPY today`), `monitor_exits` sain, `state.json` intact.
+
+---
+
 ## 🟢 24/08 (soir) — session terminal : TOUT le code du jour vérifié contre l'API réelle
 
 **Verdict : le pipeline tourne de bout en bout avec tous les correctifs en place.** Ordre paper `id=2e7ba582-3784-4c80-8abb-d1e4eb0a79eb`, **qty=2** sur `SPY260831P00764000`, rempli à 4,69 $. Univers passé à SPY/GLD/XLK/XLV (redesign multi-positions).

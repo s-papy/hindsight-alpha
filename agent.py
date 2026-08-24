@@ -317,15 +317,51 @@ def _run(args, symbols, record: dict) -> None:
                 continue
 
             order_id = alpaca_cli.submit_paper_option_order(contract, qty=decision.qty)
-            risk_gates.record_order_submitted(tradeable.symbol)  # written synchronously, right away -- survives a crash on the next line
+
+            # The order EXISTS from this line on. Everything below is
+            # bookkeeping about an order that has already been placed, so
+            # nothing below may be allowed to make this run behave as though
+            # it hadn't been.
+            #
+            # These two accumulators move FIRST, before any call that can
+            # raise -- found 24/08, "cherche encore", by reproducing it:
+            # record_order_submitted() writes state.json, and a write failure
+            # there (the same crash-mid-write scenario _load_state's
+            # corruption handling was written for) used to jump straight to
+            # this loop's `except`, skipping both updates. The order was
+            # filled, but the NEXT symbol in the same run was then gated as
+            # if that position did not exist -- committed={} and open=set()
+            # instead of {'SPY': 950.0} / {'SPY'} -- so MAX_TOTAL_RISK_PCT,
+            # MAX_SECTOR_EXPOSURE_PCT and MAX_OPEN_POSITIONS could all be
+            # exceeded in aggregate during the very API-lag window these
+            # accumulators exist to cover.
+            #
+            # Same shape as the manage_exits() fix earlier in this pass ("a
+            # position really closed must never be reported as left open just
+            # because the streak counter failed afterwards"), but on the
+            # ENTRY path -- and unlike most isolation gaps found today, this
+            # one failed on the DANGEROUS side: over-exposure, not a
+            # needlessly refused trade.
+            committed_this_run_by_underlying[tradeable.symbol.upper()] = decision.committed_dollars
+            opened_this_run_underlyings.add(tradeable.symbol.upper())
+
+            # Own try/except for the same reason: this is a state.json write,
+            # it is the most likely thing here to fail, and its failure must
+            # not be reported as "no order was placed".
+            try:
+                risk_gates.record_order_submitted(tradeable.symbol)
+            except Exception as e:
+                print(f"  WARNING: order {order_id} WAS submitted for {tradeable.symbol}, but recording it "
+                      f"in state.json failed ({type(e).__name__}: {e}). The duplicate-order guard may not "
+                      "block a rerun today -- check open positions before re-running.")
+                trade_record["record_order_submitted_failed"] = f"{type(e).__name__}: {e}"
+
             print(f"  Paper order submitted (via `alpaca order submit`). qty={decision.qty} id={order_id}")
             trade_record["outcome"] = "order_submitted"
             trade_record["order_id"] = order_id
             trade_record["qty"] = decision.qty
             trades.append(trade_record)
             orders_submitted += 1
-            committed_this_run_by_underlying[tradeable.symbol.upper()] = decision.committed_dollars
-            opened_this_run_underlyings.add(tradeable.symbol.upper())
         except Exception as e:
             print(f"  ERROR attempting entry for {tradeable.symbol}: {type(e).__name__}: {e} -- skipping this symbol today")
             trade_record["outcome"] = "error"

@@ -157,6 +157,42 @@ def _load_state() -> dict:
 
 
 def _save_state(state: dict) -> None:
+    """Refuses to write a state carrying the _corrupted sentinel -- found
+    24/08, "cherche encore", by reproducing it rather than by inspection.
+
+    _load_state() promises, in its own docstring, that a corrupted
+    state.json is "left untouched on disk until a human deliberately
+    intervenes". check_gates() honours that carefully (it refuses before
+    ever calling _record_starting_equity). But the EXIT path does not go
+    through check_gates at all -- by design, exits must keep running under
+    a lock -- so manage_exits() -> _record_exit_outcome() reached
+    _load_state() + _save_state() with no corruption check, and overwrote
+    the damaged file with a freshly serialised one.
+
+    Measured, on a real corrupted file that was hiding locked=true:
+    starting_equity and locked were both GONE afterwards, replaced by
+    {"_corrupted": true, "consecutive_losses": 1}.
+
+    Scope of the damage, stated precisely: this did NOT open a trading
+    hole. The _corrupted key survives the round-trip, so check_gates keeps
+    refusing every new entry exactly as intended. What was destroyed is the
+    EVIDENCE -- the bytes a human needs to decide whether a weekly lock was
+    active before the crash -- while the module's own stated invariant said
+    those bytes would be preserved.
+
+    Guarding here rather than in each caller is deliberate: _save_state is
+    the single choke point every writer already goes through, so this also
+    covers record_order_submitted() (same latent shape, currently
+    unreachable only because check_gates refuses first) and any writer
+    added later, which a per-caller check would not."""
+    if state.get("_corrupted"):
+        print(
+            f"  WARNING: refusing to overwrite {STATE_FILE} -- it is corrupted and its original "
+            "contents are the only record of what was in effect before the crash (a weekly loss "
+            "lock, a consecutive-loss count). Bookkeeping for this action was NOT persisted. "
+            "New entries stay refused until a human deletes or repairs the file by hand."
+        )
+        return
     STATE_FILE.write_text(json.dumps(state, indent=2))
 
 
