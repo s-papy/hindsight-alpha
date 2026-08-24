@@ -741,3 +741,30 @@ La NOTE de re-calibrage est bien émise, nommant les deux comptes.
 `state.json` **restauré à l'identique**, y compris `traded_today: ["SPY"]` — c'est la garde anti-doublon du jour, la perdre aurait rouvert une porte. `.env` intact, `.env.hackathon` toujours à sa date de création, jamais touché. Aucun `.env.test2` ni `.env.dev.bak` n'a été créé. Non-régression propre.
 
 **Ce qui reste non prouvé, dit honnêtement :** que *l'échange des fichiers `.env`* désigne bien le bon compte. Ce n'est pas le mécanisme risqué — c'est une copie de fichier, et `test_connection.py` vérifie déjà l'`account_number` obtenu. **Le code qui pouvait mal se comporter est celui qui vient d'être exercé.**
+
+---
+
+## 🟢 24/08 (nuit) — la garantie « paper uniquement » prouvée, et une politique en prose transformée en contrôle
+
+*Deux zones jamais auditées : `config.py` — qui porte la contrainte la plus dure du projet — et le risque de dérive du CLI.*
+
+### `config.py` : aucun bug, et c'est désormais démontré et non plus supposé
+
+**Structurellement** : un seul point du dépôt lance le CLI Alpaca (`alpaca_cli.py`), et il passe `env=config.cli_env()`. Les quatre autres sous-processus sont `git`. **Aucun chemin ne peut atteindre le CLI avec l'environnement ambiant.**
+
+**Empiriquement, sur trois couches** :
+- `require_credentials()` refuse `true / TRUE / True / 1 / yes / YES / " true "` — et autorise `"" / false / no / 0 / off`. Aucune graphie vraie ne passe.
+- `cli_env()` retire le drapeau de l'environnement transmis **même quand il est réellement présent** dans `os.environ`.
+- Et si **`.env` lui-même** contenait `ALPACA_LIVE_TRADE=true` : refus à la couche 1, environnement propre à la couche 2. *(Testé en l'ajoutant réellement au fichier, puis restauré — 0 occurrence après.)*
+
+**« Zéro fonds réel engagé » n'est plus une phrase de pied de page : c'est vérifié.**
+
+### 🟠 Le contrôle ajouté : la version du CLI n'était garantie que par des commentaires
+
+Trois endroits d'`alpaca_cli.py` portent *« VERIFIED 24/08 against CLI v0.0.13 »*. **Rien ne le vérifiait à l'exécution** — une politique écrite en prose que rien n'applique, exactement le reproche que ce projet adresse au travail des autres.
+
+**Et le risque est mesuré, pas théorique : la dérive de flag a coûté DEUX bugs le 24/08** (`data option snapshot --symbol` → `--symbols`, `position close --symbol` → `--symbol-or-asset-id`). **Les deux échouaient en silence** : le premier rend `None` et le trade est écarté « faute de prix », le second laisse une position stop-lossée **ouverte**.
+
+**Ajouté** : `_check_cli_version()`, une fois par processus, **avertit sans bloquer** *(refuser de trader sur une chaîne de version serait pire que la dérive qu'on veut attraper)*. Vérifié : silence quand la version correspond · **un seul** avertissement sur 3 appels quand elle diffère · **un seul sous-processus en plus par processus**, pas par appel.
+
+*Contexte du jour : v0.0.13 installée = dernière publiée, et `alpaca update` est manuel. Aucune dérive possible aujourd'hui — le contrôle est là pour la semaine à venir.*

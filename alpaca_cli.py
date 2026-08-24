@@ -46,6 +46,23 @@ import config
 from vol_strategy import MIN_TRADING_DAYS_FOR_SWEEP, Bar
 
 
+# The exact CLI build every flag name in this file was verified against, by
+# actually running the commands (see the "VERIFIED 24/08" comments below).
+# Checked once per process in _check_cli_version(), because "verified against
+# v0.0.13" written only in a comment is a policy in prose that nothing
+# enforces -- precisely what this project exists to catch elsewhere.
+#
+# This is not hypothetical: flag drift cost two real bugs on 24/08 alone
+# (`data option snapshot --symbol` -> `--symbols`, and `position close
+# --symbol` -> `--symbol-or-asset-id`), and BOTH failed quietly -- the first
+# returns None and the trade is skipped "because it couldn't be priced", the
+# second leaves a stop-lossed position open. A loud warning at the top of a
+# run is what turns the next such drift into five minutes instead of a
+# silent week.
+VERIFIED_CLI_VERSION = "0.0.13"
+_version_checked = False
+
+
 class AlpacaCLIError(Exception):
     """Raised when the `alpaca` CLI exits non-zero or returns unparseable output."""
 
@@ -78,6 +95,33 @@ def _require_binary() -> None:
         )
 
 
+def _check_cli_version() -> None:
+    """Warn once per process if the installed CLI isn't the build the flag
+    names here were verified against. Warns, never blocks: a patch release is
+    usually harmless, and refusing to trade over a version string would be a
+    worse failure than the drift it guards against. Costs one extra
+    subprocess per process, not per call."""
+    global _version_checked
+    if _version_checked:
+        return
+    _version_checked = True  # set first: a failure here must never retry on every call
+    try:
+        result = subprocess.run(["alpaca", "version"], capture_output=True, text=True,
+                                env=config.cli_env(), timeout=15)
+        installed = result.stdout.strip().split()[-1] if result.stdout.strip() else ""
+    except Exception:
+        return  # version unreadable is not a reason to stop; run() will fail loudly anyway
+    if installed and installed != VERIFIED_CLI_VERSION:
+        print(
+            f"WARNING: alpaca CLI is v{installed}, but every flag name in alpaca_cli.py was "
+            f"verified against v{VERIFIED_CLI_VERSION}. Flag drift between builds has already "
+            "caused silent failures here (a trade skipped as 'unpriceable', a stop-lossed "
+            "position left open). Re-check `alpaca <cmd> --help` for the commands used in this "
+            "file before trusting a run.",
+            flush=True,
+        )
+
+
 def run(args: List[str]) -> Any:
     """Run `alpaca <args>` and return the parsed JSON stdout.
 
@@ -88,6 +132,7 @@ def run(args: List[str]) -> Any:
     labeled "Alpha Preview" by its own docs, not a hypothetical one."""
     _require_binary()
     config.require_credentials()
+    _check_cli_version()
 
     full_args = [*args] if "--quiet" in args else [*args, "--quiet"]
     result = subprocess.run(
