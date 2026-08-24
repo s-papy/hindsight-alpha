@@ -800,3 +800,29 @@ Sur SPY : `momentum` gagne la moyenne (+0,00045 contre +0,00027) et **perd quand
 La mise en garde est désormais **générée** par `compare_strategies.py` (une correction écrite à la main aurait été écrasée au run suivant — elle l'avait d'ailleurs été), et les colonnes **moyenne/jour et écart-type/jour** sont calculées et affichées pour les deux familles, **pour que l'affirmation soit vérifiable au lieu d'être crue**. Le verdict de `STRATEGY_COMPARISON.md` est réécrit : il donne les **trois** chiffres qui tirent dans des sens différents, au lieu d'un seul qui tranche à la place de Spap.
 
 **Aucune bascule de stratégie décidée** — hors périmètre, et c'est précisément le genre de décision que ce document ne doit pas préempter.
+
+---
+
+## 🔴 24/08 (nuit) — `BACKTEST_RESULTS.md` : deux cadrages trompeurs, et une analyse que j'avais silencieusement perdue
+
+*Suite de la passe sur les outils de rapport. Même famille que la correction de `STRATEGY_COMPARISON.md` : le code sait, le rapport ne le dit pas.*
+
+### ① Le buy-and-hold était juxtaposé au payoff, sans un mot
+
+L'en-tête de chaque symbole affichait `## SPY (657 bars used, buy-and-hold over the period: 60.2%)` **immédiatement au-dessus** d'une colonne `cum. proxy payoff` valant `0.108`. **Aucune mise en garde** — un lecteur, ou un juge, lit mécaniquement « le buy-and-hold écrase la stratégie ». **Les deux ne sont pas comparables** : l'un est un rendement composé sur *tous* les jours, l'autre une **somme** de payoffs `abs(rendement) − coût` sur la minorité de jours où la règle était en position. Le buy-and-hold est maintenant sur sa propre ligne, avec l'avertissement.
+
+### ② « max drawdown » n'est pas un drawdown de compte
+
+Le champ interne s'appelle honnêtement `max_drawdown_proxy` — **mais l'en-tête de colonne laissait tomber le qualificatif**, seul endroit où un lecteur rencontre le chiffre. Il porte sur une **somme cumulée de payoffs**, pas sur une courbe d'équité : il ne peut pas se lire « le compte a chuté de X % ». Colonne renommée, et la fonction documente désormais ce qu'elle mesure vraiment.
+
+### 🔴 ③ Et surtout : mon analyse de concentration avait disparu du document public
+
+L'analyse mesurée hier (**83 % du gain de SPY venant de 5 jours sur 102**) avait été écrite **à la main** dans un fichier **généré**. Elle a été écrasée à la régénération suivante — **et j'avais commité la version amputée sans le voir** : vérifié, elle était déjà absente de `HEAD`. **Troisième fois que je commets cette erreur** (après `STRATEGY_COMPARISON.md`, deux fois).
+
+**Corrigé pour de bon : la concentration est désormais CALCULÉE ET PUBLIÉE PAR LE SCRIPT** (`_top_n_share`), donc elle survit à toute régénération. Recoupée avec ma mesure manuelle : **SPY 82,6 %** contre 83 % mesuré à la main. 🟢
+
+**Découverte au passage :** plusieurs symboles dépassent **100 %** (XLV 20 j : **282,5 %**). Ce n'est pas une erreur — **les 5 meilleurs jours rapportent plus que le résultat net entier, donc tous les autres jours de trade réunis perdent de l'argent**. C'est plus parlant que le chiffre de SPY, et c'est maintenant expliqué dans le rapport plutôt que laissé passer pour un bug.
+
+### 🟢 Ce que la journée a démontré au passage
+
+En insérant ce calcul, je me suis trompé de nom de variable (`trade_rets` au lieu de `trade_days`). **L'isolation par symbole ajoutée ce matin a fait exactement son travail** : elle a attrapé le `NameError` sur chaque symbole et poursuivi proprement, au lieu de faire tomber le run. *(J'avais aussi masqué la sortie avec `>/dev/null` — sans quoi je l'aurais vu tout de suite. Contrôler en aveugle ne contrôle rien.)*

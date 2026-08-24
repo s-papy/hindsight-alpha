@@ -51,7 +51,14 @@ RESULTS_FILE = Path(__file__).parent / "BACKTEST_RESULTS.md"
 
 
 def max_drawdown(cumulative: List[float]) -> float:
-    """Largest peak-to-trough drop in a cumulative proxy-payoff curve."""
+    """Largest peak-to-trough drop in the cumulative proxy-payoff curve.
+
+    NOT an account drawdown, and the difference matters when this number is
+    published: the curve is a running SUM of daily payoffs, not a compounded
+    equity curve, so the figure is in payoff units and cannot be read as "the
+    account fell X%". The internal field is named max_drawdown_proxy for that
+    reason -- the report's column header used to drop the qualifier, which is
+    the one place a reader would have met the number (fixed 24/08)."""
     if not cumulative:
         return 0.0
     peak = cumulative[0]
@@ -60,6 +67,17 @@ def max_drawdown(cumulative: List[float]) -> float:
         peak = max(peak, v)
         worst = min(worst, v - peak)
     return worst
+
+
+def _top_n_share(trade_rets: List[float], n: int) -> Optional[float]:
+    """What percentage of the cumulative payoff comes from the best n trade
+    days. None when the total is <= 0 (the share would be meaningless, and
+    inventing a number there is exactly the kind of thing this report must
+    not do)."""
+    total = sum(trade_rets)
+    if not trade_rets or total <= 0:
+        return None
+    return round(100.0 * sum(sorted(trade_rets, reverse=True)[:n]) / total, 1)
 
 
 def buy_and_hold_return(bars: List[Bar]) -> float:
@@ -87,6 +105,14 @@ def backtest_symbol(symbol: str, bars: List[Bar]) -> dict:
             "win_rate_on_trade_days_pct": round(100 * sum(1 for r in trade_days if r > 0) / len(trade_days), 1) if trade_days else 0.0,
             "avg_payoff_per_trade": round(mean(trade_days), 5) if trade_days else 0.0,
             "max_drawdown_proxy": round(max_drawdown(cumulative), 4),
+            # Share of the total payoff contributed by the best 5 trade days.
+            # Computed and PUBLISHED because the headline number is meaningless
+            # without it: a long-optionality rule is expected to earn on a few
+            # large moves, so a positive total says little until you know how
+            # few days carry it. Written into the report by the script rather
+            # than added by hand afterwards -- a hand-written analysis in a
+            # regenerated file was silently wiped twice before this (24/08).
+            "top5_share_pct": _top_n_share(trade_days, 5),
         }
 
     # Replay what the live agent's own leak check would have picked, honestly
@@ -114,15 +140,42 @@ def format_report(results: List[dict]) -> str:
         "",
     ]
     for r in results:
-        lines.append(f"## {r['symbol']} ({r['bars_used']} bars used, buy-and-hold over the period: {r['buy_and_hold_return_pct']}%)")
+        lines.append(f"## {r['symbol']} ({r['bars_used']} bars used)")
         lines.append("")
-        lines.append("| window (days) | trade days | freq | cum. proxy payoff | win rate on trades | avg payoff/trade | max drawdown |")
+        lines.append(
+            f"*Buy-and-hold over the same bars: **{r['buy_and_hold_return_pct']}%**. "
+            "🔴 This is NOT comparable to the payoff column below and must never be "
+            "ranked against it: buy-and-hold is a compounded price return over every "
+            "day of the period, while `cum. proxy payoff` is a SUM of daily "
+            "`abs(return) - cost` payoffs on the minority of days the rule was in a "
+            "position at all. Different quantities, different denominators. It is "
+            "printed for context on what the underlying did, not as a benchmark to "
+            "beat.*"
+        )
+        lines.append("")
+        lines.append("| window (days) | trade days | freq | cum. proxy payoff | win rate on trades | avg payoff/trade | max drawdown (proxy units) |")
         lines.append("|---|---|---|---|---|---|---|")
         for w, d in r["windows"].items():
             lines.append(
                 f"| {w} | {d['trade_days']}/{d['total_days_scored']} | {d['trade_frequency_pct']}% "
                 f"| {d['cumulative_proxy_payoff']} | {d['win_rate_on_trade_days_pct']}% "
                 f"| {d['avg_payoff_per_trade']} | {d['max_drawdown_proxy']} |"
+            )
+        conc = [
+            f"{w}d: **{d['top5_share_pct']}%**"
+            for w, d in r["windows"].items() if d.get("top5_share_pct") is not None
+        ]
+        if conc:
+            lines.append("")
+            lines.append(
+                "🔴 **Concentration — share of each positive total earned on its best 5 trade "
+                "days:** " + " · ".join(conc) + ". *A share ABOVE 100% is not an error: it "
+                "means those five days earned more than the entire net result, i.e. every "
+                "other trade day combined lost money.* A long-optionality rule is *expected* to "
+                "earn on a handful of large moves, so this is the payoff's signature rather "
+                "than an anomaly — but it means a positive total built from ~100 trades does "
+                "not distinguish an edge from luck, and that the omitted costs (spread, theta) "
+                "would bite hardest on exactly what remains after those days are removed."
             )
         lines.append("")
         lines.append(f"**hindsight_guard verdict for this symbol:** {'agrees (no leak)' if r['hindsight_guard_verdict']['agrees'] else 'LEAK DETECTED'} — full-window winner: {r['hindsight_guard_verdict']['full_winner']} days, in-sample winner: {r['hindsight_guard_verdict']['in_sample_winner']} days.")
