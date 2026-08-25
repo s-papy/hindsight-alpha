@@ -109,13 +109,34 @@ def write_snapshot() -> Path:
 
 
 def git_publish() -> None:
-    subprocess.run(["git", "add", "docs/data.json", "decision_log.jsonl"], check=True)
-    result = subprocess.run(["git", "diff", "--cached", "--quiet"])
+    paths = ["docs/data.json", "decision_log.jsonl"]
+    subprocess.run(["git", "add", *paths], check=True)
+    # Both calls below are scoped to `paths` on purpose -- found 24/08,
+    # "cherche encore". `git diff --cached --quiet` with NO pathspec checks
+    # the whole index, not just the two files just staged above: if anything
+    # else happened to already be staged in this working tree at this exact
+    # moment (a terminal session mid multi-file review, say -- this repo's
+    # own workflow runs plenty of ad hoc `git add` before this function is
+    # ever called), that unrelated staged diff makes this "did anything
+    # change" check report true even when docs/data.json and
+    # decision_log.jsonl are byte-identical to HEAD. And an unscoped `git
+    # commit` would then scoop that unrelated staged file into a commit
+    # whose message claims to be only "dashboard: snapshot ...", pushing it
+    # to the public repo under a misleading label -- a commit lying about
+    # its own contents is exactly the kind of untrustworthy trace this
+    # project exists to catch elsewhere. Reproduced in a throwaway repo:
+    # staged an unrelated file, left the dashboard files unchanged, and
+    # confirmed the unscoped diff reported "changed" anyway (exit 1); the
+    # scoped `-- <pathspec>` form correctly reported "unchanged" (exit 0) in
+    # the same state, and `git commit -m ... -- <pathspec>` committed only
+    # the intended files while leaving the unrelated staged file untouched
+    # and still staged for whoever put it there.
+    result = subprocess.run(["git", "diff", "--cached", "--quiet", "--", *paths])
     if result.returncode == 0:
         print("Nothing changed since last publish — skipping commit.")
         return
     subprocess.run(
-        ["git", "commit", "-m", f"dashboard: snapshot {datetime.now(timezone.utc).isoformat()}"],
+        ["git", "commit", "-m", f"dashboard: snapshot {datetime.now(timezone.utc).isoformat()}", "--", *paths],
         check=True,
     )
     subprocess.run(["git", "push"], check=True)

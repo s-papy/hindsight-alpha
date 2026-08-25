@@ -34,7 +34,7 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 from statistics import mean
-from typing import List
+from typing import List, Optional
 
 import alpaca_cli
 import hindsight_guard

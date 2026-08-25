@@ -416,8 +416,32 @@ def _run(args, symbols, record: dict) -> None:
         # e.g. every symbol failing contract lookup (misleading otherwise:
         # a judge reading "blocked by risk gate" when no gate was ever
         # reached would be reading the wrong story).
+        #
+        # That handles every symbol sharing the SAME outcome -- but found
+        # 25/08, "cherche encore", re-reading this exact block: the ELSE
+        # branch still hard-coded "risk_gate_blocked" whenever outcomes
+        # DIFFER across symbols, regardless of whether risk_gate_blocked was
+        # even among them. Reproduced: trades = [no_contract_found, error]
+        # (zero symbols actually reached a risk gate) still produced
+        # record["outcome"] == "risk_gate_blocked" -- the exact same
+        # misleading-badge failure this block's own comment says it exists
+        # to prevent, just for the case nobody tested (multiple DIFFERENT
+        # reasons, none of them risk_gate_blocked). docs/index.html's
+        # outcomeBadge() would render the public dashboard's top-level badge
+        # as "blocked by risk gate" on a day where no risk gate was ever
+        # reached by anything. Each trade's own true reason is still shown
+        # correctly in the per-trade detail line below the badge (see
+        # renderTrade()) -- only the SUMMARY badge lied.
+        #
+        # Fixed honestly rather than picking a different single reason to
+        # default to (any single choice among N different real reasons is
+        # equally arbitrary and equally misleading): a heterogeneous set of
+        # outcomes reports "mixed", which outcomeBadge() renders as a plain
+        # muted badge with that literal label rather than crashing or
+        # falling back silently -- verified against its `map[d.outcome] ||
+        # ['badge-muted', d.outcome || 'unknown']` fallback.
         trade_outcomes = {t["outcome"] for t in trades}
-        record["outcome"] = trade_outcomes.pop() if len(trade_outcomes) == 1 else "risk_gate_blocked"
+        record["outcome"] = trade_outcomes.pop() if len(trade_outcomes) == 1 else "mixed"
 
 
 if __name__ == "__main__":

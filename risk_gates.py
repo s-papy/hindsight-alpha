@@ -471,7 +471,7 @@ def is_halted() -> tuple:
     return True, reason
 
 
-def _record_exit_outcome(is_win: bool) -> int:
+def _record_exit_outcome(is_win: bool, account_id: Optional[str] = None, equity: Optional[float] = None) -> int:
     """Updates the consecutive-loss counter in state.json: a win resets it
     to 0, a loss increments it. Returns the new count.
 
@@ -493,8 +493,44 @@ def _record_exit_outcome(is_win: bool) -> int:
     entries are blocked, no new trade can ever produce the win that would
     reset it, which is the point -- a losing streak is a "stop and have a
     human look" signal, not something the agent should quietly work
-    through on its own."""
+    through on its own.
+
+    account_id/equity added 25/08, "cherche encore": this function used to
+    mutate state["consecutive_losses"] with NO idea which account's exit
+    actually caused the mutation. check_gates() is the only place that
+    compares state.json's saved account_id against the currently active
+    one and re-baselines (_record_starting_equity) -- and manage_exits()/
+    monitor_exits.py never goes through check_gates() by design (exits
+    must keep running under a lock, so they can't be gated on anything).
+    Reproduced 25/08: seeded state.json as account "A"'s (consecutive_losses:
+    1), then closed a losing position while alpaca_cli was mocked to
+    represent a DIFFERENT account "B" -- consecutive_losses on disk went to
+    2, still labeled account_id "A", with nothing anywhere recording that
+    the loss producing that "2" was actually B's. Not hypothetical for this
+    project specifically: monitor_exits.py is scheduled via launchd to run
+    unattended every 15 minutes, and this same project's own workflow
+    repeatedly swaps .env by hand for testing -- if that scheduled job ever
+    fires during such a swap window, and .env is switched back before any
+    check_gates() call happens on the account it was briefly pointed at,
+    the real account's circuit breaker silently inherits a stranger's
+    loss/win history, with no warning anywhere, because state.json's
+    account_id never gets compared or corrected on this path.
+
+    Fix: when account_id is supplied (manage_exits() always supplies it
+    now), reconcile through the SAME _record_starting_equity() check_gates()
+    already relies on -- a no-op when it already matches (every routine
+    15-minute tick, once an account is settled), a full reset (including
+    this very counter, to 0) when it doesn't, so the win/loss update below
+    always applies to a freshly-correct baseline for whichever account's
+    position actually just closed, never to a number left behind under
+    someone else's account_id. Optional/default-None so a caller that
+    genuinely doesn't have an account_id handy (none exist today, but
+    future ones might in a mocked/offline context) degrades to the old,
+    account-blind behavior rather than raising -- narrower than before, not
+    a new failure mode."""
     state = _load_state()
+    if account_id is not None:
+        state = _record_starting_equity(equity or 0.0, state, account_id)
     count = 0 if is_win else state.get("consecutive_losses", 0) + 1
     state["consecutive_losses"] = count
     if not _save_state(state):
@@ -684,14 +720,37 @@ def manage_exits(dry_run: bool = False) -> List[ExitAction]:
                     # this project cares most about being honest about.
                     consecutive_losses = None
                     bookkeeping_error = None
+                    # account/equity fetched here, not once at the top of
+                    # manage_exits() -- only paid for when a close actually
+                    # fires (rare: most 15-minute ticks are all HOLDING),
+                    # same "only pay the API cost when you actually need to
+                    # act" shape as _check_cli_version's once-per-process
+                    # cache. See _record_exit_outcome's docstring for why
+                    # this call exists at all: without it, this bookkeeping
+                    # had no way to notice state.json belongs to a
+                    # DIFFERENT account than the one that just closed.
+                    account_id = None
+                    account_equity = None
+                    try:
+                        account = alpaca_cli.get_account()
+                        account_id = account.get("id")
+                        account_equity = float(account.get("equity", account.get("portfolio_value", 0)))
+                    except Exception as e:
+                        # Can't reconcile the account without this call --
+                        # fall through with account_id=None, which makes
+                        # _record_exit_outcome skip reconciliation entirely
+                        # (old, account-blind behavior) rather than guessing.
+                        print(f"  WARNING: could not fetch account info to reconcile {symbol}'s exit "
+                              f"bookkeeping against the correct account ({type(e).__name__}: {e}) -- "
+                              "recording the outcome against state.json's existing account_id as-is.")
                     if not would_close_profit:
                         try:
-                            consecutive_losses = _record_exit_outcome(is_win=False)
+                            consecutive_losses = _record_exit_outcome(is_win=False, account_id=account_id, equity=account_equity)
                         except Exception as e:
                             bookkeeping_error = f"{type(e).__name__}: {e}"
                     else:
                         try:
-                            _record_exit_outcome(is_win=True)
+                            _record_exit_outcome(is_win=True, account_id=account_id, equity=account_equity)
                         except Exception as e:
                             print(f"  WARNING: {symbol} closed on a win but failed to reset the "
                                   f"consecutive-loss counter ({type(e).__name__}: {e}) -- the close "

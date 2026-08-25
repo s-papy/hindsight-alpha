@@ -826,3 +826,96 @@ L'analyse mesurée hier (**83 % du gain de SPY venant de 5 jours sur 102**) avai
 ### 🟢 Ce que la journée a démontré au passage
 
 En insérant ce calcul, je me suis trompé de nom de variable (`trade_rets` au lieu de `trade_days`). **L'isolation par symbole ajoutée ce matin a fait exactement son travail** : elle a attrapé le `NameError` sur chaque symbole et poursuivi proprement, au lieu de faire tomber le run. *(J'avais aussi masqué la sortie avec `>/dev/null` — sans quoi je l'aurais vu tout de suite. Contrôler en aveugle ne contrôle rien.)*
+
+---
+
+## 🔴 25/08 (Cowork) — cherche encore : `publish_dashboard.py --git-push` pouvait committer et pousser un fichier qui n'avait rien à voir avec le dashboard
+
+*Nouveau bug, jamais signalé avant (relu la ligne 591 de ce fichier : `publish_dashboard` avait déjà été « audité et déclaré sain » — mais sur la résilience de lecture, jamais sur ce chemin git). Famille différente des six précédents : pas une trace perdue, une PORTÉE mal posée — le contrôle censé décider « y a-t-il quelque chose à publier » ne regardait pas ce qu'il croyait regarder.*
+
+**Le code, avant correction :**
+```python
+subprocess.run(["git", "add", "docs/data.json", "decision_log.jsonl"], check=True)
+result = subprocess.run(["git", "diff", "--cached", "--quiet"])
+if result.returncode == 0:
+    print("Nothing changed since last publish — skipping commit.")
+    return
+subprocess.run(["git", "commit", "-m", f"dashboard: snapshot ..."], check=True)
+subprocess.run(["git", "push"], check=True)
+```
+
+`git diff --cached --quiet` **sans pathspec** regarde tout l'index, pas seulement les deux fichiers venant d'être ajoutés. Et `git commit` sans pathspec committe tout l'index aussi. **Reproduit dans un dépôt jetable** : un fichier sans rapport (`unrelated.py`) déjà `git add`é, `docs/data.json`/`decision_log.jsonl` strictement inchangés → le diff non scopé rend quand même "changé" (code 1), et un `git commit` non scopé aurait embarqué `unrelated.py` dans un commit qui se prétend juste « dashboard: snapshot ... » — poussé au dépôt public sous une étiquette fausse.
+
+Ce n'est pas hypothétique pour CE dépôt précisément : toute la journée, la session terminal a fait des `git add`/relectures multi-fichiers en cours de séance, exactement le genre d'état où un fichier peut rester indexé au moment où `publish_dashboard.py --git-push` tourne (le `README.md` documente cet enchaînement comme le geste de fin de journée).
+
+**Corrigé** : les deux appels sont maintenant scopés au pathspec (`git diff --cached --quiet -- <paths>` et `git commit -m ... -- <paths>`). Testé dans un dépôt jetable avec un vrai remote local, deux scénarios : (a) fichier étranger indexé + dashboard inchangé → commit sauté, le fichier étranger reste indexé intact ; (b) fichier étranger indexé + dashboard changé pour de vrai → commit contient EXCLUSIVEMENT les 2 fichiers du dashboard (`git show --stat` vérifié), poussé avec succès, le fichier étranger reste indexé et intact après coup. `py_compile` propre. Non committé — pour la prochaine session terminal, comme d'habitude.
+
+---
+
+## 🔴 25/08 (Cowork) — cherche encore : `manage_exits()` mutait `consecutive_losses` sans jamais vérifier à quel compte `state.json` appartenait vraiment
+
+*Même famille que les six précédents (un contrôle construit avec soin pour UN chemin, silencieusement supposé protéger un AUTRE chemin qui ne passe jamais par lui) mais jamais repérée jusqu'ici. Trouvée en relisant `risk_gates.py` avec un œil neuf plutôt qu'en repartant du dernier diff.*
+
+**Le fait établi** : `check_gates()` est le SEUL endroit qui compare l'`account_id` sauvegardé dans `state.json` avec celui du compte réellement actif, et re-baseline (`_record_starting_equity`) si ça ne correspond pas — locked, traded_today, ET consecutive_losses remis à zéro. `manage_exits()` (donc `monitor_exits.py`) ne passe JAMAIS par `check_gates()`, par construction (les sorties doivent continuer à tourner même sous un lock). Résultat : `_record_exit_outcome()` incrémentait/remettait à zéro `consecutive_losses` dans `state.json` sans jamais vérifier si ce fichier appartenait au compte qui venait réellement de subir la perte ou le gain.
+
+**Pas hypothétique pour CE projet précisément** : `monitor_exits.py` est planifié via launchd, sans surveillance, toutes les 15 minutes — et cette même session a swappé `.env` à la main des dizaines de fois aujourd'hui pour tester. Si ce job planifié se déclenche pendant une fenêtre de swap manuel, et que `.env` est reswappé vers le bon compte AVANT qu'un `check_gates()` tourne sur le compte visité entre-temps (ce qui ne déclenche la détection que dans le sens compte→state.json, pas l'inverse), le vrai compte hérite silencieusement d'un historique de gains/pertes qui n'était pas le sien — sans aucun avertissement nulle part.
+
+**Reproduit** : `state.json` semé pour le compte "A" (`consecutive_losses: 1`), `alpaca_cli.get_account()` mocké pour renvoyer le compte "B", une position perdante fermée via `manage_exits()`. Résultat avant correctif : `consecutive_losses` passe à 2, toujours étiqueté `account_id: "A"` — rien n'enregistre que cette perte était en fait celle de B.
+
+**Corrigé** : `_record_exit_outcome()` accepte maintenant `account_id`/`equity` (optionnels, défaut `None` — dégrade vers l'ancien comportement aveugle si absents, jamais une nouvelle façon d'échouer) et réconcilie via `_record_starting_equity()`, la même fonction déjà testée que `check_gates()` utilise — no-op quand le compte correspond déjà (le cas courant à chaque tick de 15 minutes), reset complet sinon. `manage_exits()` récupère le compte SEULEMENT quand une clôture réelle se produit (pas à chaque tick, pas sur les positions "holding" — même logique de coût que le contrôle de version du CLI), et cet appel est lui-même protégé par son propre `try/except` : un échec de `get_account()` à ce moment précis ne bloque JAMAIS la clôture déjà effectuée, il dégrade simplement vers l'ancien comportement aveugle au compte.
+
+**4 scénarios testés, tous passent** : ① compte différent → re-baseline avant d'appliquer la perte, l'ancien compte de A n'est pas hérité ; ② même compte, perte normale → incrément 1→2 comme avant, aucun re-baseline parasite ; ③ même compte, gain → reset à 0 comme avant ; ④ `get_account()` échoue pendant la réconciliation → la clôture reste effective, comptabilité en mode aveugle (ancien comportement), rien de cassé. `py_compile` propre sur tout le périmètre touché aujourd'hui. Non committé — pour la prochaine session terminal.
+
+---
+
+## 🔴 25/08 (Cowork) — cherche encore : le correctif du badge résumé mentait encore, exactement dans le cas qu'il prétendait avoir corrigé
+
+*Trouvé dans `agent.py`, à l'intérieur même du bloc dont le commentaire affirme déjà avoir réglé « le badge résumé ne doit pas mentir ». Pas une nouvelle famille — la même récidive que ce bloc était censé fermer, laissée ouverte dans le cas qu'il ne testait pas.*
+
+**Le code, avant correction** :
+```python
+trade_outcomes = {t["outcome"] for t in trades}
+record["outcome"] = trade_outcomes.pop() if len(trade_outcomes) == 1 else "risk_gate_blocked"
+```
+Le commentaire au-dessus explique avoir corrigé le cas où TOUS les symboles partagent la même issue (`len == 1`) — mais dès que deux symboles ont des issues DIFFÉRENTES (`len > 1`), le code retombe sur `"risk_gate_blocked"` en dur, **qu'un risk gate ait ou non jamais été atteint**.
+
+**Reproduit** : `trades = [{"outcome": "no_contract_found"}, {"outcome": "error"}]` (zéro symbole bloqué par un risk gate) → `record["outcome"]` valait quand même `"risk_gate_blocked"`. `docs/index.html`'s `outcomeBadge()` aurait affiché **« blocked by risk gate »** en jaune sur le tableau de bord public, un jour où aucun risk gate n'a jamais été atteint par quoi que ce soit — exactement le mensonge que ce bloc affirme empêcher, juste dans le cas jamais testé (plusieurs raisons différentes, aucune n'étant `risk_gate_blocked`).
+
+**Corrigé** : un jeu d'issues hétérogène produit maintenant `"mixed"` plutôt que de choisir arbitrairement l'une des raisons réelles (n'importe quel choix unique parmi N raisons différentes serait tout aussi trompeur). `docs/index.html` reçoit une entrée dédiée dans la table des badges (`mixed: muted, "mixed outcomes — see trades below"`) plutôt que de tomber sur le badge générique — le détail par symbole reste correct et visible juste en dessous (`renderTrade()`, inchangé). 4 cas testés (mêmes issues répétées, issues différentes, un seul symbole, mélange incluant `risk_gate_blocked`) — tous passent. `node --check` sur le JS extrait du dashboard, propre. `py_compile` propre. Non committé — pour la prochaine session terminal.
+
+---
+
+## 🟡 25/08 (Cowork) — cherche encore : rien de conséquent, un seul import manquant, honnêtement mineur
+
+*Par honnêteté envers le rituel : cette passe n'a PAS trouvé de bug fonctionnel. Un seul défaut réel, mais sans conséquence à l'exécution — signalé quand même plutôt que de forcer quelque chose de plus gros pour avoir quelque chose à écrire ici.*
+
+`backtest.py` importe `from typing import List` mais utilise `Optional[float]` comme annotation de retour de `_top_n_share()` (ajoutée par la session terminal, commit `1ae7b7c`) sans jamais importer `Optional`. Ça ne plante PAS à l'exécution — `from __future__ import annotations` (déjà présent en haut du fichier) rend toutes les annotations paresseuses (de simples chaînes, jamais évaluées), vérifié en appelant la fonction pour de vrai (`_top_n_share([0.1, 0.2, -0.05], 5)` → `100.0`, aucune `NameError`). Ça casserait uniquement un outil qui évalue les annotations activement (`typing.get_type_hints()`, un `mypy`) — rien de tel ne tourne dans ce projet aujourd'hui. Corrigé quand même (une ligne, `from typing import List, Optional`), `py_compile` propre, `get_type_hints()` résout proprement après coup. Aussi consulté : `vol_strategy.py`, `momentum_strategy.py`, `hindsight_guard.py`, `alpaca_cli.py` (parsing des snapshots, sélection de contrat, comptage des positions) relus sans trouver de nouveau problème réel — y compris une piste creusée sérieusement (`hindsight_guard.check_selection_leakage`'s `max(scores, key=...)` avec un score `NaN` produirait un résultat instable en Python) puis abandonnée après avoir confirmé que `vol_strategy._sharpe`/`_realized_vol` ne peuvent jamais renvoyer NaN sur des données réelles (retour `0.0` garanti dans tous les cas dégénérés) — piste non reproductible, donc pas publiée comme un bug.
+
+---
+
+## 🟢 25/08 (Cowork) — audit demandé explicitement : compilation + rangement, tout le dépôt
+
+*Spap a demandé un passage général, pas un "cherche encore" ciblé : compiler tout, vérifier le rangement, confirmer que rien n'est cassé. Résultat rangé en trois blocs.*
+
+### 🟢 Tout est vert
+
+- `python3 -m py_compile *.py` (les 16 fichiers Python à la racine) : propre, y compris avec `-W error::SyntaxWarning`.
+- `docs/data.json`, `decision_log.jsonl` (16 lignes), `state.json`, `monitor_exits_dedup.json` : JSON valide, vérifié en les parsant réellement, pas en supposant.
+- `submission/Hindsight_Alpha_Deck.pptx` et `.docx` : archives zip valides, non corrompues (`zipfile.testzip()`).
+- `requirements.txt` : recoupé contre les imports RÉELS de tout le code actif (AST, pas grep) — `python-dotenv` est bien la seule dépendance externe utilisée, rien de manquant, rien de mort listé.
+- `.gitignore` : `.env`, `.env.*`, `__pycache__/`, `*.pyc`, `state.json`, `HALT`, `.DS_Store`, les fichiers `.tmp`, `monitor_exits.log`, `monitor_exits_dedup.json` — tous correctement ignorés, confirmé via `git status --ignored`, aucun n'est suivi.
+- **Aucun secret jamais committé** : `git log --all --full-history` sur `.env`/`.env.hackathon`/etc. est vide sur tout l'historique, et aucune clé API en dur trouvée dans les fichiers suivis (`git grep`).
+- Aucun `.pyc`/`__pycache__`/`.DS_Store` suivi par git.
+
+### 🟡 Un fichier mal rangé, déjà documenté mais jamais nettoyé
+
+`alpaca_client.py` — brouillon abandonné (SDK `alpaca-py` direct, remplacé par `alpaca_cli.py` pour respecter l'exigence "MCP or CLI" du hackathon). **Committé depuis le tout premier commit** (`68c778d`), jamais importé nulle part (vérifié par grep sur tout le dépôt), et son import `from alpaca.trading.client import TradingClient` échouerait immédiatement si quelqu'un l'exécutait (le paquet `alpaca-py` n'est même pas dans `requirements.txt`). README.md le documente déjà honnêtement ligne 256-259 : *"dead code... nothing imports it. Safe to delete by hand."* — donc déjà repéré, jamais exécuté par erreur, mais toujours présent, avec un nom qui ressemble dangereusement à `alpaca_cli.py` (le vrai fichier actif) pour quiconque parcourt le dépôt en diagonale, juge du hackathon inclus.
+
+**Testé, pas supposé : Cowork ne peut PAS le supprimer.** `rm` sur ce dossier (`/Users/s-pap/hindsight-alpha`, monté séparément de `~/Desktop/CERVEAU`) échoue avec `Operation not permitted` — même restriction que celle déjà documentée dans README.md pour ce fichier précis. **À supprimer à la main, ou via la prochaine session terminal** : `git rm alpaca_client.py`.
+
+### 🟡 Deux fichiers laissés par cette session elle-même, à nettoyer
+
+- **`__TEST_DELETE_PERMISSION__.tmp`** (0 octet, racine) — créé par Cowork pour vérifier la permission de suppression ci-dessus, confirmé non supprimable par Cowork. **Untracked** (`??` dans `git status`, aucun risque d'être committé par accident), mais à supprimer à la main : `rm __TEST_DELETE_PERMISSION__.tmp`.
+- **`.git/index.lock`** (0 octet, horodaté de cette session) — le warning déjà observé plusieurs fois aujourd'hui ("unable to unlink .git/index.lock: Operation not permitted") vient de ce fichier fantôme, lui aussi non supprimable par Cowork. **N'a bloqué aucune opération git testée aujourd'hui** (status, log, diff, et même les scénarios de test avec un vrai remote local ont tous fonctionné) — vraisemblablement un artefact du montage réseau de ce dossier côté Cowork, pas une vraie corruption de l'index git réel sur le Mac. À vérifier/supprimer côté terminal si une vraie opération git bloque un jour (`rm .git/index.lock`), mais rien d'urgent constaté.
+
+**Verdict global : le code est vert, rien de cassé. Le seul vrai rangement en attente (`alpaca_client.py`) était déjà connu et documenté — ce passage l'a juste re-confirmé avec des tests plutôt que de le supposer, et a trouvé les deux fichiers de service que cette session elle-même a laissés traîner.**

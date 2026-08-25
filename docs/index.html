@@ -271,6 +271,15 @@ function outcomeBadge(d) {
     no_contract_found: ['badge-yellow', 'no contract'],
     dry_run_tradeable: ['badge-yellow', 'dry-run: would trade'],
     error: ['badge-red', 'error'],
+    // Added 25/08 alongside agent.py's fix to the same-day outcome
+    // aggregation: a run whose attempted symbols hit DIFFERENT outcomes
+    // (e.g. one had no contract found, another errored, neither blocked by
+    // a risk gate) used to be mislabeled here as "blocked by risk gate"
+    // regardless of whether that was true for any of them. See each
+    // trade's own line below the badge (renderTrade()) for what actually
+    // happened per symbol -- this badge just says the summary isn't a
+    // single story.
+    mixed: ['badge-muted', 'mixed outcomes — see trades below'],
   };
   const [cls, label] = map[d.outcome] || ['badge-muted', d.outcome || 'unknown'];
   return `<span class="badge ${cls}">${label}</span>`;
