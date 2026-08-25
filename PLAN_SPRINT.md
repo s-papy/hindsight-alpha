@@ -1111,3 +1111,397 @@ C'est aussi ce qui explique les horodatages **hors grille** (13:13, 13:42, 14:35
 3. **Rendre l'échec visible** : aujourd'hui un job mort n'alerte personne. Le tableau de bord ne distingue pas « rien à faire » de « n'a jamais tourné ».
 
 *Conformément au brief, aucun code, aucun plist et aucun seuil n'ont été modifiés sur cette base — c'est un constat mesuré, pas une décision prise.*
+
+---
+
+## 🟢 25/08 (Cowork) — piste 3 du terminal (« rendre l'échec visible ») construite : indicateur de santé du moniteur de sortie sur le dashboard
+
+*Suite directe de la trouvaille DarkWake ci-dessus. Spap a validé explicitement (« Oui, construis-la maintenant ») la piste 3 listée par le terminal : aujourd'hui le dashboard ne distingue pas « rien à faire » de « n'a jamais tourné » — les 11 échecs du jour n'ont été vus que par accident via `git status`, pas via la page publique que les juges regardent.*
+
+### Ce qui a été ajouté — `docs/index.html` uniquement, lecture seule, aucun changement de comportement de trading
+
+Une bannière calculée **entièrement côté client**, à partir de `data.json.recent_decisions` (déjà publié par `publish_dashboard.py` via `decision_log.read_log(limit=30)`, déjà newest-first) :
+
+- Filtre les entrées `run_type === 'exit_monitor'`, prend la plus récente.
+- Âge calculé contre `Date.now()` du **visiteur**, pas contre l'heure de génération de `data.json` — reste juste même si la page n'est pas régénérée entre deux visites.
+- Compte les échecs consécutifs en partant de la plus récente entrée `exit_monitor` et en s'arrêtant au premier `outcome !== 'error'`.
+- Quatre paliers : ⚪ muted si aucune entrée `exit_monitor` n'existe encore ; 🔴 rouge si ≥3 échecs consécutifs ; 🟡 jaune si pas de série d'échecs mais dernier passage il y a plus de 45 min (3× le cycle de 15 min, pour tolérer un raté isolé sans fausse alerte) ; 🟢 vert sinon.
+
+### Vérifié avant d'être laissé sur disque
+
+Extrait la fonction du fichier réel (`docs/index.html` → `/tmp/dash.js`) avec un faux `document.getElementById` en Node, **10 scénarios** testés : aucune donnée, cas sain récent, exactement 3 échecs consécutifs, 11 échecs consécutifs (forme exacte de l'incident réel du jour), stale sans série d'échecs, frontière exacte 45 min (doit rester vert), 46 min (doit passer jaune), 2 échecs seulement — sous le seuil rouge, doit rester vert, entrée `run_type` non-`exit_monitor` plus récente qui ne doit pas fausser le tri, timestamp manquant. **Les 10 passent.**
+
+Rejoué ensuite contre le **vrai** `decision_log.jsonl` (les 28 lignes réelles, dont les 11 échecs du DarkWake) : résultat `🔴 Exit monitor: 11 consecutive failures, last check 1h 14m ago` — correspond exactement à l'incident documenté ci-dessus, pas une donnée synthétique inventée pour faire joli.
+
+Syntaxe JS validée (`new Function(...)` sans exception) et HTML re-parsé sans erreur après l'édition.
+
+### Pas fait ici
+
+Aucun commit — comme toujours depuis Cowork, le fichier reste modifié sur disque pour une session terminal. Rien dans `publish_dashboard.py` ou `decision_log.py` n'a été touché : la bannière ne consomme que des données déjà publiées.
+
+---
+
+## 🔴🟢 25/08 (Cowork) — grande passe "cherche encore" demandée explicitement par Spap : un vrai bug trouvé en confrontant la bannière aux données réelles, 3 agents dispatchés en parallèle, et une série de correctifs de présentation
+
+*Spap a demandé, en une seule fois : chercher encore ce qui a pu être oublié, chercher de nouveaux axes, chercher des règles ratées, explorer le dossier ligne par ligne, mobiliser tous les outils disponibles, contrôler et double-contrôler, et revenir avec une solution plutôt qu'un problème — avec l'objectif explicite de viser la première place, pas un top 10.*
+
+### Le vrai bug, trouvé en vérifiant la bannière de santé (construite plus tôt le même jour) contre les VRAIES données du disque, pas contre des scénarios synthétiques
+
+En relisant `monitor_exits.log` et `decision_log.jsonl` pour préparer le brief terminal suivant, découverte que **le moniteur a réellement récupéré depuis 17:55** (confirmé par le log réel : contrôles réussis toutes les 15 min de 17:55 à au moins 19:15) — mais `decision_log.jsonl` ne contient toujours QUE les 11 échecs comme dernières entrées `exit_monitor`, parce que `monitor_exits.py` n'écrit jamais dans ce fichier pour un contrôle routinier réussi (`noteworthy = outcome=="error" or bool(surfaced)` — voir son propre commentaire, déjà présent avant aujourd'hui, jamais remis en question jusqu'à ce que la bannière construite ce matin en dépende directement).
+
+**Conséquence concrète, non hypothétique** : la bannière construite plus tôt aujourd'hui, basée uniquement sur `decision_log.jsonl`, afficherait **"🔴 11 consecutive failures" indéfiniment**, potentiellement pour le reste de la semaine jugée, même des heures après que le problème soit résolu — une fausse alerte qui ne se corrige jamais toute seule, pire que l'absence d'indicateur.
+
+**Corrigé par un mécanisme séparé, pas en modifiant `decision_log.jsonl`** (son filtre "noteworthy only" reste intentionnellement intact — c'est la bonne conception pour SON rôle, un journal curé, pas pour la santé instantanée) :
+- `monitor_exits.py` : nouveau fichier `monitor_last_run.json` (gitignored, même catégorie que `state.json`/`monitor_exits_dedup.json`), écrit **à chaque run, sans condition**, via `_write_last_run_status()` appelée dans le `finally` — résiste à toute exception (capture large, jamais autorisé à interférer avec la vraie logique de protection des positions).
+- `publish_dashboard.py` : lit ce fichier (best-effort, `None` si absent/corrompu) et le republie dans `data.json` sous `monitor_status`.
+- `docs/index.html` : `renderMonitorHealth()` réécrite pour utiliser `monitor_status` comme signal primaire (le vrai dernier run, succès ou non), avec repli automatique sur l'ancienne logique `decision_log`-seule si `monitor_status` est absent (compatibilité avec un `data.json` généré avant ce correctif).
+- **Ajout non prévu au départ, trouvé en réfléchissant à la staleness** : un contrôle d'heures de marché côté client (`isUsMarketHoursNow()`, via `Intl` + fuseau `America/New_York`, DST géré automatiquement) — sans ça, la bannière passerait au jaune "stale" **toutes les nuits et tous les week-ends**, puisque le moniteur est censé être silencieux des heures durant en dehors du marché. Un indicateur qui crie au loup chaque soir se fait ignorer exactement quand une vraie coupure pendant les heures de marché compte.
+
+**Vérifié, pas juste écrit** : 3 scénarios Python isolés sur `_write_last_run_status`/`_read_monitor_status` (écriture normale, écrasement sur erreur, résilience sur chemin non-inscriptible) ; 10 scénarios JS sur `renderMonitorHealth` (dont le cas exact de l'incident réel — 11 échecs + récupération — qui DOIT rester vert, pas rouge) ; 6 scénarios sur `isUsMarketHoursNow` avec des timestamps UTC fixes (mercredi en séance, avant l'ouverture, exactement à la clôture, juste avant clôture, samedi, dimanche) — tous corrects, DST inclus (août = EDT). `py_compile` + `pyflakes` propres sur tout `*.py` après coup, HTML re-parsé sans erreur.
+
+### 3 agents dispatchés en parallèle pour l'audit "ligne par ligne" demandé
+
+**Agent 1 — audit code + fichiers du repo** : verdict global, le code est déjà exceptionnellement propre (aucun bug fonctionnel neuf après relecture complète des 13 `.py` racine). Trouvé : 2 imports morts (`json` dans `agent.py`, `json` + `daily_returns` dans `backtest.py` — confirmés par `pyflakes`, **corrigés**), et trois incohérences documentaires à fort impact (README daté, script vidéo citant un chiffre de l'ancien univers abandonné, dashboard public déjà en ligne périmé).
+
+**Agent 2 — re-vérification du règlement officiel lablab/Alpaca** : confirme tout ce qui était déjà su, et trouve du **neuf et important** :
+- Soumission finale doit inclure l'**Alpaca paper trading account ID** ("this allows the judging team to identify your trading activity and evaluate your P&L performance") — déjà anticipé par construction dans `publish_dashboard.py` (commentaire explicite déjà présent avant cette recherche), rien à changer.
+- Write-up d'une page doit couvrir "AI logic, risk gates, and Alpaca infrastructure implementation" — déjà le cas.
+- Vidéo : **maximum 5 minutes, format MP4**, structure "introduction → discuter la présentation PDF → montrer les fonctionnalités" — script vidéo mis à jour en conséquence (voir plus bas).
+- Cover image de soumission : **PNG/JPG, ratio 16:9 recommandé** — **pas encore préparée, action restante**.
+- Clause "Submissions must be original and MIT-compliant" — **déjà respecté**, `LICENSE` déjà en MIT pur (vérifié en le relisant intégralement).
+- "Social engagement" noté sur la qualité ET l'engagement généré (likes/commentaires/partages), pas juste sur le fait de poster — renforce l'importance de vraiment poster les brouillons de `SOCIAL_POSTS_DRAFT.md`, pas de les laisser en brouillon.
+- Concurrence : correction par rapport à la recherche du 25/08 matin — plusieurs équipes ont maintenant des pitchs très aboutis (garde-fous déterministes, multi-agents, stat-arb). **Point rassurant confirmé malgré ça** : aucune équipe repérée ne mentionne le concept de "hindsight leakage"/"look-ahead bias" avec un mécanisme de comparaison fenêtre-pleine vs in-sample — la différenciation du projet tient toujours.
+
+**Agent 3 — audit des livrables Presentation & Execution** : trouve 2 erreurs factuelles dans `Video_Script.md` (le script affirmait "aucune fuite" alors que `hindsight_guard` détecte un vrai leak sur XLK — la meilleure preuve du concept était occultée plutôt que montrée ; "trois symboles" au lieu de quatre) et un manque critique dans `README.md` : **le lien du dashboard public n'apparaissait nulle part dans le fichier**, alors que le règlement exige une "Application URL" visible.
+
+### Correctifs appliqués suite à ces trois audits
+
+- **`Video_Script.md`** : les deux erreurs factuelles corrigées (le cas XLK refusé devient la preuve centrale de la section démo, plus un "s'il y en a un" hypothétique ; les vrais chiffres du write-up — 68,5–82,6% de concentration, 52–102 trades, 45–57% de réussite — remplacent le "53 à 83%" périmé de l'ancien univers SPY/QQQ/IWM) ; durée cible unifiée à ~2:45 (au lieu de deux chiffres contradictoires) ; nouvelles contraintes officielles ajoutées aux notes de tournage (5 min max, MP4, mentionner le write-up PDF, cover image 16:9 à préparer).
+- **`README.md`** : lien du dashboard ajouté dès la 3e ligne utile ; TL;DR de 5 phrases ajouté avant la prose longue ; tableau condensé des résultats de backtest ajouté (4 lignes, référence vers `BACKTEST_RESULTS.md` pour le détail) ; le fait honnête que `momentum_strategy` passe `hindsight_guard` proprement sur 4/4 symboles contre 3/4 pour la stratégie réellement tradée, auparavant seulement dans `STRATEGY_COMPARISON.md`, maintenant visible dans le README ; section "Status" réécrite pour refléter la réalité du jour — le blocage TCC/Full Disk Access est résolu (le moniteur tourne réellement), la trouvaille DarkWake et sa parade (bannière) sont documentées, l'exigence de solde $100k et son risque de régénération de clé API sont rappelés avant le kickoff.
+- **`agent.py`, `backtest.py`** : imports morts retirés, `pyflakes` propre sur tout le repo Python.
+
+### Ce qui reste, honnêtement, pas caché
+
+- **Cover image PNG/JPG 16:9** : pas préparée. Nécessite un vrai choix visuel, pas juste du code — à faire par Spap ou à discuter avant qu'un visuel générique soit produit à sa place.
+- **Glossaire/tooltips pour le jargon du dashboard** (HV rank, in-sample, hindsight_guard) et un vrai test dans un navigateur mobile réel : identifiés par l'agent 3 comme améliorations utiles mais de moindre impact que ce qui a été corrigé ici — pas faits, pour rester concentré sur ce qui avait le plus d'impact avant la deadline.
+- **Le dashboard public en ligne reste périmé tant qu'une session terminal n'a pas republié** `docs/data.json` (avec `monitor_status`) et poussé `docs/index.html`, `README.md`, `Video_Script.md`, `monitor_exits.py`, `publish_dashboard.py`, `agent.py`, `backtest.py`, `.gitignore` — voir le brief terminal mis à jour.
+
+---
+
+## 🔴🟢 25/08 (Cowork) — cherche encore, sur mon propre travail de ce soir : un vrai bug de rendu Markdown trouvé et corrigé, le reste vérifié plus profondément et confirmé propre
+
+*Cette passe s'est concentrée délibérément sur le code écrit CE SOIR (`monitor_exits.py`, `publish_dashboard.py`, `docs/index.html`, `README.md`) — le même réflexe que plusieurs passes précédentes du 24/08 (13e, 14e, 22e→23e) : le code le plus récent est celui le moins relu, donc le plus probable à cacher un défaut.*
+
+### 🔴 Trouvé : le nouveau titre "TL;DR" du README cassait le rendu Markdown, prouvé en le rendant pour de vrai, pas en le relisant
+
+Le titre `### TL;DR (...)` ajouté plus tôt ce soir contenait un retour à la ligne brut au milieu de la parenthèse explicative. En Markdown, un titre ATX (`###`) ne prend que la première ligne — le reste (*"summary were both missing before, and a judge with 5 minutes is exactly who that hurts)"*) devenait un paragraphe orphelin, commençant en pleine phrase, juste avant le vrai contenu du TL;DR. **Reproduit en rendant le fichier avec un vrai moteur Markdown** (`python-markdown` + extension `tables`) plutôt qu'en le relisant à l'œil : le `<h3>` réel ne contenait que *"TL;DR (added 25/08, "cherche encore" pass — the link above and this"*, tronqué, suivi d'un `<p>` qui commence par *"summary were both..."*. Exactement le genre de changement qui "a l'air correct" en relisant le texte source mais casse une fois rendu — même famille que le bug de liste Markdown orpheline trouvé dans ce même README le 24/08 (19e passe).
+
+**Corrigé** : titre réduit à `### TL;DR` seul, l'explication déplacée en italique juste en dessous (même style que l'intro de la section "Backtest, at a glance" ajoutée à côté). Revérifié en rendant à nouveau : `<h3>` propre (`"TL;DR"`), plus aucun paragraphe orphelin.
+
+**Balayage complet fait dans la foulée**, pas juste ce seul titre : script qui détecte toute ligne `#`/`##`/`###` suivie immédiatement (sans ligne vide) d'une ligne non-titre — a remonté d'autres cas, tous **faux positifs vérifiés** (des blocs de code bash après `## Setup`, légitimes en Markdown). Un premier passage avait aussi semblé montrer des `<h1>` fantômes à l'intérieur des blocs de code bash (des commentaires `#` interprétés comme des titres) — **faux positif de mon propre outil de test**, pas du fichier : l'extension `fenced_code` manquait dans mon appel à la librairie Markdown. Refait avec l'extension correcte : un seul vrai `<h1>` (`"Hindsight Alpha"`), tous les autres titres propres. `submission/Video_Script.md` passé au même test : 8 titres, tous corrects, rien à corriger.
+
+### 🟢 Vérifié plus profondément, rien de cassé : le nouveau code de `monitor_exits.py` rejoué via son vrai `main()`, pas juste la fonction isolée
+
+Les tests de ce soir sur `_write_last_run_status()` appelaient la fonction directement, en isolation — jamais le vrai `main()` de bout en bout. Rejoué avec `alpaca_cli.get_clock`/`risk_gates.manage_exits` mockés (pas réécrits) sur 4 cas réels : run normal réussi, marché fermé, `manage_exits()` qui lève une exception en cours de route. Les 4 cas écrivent `monitor_last_run.json` avec le bon `outcome`/`market_open` dans tous les cas, y compris quand `main()` propage bien l'exception (le comportement voulu, pas un régression) — `record.get("market_open")` reste `None` proprement plutôt que de lever une `KeyError` quand `get_clock()` échoue avant d'avoir pu le renseigner (exactement le scénario DarkWake du jour). Import de `publish_dashboard.py` (qui importe maintenant `monitor_exits` pour partager `MONITOR_STATUS_FILE`) revérifié sans effet de bord ni import circulaire.
+
+Rien d'autre trouvé cette passe — le reste du nouveau code de ce soir (bannière de santé, surlignage des refus XLK, heures de marché) tient face à une relecture adversariale supplémentaire.
+
+### 🟡 Erreur commise EN VÉRIFIANT, corrigée immédiatement : mon propre test a pollué `decision_log.jsonl` pour de vrai
+
+Le test end-to-end ci-dessus mockait `alpaca_cli.get_clock` et `risk_gates.manage_exits`, mais **pas** `decision_log.log_run_or_dump` — le cas "manage_exits lève une exception" a donc un `outcome="error"` que le code juge à raison "noteworthy", et a réellement écrit une ligne bidon (`"error": "RuntimeError: boom"`) dans le vrai `decision_log.jsonl` du dépôt. Repéré immédiatement par `git status` (même réflexe que celui qui avait révélé l'incident DarkWake ce matin — surveiller les fichiers qui ne devraient pas bouger). **Corrigé** : ligne retirée, fichier revérifié `git diff` vide (identique à `HEAD`). Aucune trace committée — l'erreur n'a existé que sur le disque local, quelques minutes.
+
+Vaut la peine d'être écrit tel quel plutôt que discrètement réparé sans le dire : c'est exactement le principe que ce projet applique au reste du code (une trace fausse est un vrai défaut, même auto-infligé) appliqué à ma propre séance de vérification.
+
+---
+
+## 🟢 25/08 (Cowork) — cherche encore, sur demande explicite : audit complet du mécanisme hindsight_guard + recherche de littérature/concurrence "à contre-courant"
+
+*Spap a demandé deux choses précisément : chercher d'autres stratégies "à contre-courant" comme la nôtre, et vérifier partout le mécanisme de détection de fuite pour voir si quelque chose avait été raté.*
+
+### Audit interne — rien de cassé, un point mineur purement théorique noté
+
+`grep` exhaustif de tout usage réel de `check_selection_leakage` dans le dépôt : 4 sites d'appel (`agent.py` en live, `backtest.py`, `compare_strategies.py` ×2 pour vol_strategy et momentum_strategy) — cohérents entre eux, même `IN_SAMPLE_HOLDOUT_DAYS = 20` dans `vol_strategy.py` ET `momentum_strategy.py` (dupliqué en constante séparée dans chaque module plutôt que partagé, mais vérifié identique dans les deux — pas un bug). Les deux seules mentions dans `monitor_exits.py`/`risk_gates.py` sont des commentaires expliquant pourquoi le chemin de SORTIE ne passe délibérément jamais par le garde-fou (les sorties gèrent des positions déjà ouvertes, pas une nouvelle sélection de paramètre) — conforme au design, pas un oubli. Seul point relevé, purement théorique : `max(scores, key=...)` départage une égalité exacte de score par l'ordre d'insertion des candidats, pas par une règle de bris d'égalité explicite — sans risque pratique avec des scores réels en virgule flottante calculés sur des données de marché (une égalité exacte n'arrive jamais en pratique), donc noté et pas corrigé.
+
+### Recherche externe — le vrai résultat de cette passe : `hindsight_guard` n'est pas une invention isolée, et c'est une bonne nouvelle une fois dit honnêtement
+
+Recherché la littérature quant établie sur exactement ce problème (sélection de paramètre biaisée par des données non disponibles au moment de la décision). Trouvé une vraie parenté, avec ce qui est repris et ce qui ne l'est pas :
+
+- **Probability of Backtest Overfitting / combinatorially symmetric cross-validation** (Bailey, Borwein, López de Prado & Zhu, 2015) — la parenté la plus directe : comparer un gagnant in-sample contre son rang out-of-sample.
+- **Walk-forward optimization** (Pardo) — revalider qu'un paramètre optimal reste optimal en avançant dans le temps.
+- **Deflated Sharpe Ratio** (Bailey & López de Prado, 2014) — l'esprit ("ne pas faire confiance à un Sharpe non corrigé du nombre d'essais"), sans en reprendre la formule.
+
+**Ce qui N'EST PAS repris**, dit honnêtement : aucune correction formelle de multiple-testing sur les 5 fenêtres candidates, pas de partitions combinatoires, pas de bootstrap — `hindsight_guard` est une version dégradée à deux partitions (historique complet vs historique moins 20 jours), pas l'appareil statistique complet de ces méthodes.
+
+**La vraie différence, et l'argument à mettre en avant** : ces méthodes valident une stratégie **une fois, à la conception**, puis déploient. Ce projet refait le même test de désaccord **avant chaque décision live**, avec refus catégorique possible n'importe quel jour — un paramètre validé hier peut être refusé aujourd'hui. C'est la réponse prête si un juge connaissant cette littérature demande "n'est-ce pas juste du walk-forward validation ?"
+
+**Concurrence** : toujours aucun projet trouvé (dans le hackathon Alpaca ou l'écosystème lablab.ai plus large) combinant un test de désaccord de sélection ET un refus par décision individuelle en production. Une équipe de plus repérée avec un angle voisin en esprit (`Dawn Of The Trading Agents` — débat interne bull/bear/risk avant chaque trade, mécanisme qualitatif d'auto-contestation, pas un test statistique) — pas un concurrent direct sur le mécanisme, mais le seul autre projet du pool actuel qui met en avant l'auto-contestation plutôt que la performance brute. `JudyAI WaveRider` (déjà connu du 24/08) confirme que "l'honnêteté méthodologique comme argument central" n'est pas un angle inédit dans ce type de hackathon, mais valide sa stratégie une fois au design (walk-forward sur 8 fenêtres), pas à chaque décision — même distinction que ci-dessus.
+
+**Corrigé/ajouté** : nouvelle sous-section dans `README.md` ("Where this sits in the existing literature — not invented from nothing"), qui cite les trois techniques ci-dessus, dit honnêtement ce qui est repris et ce qui ne l'est pas, et formule l'argument du "à chaque décision, pas une fois" — vérifié en rendant le Markdown (pas juste relu) après l'édition, aucun titre cassé. Ajout d'une ligne courte dans les "Notes de tournage" de `Video_Script.md` pour que Spap ait la réponse prête en Q&A sans l'ajouter au script minuté lui-même.
+
+---
+
+## 🔴 25/08 (Cowork) — cherche encore : `submission/Hindsight_Alpha_Deck.pptx` n'avait jamais été relu cette session, et il mentait sur le point le plus important du projet
+
+*Quatrième "cherche encore" de la soirée. Le write-up, le README et le script vidéo avaient tous déjà reçu les chiffres corrigés (univers SPY/GLD/XLK/XLV, leak XLK confirmé) lors de passes précédentes — mais personne n'avait pensé à relire le deck de slides lui-même. Trouvé via `markitdown submission/Hindsight_Alpha_Deck.pptx`, texte de tous les slides d'un coup.*
+
+**Le plus grave, de loin** : le slide 8 ("HONEST RESULTS — NOT A HEADLINE NUMBER") affichait encore **"0 leaks"** comme statistique vedette — alors que c'est désormais l'argument central du projet, répété partout ailleurs, que `hindsight_guard` A détecté un vrai désaccord sur XLK (gagnant plein historique = 90j, gagnant in-sample = 10j) et le refuse en live à chaque run. Un juge qui aurait comparé le deck au write-up ou à la vidéo aurait vu une contradiction directe sur le point que ce projet existe pour prouver.
+
+**Autres chiffres périmés trouvés sur le même slide** : "53–83%" → chiffre réel actuel 68,5–82,6% (concentration du gain sur les 5 meilleurs jours) ; "43–54%" → 45,1–57,1% (taux de succès) ; "~110 trades" → en réalité 52 à 102 trades selon le symbole ; la légende affirmait "all three symbols tested (SPY, QQQ, IWM)" — ancien univers abandonné, remplacé depuis par SPY/GLD/XLK/XLV. Le graphique natif (`chart1.xml` + son classeur Excel intégré) avait aussi une valeur légèrement périmée pour la fenêtre 10j de SPY (0,1071 vs 0,108 actuel dans `BACKTEST_RESULTS.md` — petit écart de précision entre deux runs de backtest, pas un changement d'univers). Slide 3 : nombre d'équipes inscrites encore à 442, mis à jour à 546 (dernier chiffre vérifié ce soir). Slides 6/7 (garde-fous de risque : 1%/3%/1,5%/3%/4 positions/3 pertes consécutives/30e percentile) recroisés contre les constantes réelles de `risk_gates.py`/`vol_strategy.py` — toujours exacts, rien à corriger là.
+
+**Corrigé** : 7 remplacements de texte exact-match (vérifiés uniques avant chaque remplacement) sur `slide8.xml`, dont la phrase "0 leaks" → "1 leak caught" avec la vraie explication XLK ; la légende du graphique recadrée pour ne parler que de SPY plutôt que de prétendre à tort une uniformité sur 3 symboles ; `chart1.xml` ET son classeur Excel intégré (`ppt/embeddings/Microsoft_Excel_Worksheet1.xlsx`) patchés en cohérence (0,1071 → 0,108) pour que le graphique affiché et sa source "Edit Data" restent synchronisés ; `slide3.xml` mis à jour (442 → 546). Décision prise consciemment : ne pas reconstruire le graphique pour montrer les 4 symboles actuels (SPY/GLD/XLK/XLV) plutôt que SPY seul — gardé comme illustration ciblée SPY avec une légende honnêtement recadrée, compromis temps/risque plutôt qu'un vrai manque.
+
+**Vérifié par le rendu, pas juste par le texte XML** : `validate.py --original` propre, conversion PDF + rasterisation des slides 3 et 8, inspection visuelle des deux images — aucun débordement de texte malgré des chaînes plus longues ("68,5–82,6%" vs "53–83%", la nouvelle phrase XLK nettement plus longue que l'originale), aucun chevauchement, mise en page intacte. `markitdown` relancé sur le fichier final : plus aucune trace de "442", "53–83", "43–54", "0 leaks", ou "SPY, QQQ, IWM" ; "546", "68.5–82.6%", "45.1–57.1%", "1 leak caught" et la phrase XLK bien présents.
+
+`submission/Hindsight_Alpha_Deck.pptx` devient donc un nouveau fichier modifié dans `git status` — à ajouter à la liste de `BRIEF_COMMIT_INDICATEUR_SANTE_ET_WRITEUP.md`, qui n'a toujours pas été traité par une session terminal (`origin/main` toujours à `0fe900f` au dernier contrôle).
+
+---
+
+## 🟡 25/08 (Cowork) — cinquième "cherche encore" de la soirée : rien de nouveau, sweep systématique du même motif d'erreur sur tout le dépôt
+
+*Après avoir trouvé le même genre de staleness deux fois de suite (write-up/README/vidéo, puis le deck), plutôt que de deviner un prochain fichier au hasard, recherche systématique (`grep`) des mêmes motifs périmés exacts — "442", "0 leaks", "53–83", "43–54", "~110 trades", "SPY, QQQ, IWM" — sur TOUT le dépôt, pas juste les livrables déjà connus.*
+
+**Résultat honnête : aucune occurrence vivante de plus.** Les seuls résultats trouvés sont dans `PLAN_SPRINT.md` lui-même (journal historique daté, où l'ancien chiffre EST le sujet de l'entrée) et dans des `BRIEF_*.md` déjà traités/archivés (contexte historique légitime, pas une affirmation "en direct"). `agent.py:52` mentionne encore "SPY, QQQ, IWM" mais c'est volontaire — déjà noté le 24/08 comme référence à l'ANCIEN univers pour expliquer pourquoi il ne convenait pas au multi-positions.
+
+**Trois vérifications ciblées en plus, pour être sûr** :
+- `submission/Hindsight_Alpha_Writeup.docx` — jamais relu par `markitdown` cette session (le paquet `markitdown[docx]` n'était pas installé dans ce bac à sable ; installé et relancé pour de vrai, pas supposé propre). Texte extrait entièrement vérifié : univers SPY/GLD/XLK/XLV correct, 68,5–82,6%/45,1–57,1%/52–102 trades tous exacts, XLK explicitement documenté comme refusé par `hindsight_guard` — cohérent avec tout le reste. Aucune mention de "442"/"0 leaks" (le docx ne cite même pas de chiffre d'équipes inscrites, donc pas de risque de péremption sur ce point-là).
+- `SOCIAL_POSTS_DRAFT.md` — jamais relu cette session. Tous les chiffres concrets (P&L, symbole tradé, nombre de refus) sont volontairement des `[placeholders]` à remplir pendant la vraie semaine de trading, pas des valeurs codées en dur — donc structurellement à l'abri de la péremption trouvée ailleurs. Rien à corriger.
+- `.gitignore` — diff relu contre `origin/main` : un seul ajout (`monitor_last_run.json`), cohérent avec le correctif de bannière de santé déjà documenté plus haut. Rien de nouveau.
+
+Pas de bug, pas de correctif cette fois — juste la confirmation, par une recherche exhaustive plutôt qu'une supposition, que la même famille d'erreur ne traîne pas ailleurs.
+
+---
+
+## 🟢 25/08 (Cowork) — Spap a remarqué qu'aucun garde-fou ne tournait sur ce projet : `garde_fou.py` posé, avec le skill `garde-fou-generique`
+
+*hindsight-alpha n'a jamais eu son propre `garde_fou.py`, contrairement à SNIPER/JEU BLOCKCHAIN/OUTILS_CONTROLE_GARDE_FOU. Construit volontairement PETIT (méthode du skill : un contrôle naît d'une erreur réelle déjà commise, jamais par anticipation), avec 4 contrôles :*
+
+1. **Journal** (forme minimale recommandée par le skill) : `PLAN_SPRINT.md` existe, aucune section datée dans le futur.
+2. **`.env.hackathon` scellé** : jamais suivi par git, toujours couvert par `.gitignore` — née de la contrainte répétée des dizaines de fois cette session ("intouchable avant le 28/08"), équivalent d'un fichier `*SCELLE*.md` chez SNIPER.
+3. **Refus live-trading toujours actif dans `config.py`** — vérifie mécaniquement une affirmation du write-up ("hard-enforced in config.py"), pas juste supposée vraie.
+4. **Chiffres périmés** : liste noire des chaînes exactes déjà trouvées fausses dans le deck ce soir (442, "0 leaks", 53–83%, 43–54%, ~110 trades, ancien univers SPY/QQQ/IWM), recherchées dans README.md, `submission/Video_Script.md`, le docx et le pptx (extraction XML brute, bibliothèque standard uniquement — pas de dépendance externe, même philosophie que `hindsight_guard.py`).
+
+**Testé pour de vrai, pas supposé propre — et ça a immédiatement trouvé un vrai bug dans le script lui-même** : le tout premier run a bloqué à tort sur slide 5 du deck, qui affiche honnêtement "PREVIOUS UNIVERSE: SPY, QQQ, IWM" à côté de "NOW: SPY, GLD, XLK, XLV" — un contexte légitime, pas une erreur. Même piège que "PERIME vs PERIMETRE" chez SNIPER. **Corrigé dans la minute** : chaque motif de la liste noire porte désormais une exemption de contexte optionnelle (regex cherchée dans les ~40 caractères précédents). Deuxième bug trouvé au même moment, plus subtil : l'alerte non-bloquante sur le nombre d'équipes (`\b\d{2,4}\s*teams\b`) ne se déclenchait jamais sur le pptx réel, parce que l'extraction brute des runs XML concatène le texte SANS espace entre les cases ("546teams" collé) — aucune frontière `\b` entre un chiffre et le mot précédent tous deux collés à un autre mot. Corrigé avec `(?<!\d)` à la place d'un `\b` strict. Un témoin synthétique confirme que le contrôle attrape encore un vrai cas après le correctif.
+
+**État actuel, vérifié sur le vrai dépôt** : verdict 🟡 — une seule alerte non bloquante (le deck cite bien "546 teams", rappel qu'il faudra revérifier ce chiffre à la main avant la soumission finale, ce script ne peut pas savoir s'il a encore bougé). Aucun blocage.
+
+**`CLAUDE.md` créé** (n'existait pas) — règle non négociable du garde-fou (on corrige le dossier, jamais le script) + rappel condensé des contraintes non négociables du sprint (compte hackathon, live trading, seuils de risque, stratégie live, force-push, réseaux sociaux) déjà répétées des dizaines de fois dans ce fichier mais jamais centralisées ailleurs.
+
+`garde_fou.py` et `CLAUDE.md` sont deux nouveaux fichiers untracked — à ajouter au prochain commit terminal.
+
+---
+
+## 🟢 25/08 (Cowork) — Spap : « garde en mémoire qu'à chaque nouveau projet il faut un garde-fou » + amélioration comparée contre le modèle mature d'OUTILS_CONTROLE_GARDE_FOU
+
+**Mémoire mise à jour, pas juste dans ce fichier** : le skill `garde-fou-generique` (celui qui pose un garde-fou dans un nouveau projet) a été réécrit via `save_skill` pour devenir PROACTIF — il se déclenchera désormais dès qu'un nouveau dossier de projet prend forme, sans attendre que Spap le demande explicitement. La description du skill cite littéralement le retard pris sur hindsight-alpha (plusieurs "cherche encore" à répétition pour rattraper des chiffres périmés qu'un garde-fou aurait attrapés du premier coup) comme leçon.
+
+**Comparaison demandée contre le garde-fou mature d'OUTILS_CONTROLE_GARDE_FOU (1131 lignes, 22 contrôles)** — ce qui manquait au nôtre (4 contrôles, posé il y a quelques minutes) :
+1. **Fichier scellé vérifié par hash, pas juste par git** — le nôtre ne vérifiait que "pas suivi par git" pour `.env.hackathon`, ce qui protège contre une fuite poussée mais rien contre une modification purement locale. `verifier_scelles.py` chez SNIPER hash le contenu. **Corrigé** : nouveau registre local `.garde_fou_scelles.json` (gitignored — ajouté à `.gitignore`), empreinte SHA-256 enregistrée à la première lecture, comparée ensuite ; tout changement bloque avec message explicite.
+2. **Rappel "même vert, ceci n'est pas une preuve"** affiché à chaque run — présent chez SNIPER, absent du nôtre. **Ajouté**, adapté à l'échelle réelle de notre script (4 contrôles, pas 22).
+3. Non ajoutés, délibérément, et pourquoi : l'escalade à 48h avec registre persistant des alertes (utile si des alertes traînent longtemps sans être vues, mais notre garde-fou se relance à la demande dans une session active, le risque d'alerte qui pourrit en silence est bien moindre qu'avec les rythmes de SNIPER) ; l'auto-test par mutation intégré au script (fait manuellement pendant la construction, pas automatisé — pourrait être ajouté si un futur contrôle s'avère fragile) ; les ~18 sous-contrôles spécifiques au sujet de SNIPER (jugement, propositions, statuts périmés...) qui n'ont pas d'équivalent dans hindsight-alpha aujourd'hui, exactement comme le skill le recommande ("ne pas importer aveuglément").
+
+**Testé pour de vrai avant de déclarer fini, comme d'habitude** : témoin sur un dossier temporaire — première lecture du fichier scellé enregistre l'empreinte sans bloquer (🟡, "première lecture") ; une deuxième lecture sans changement reste silencieuse ; une modification simulée du fichier scellé bloque bien (🔴, message explicite). `.garde_fou_scelles.json` confirmé ignoré par git (`git check-ignore -v`).
+
+**État réel du dépôt après ces ajouts** : verdict 🟡 inchangé (toujours la seule alerte sur le nombre d'équipes du deck), plus l'empreinte de `.env.hackathon` maintenant enregistrée pour de bon.
+
+---
+
+## 🟢 25/08 (Cowork) — Spap : « compare aux bons garde-fous déjà créés sur GitHub » : recherche externe réelle, deux vrais projets open source comparés, deux ajouts, un bug trouvé et corrigé dans le hook lui-même
+
+*Clarifié avec Spap : les garde-fous SNIPER/JEU BLOCKCHAIN/OUTILS_CONTROLE_GARDE_FOU ne sont PAS sur GitHub (vérifié : aucun n'a de `.git`) — la demande portait sur de vrais projets publics. Recherche web faite, pas supposée.*
+
+**Trois projets réels trouvés et comparés** :
+- **gitleaks** (27 700+ étoiles, MIT) — le scanner de secrets de référence. Scanne l'**historique complet** du dépôt, pas juste son état actuel.
+- **pre-commit** (framework standard pour wirer des hooks git) et **danger-js** (~5 500 étoiles) — codifient des règles propres à une équipe, tournent automatiquement à chaque commit/PR, pas sur demande.
+- **doc-drift / DriftGuard** (détection de dérive documentaire en CI) — régénère les chiffres depuis la source et compare, plutôt que de connaître à l'avance les chaînes déjà fausses.
+
+**Deux gaps corrigés ce soir** :
+1. Notre contrôle `.env.hackathon` ne regardait que `git ls-files` (l'état ACTUEL de l'index) — un fichier ajouté par erreur puis retiré avec `git rm --cached` disparaît de cette liste mais reste dans l'historique, récupérable par quiconque clone. **Ajouté** : `git log --all --full-history -- .env.hackathon`, bloque si le fichier a jamais existé dans un commit, même ancien.
+2. Le vrai trou le plus profond n'était pas un contrôle manquant : rien ne forçait `garde_fou.py` à tourner. **Ajouté** : `githooks/pre-commit`, un hook versionné (activable via `git config core.hooksPath githooks`, documenté dans `CLAUDE.md`) qui relance `garde_fou.py` à chaque commit et refuse si 🔴.
+
+**Bug trouvé en testant le hook pour de vrai, corrigé dans la minute** : `set -e` en tête du script tuait le hook dès que `python3 garde_fou.py` sortait en erreur — AVANT que la ligne `code=$?` ne s'exécute. Le commit était bien bloqué (par accident, via le code de sortie brut du sous-processus), mais le message personnalisé "COMMIT REFUSÉ..." ne s'affichait jamais. Retiré `set -e`, témoin relancé : message affiché correctement.
+
+**Un troisième gap identifié, PAS corrigé ce soir, délibérément** : le pattern doc-drift (régénérer les chiffres sources et comparer) serait strictement plus robuste que notre liste noire `MOTIFS_PERIMES` actuelle — la liste noire ne rattrape que la RÉCIDIVE d'une erreur déjà vue, pas une NOUVELLE staleness jamais rencontrée. Non implémenté ce soir : demanderait de définir mécaniquement "la source de vérité" pour chaque chiffre cité (BACKTEST_RESULTS.md pour les stats, une vraie requête lablab.ai pour le nombre d'équipes) et un vrai régénérateur — trop de travail pour la fin de cette session, mais c'est la prochaine amélioration la plus honnête à faire, notée ici pour ne pas se perdre.
+
+**Testé pour de vrai, comme toujours** : témoin sur un dépôt git jetable — un commit avec un dossier rouge est bien refusé (`your current branch does not have any commits yet` confirmé), un commit propre passe. Vérifié sur le vrai dépôt : `.env.hackathon` absent de tout l'historique git réel (silence confirmé), verdict 🟡 inchangé.
+
+---
+
+## 🟢 25/08 (Cowork) — Spap : « fait le travail jusqu'à la fin » : la source de vérité mécanique (contrôle 5) implémentée, testée, trois bugs trouvés et corrigés en la testant
+
+**Ce que le contrôle 4 (liste noire) ne pouvait structurellement pas faire** : rattraper une staleness qu'on n'a encore JAMAIS vue — seulement la récidive d'une erreur déjà connue. Le contrôle 5 comble ça pour les 4 catégories de chiffres qui ont une vraie source mécanique dans ce dépôt :
+
+1. **Plages taux de succès / concentration / nombre de trades** — calculées à l'instant depuis `BACKTEST_RESULTS.md` : pour chaque symbole "propre" (non fuité selon le verdict `hindsight_guard` du fichier), on prend sa fenêtre "vettée" (le gagnant plein historique) et on lit son taux de succès, sa concentration et son nombre de trades À CETTE fenêtre précise — pas la meilleure ligne du tableau, la ligne que l'agent traderait réellement aujourd'hui. Min/max sur les symboles propres → la plage attendue.
+2. **Nombre de leaks** — compté directement dans le même fichier.
+3. **Univers actuel** — lu depuis `DEFAULT_UNIVERSE` dans `agent.py`, pas recopié à la main.
+4. **Seuils de risque** — extraits de `risk_gates.py`/`vol_strategy.py` là où le nom de la constante est cité entre backticks juste avant le chiffre.
+5. **Sharpe vetté** — comparé à la liste des vraies valeurs dans `STRATEGY_COMPARISON.md`.
+
+Toutes ces valeurs source sont recalculées À CHAQUE run, jamais mémorisées — si `BACKTEST_RESULTS.md` change demain (nouveau backtest), le contrôle change de cible tout seul, sans qu'on ait besoin d'éditer `garde_fou.py`.
+
+**Trois bugs trouvés en le testant pour de vrai contre les 4 vrais livrables, tous corrigés dans la foulée** :
+1. Une fenêtre de proximité de 40 caractères après `` `MAX_OPEN_POSITIONS` `` attrapait le "1" d'une phrase suivante sans rapport ("...positions (`MAX_OPEN_POSITIONS`), a 1%-of-equity per-trade cap...") et le comparait à tort à cette constante (qui vaut 4). Resserré : le chiffre doit suivre IMMÉDIATEMENT le nom (virgule ou parenthèse), pas n'importe où dans une fenêtre large.
+2. Un `elif` sur une seule fenêtre "texte avant le nombre" faisait retomber une plage de taux de succès déjà validée sur le contrôle concentration, parce que la phrase réelle mentionne les deux stats à la fois dans un rayon de 80 caractères. Corrigé en prenant l'ancre la plus proche, pas la première trouvée.
+3. Plus subtil, propre au pptx : sa structure est "chiffre d'abord, légende ensuite" dans les encarts (contrairement au README/docx, en prose, légende avant le chiffre) — mon fix n°2 ne regardait que le texte AVANT le nombre, donc ratait "45.1–57.1%win rate on..." où l'ancre suit le nombre. Corrigé en cherchant des deux côtés (avant ET après), distance minimale l'emporte.
+4. Un faux positif à part, pas un bug de logique mais de jugement : README dit délibérément "~50-100 trades" (approximation arrondie, marquée par le "~") — bloquer ça punirait une honnêteté volontaire. Exemption ajoutée pour "~"/"environ"/"about"/"roughly" juste avant une plage.
+
+**Testé dans les deux sens, comme toujours** : un témoin avec des chiffres délibérément faux dans les 7 catégories (taux de succès, concentration, trades, leaks, univers, seuil de risque, Sharpe) — tout bloque, avec le bon message et le bon chiffre attendu à chaque fois. Le même témoin avec les chiffres corrects — verdict 🟢 propre. Revérifié sur le vrai dépôt après les 3 correctifs : verdict 🟡 inchangé (toujours la seule alerte sur le nombre d'équipes, qui reste — honnêtement — hors de portée de ce contrôle : aucune source mécanique possible pour un chiffre qui vit sur lablab.ai).
+
+`garde_fou.py` compte maintenant 5 contrôles, pas 4 — mis à jour partout où ce chiffre était cité (le rappel de fin de script inclus).
+
+---
+
+## 🟢 25/08 (Cowork) — « cherche encore sur GitHub » : le vrai trou restant était la couche CI, pas un 6e contrôle de contenu
+
+**Deux projets réels trouvés, un adopté, un délibérément pas** :
+
+- **mutmut** (`boxed/mutmut`, 1,4k étoiles, actif — dernière mise à jour le 09/08/2026) : mutation testing pour Python, automatise exactement ce que j'ai fait à la main ce soir (fabriquer un cas connu-mauvais et vérifier qu'il est attrapé). **Pas adopté** : SNIPER fait déjà ça pour certains de ses contrôles ("auto-testé par mutation à chaque lancement"), déjà noté comme piste dans une passe précédente de ce soir — pas une découverte nouvelle, juste reconfirmée.
+- **semgrep** (15 555 étoiles, actif) : pattern-matching structurel pour du code, alternative réelle aux regex fragiles qui ont produit 3 bugs ce soir dans le contrôle 5. **Délibérément pas adopté** : `garde_fou.py` et `hindsight_guard.py` partagent la même philosophie affichée noir sur blanc ("Standard library only") — ajouter une dépendance externe pour un script de cette taille contredirait un choix déjà écrit, pas une amélioration gratuite. Noté ici au cas où le script grossirait assez pour que le compromis change.
+
+**Le vrai trou trouvé, confirmé par la propre documentation de gitleaks** : un "programme de scan en couches" cite explicitement pre-commit LOCAL **et** CI comme les deux couches, jamais l'une sans l'autre. Notre hook (`githooks/pre-commit`, ajouté plus tôt ce soir) a deux angles morts documentés : il ne protège que les machines où quelqu'un a pensé à l'activer, et `git commit --no-verify` le contourne par construction. Aucune des deux limites n'est un défaut du hook — ce sont des trous STRUCTURELS qu'un hook local ne peut, par nature, jamais combler seul.
+
+**Ajouté** : `.github/workflows/garde-fou.yml` — lance `python3 garde_fou.py` sur GitHub même à chaque push/PR vers `main`. `fetch-depth: 0` explicitement nécessaire (pas le défaut) : le contrôle 2 (`.env.hackathon` scellé) lit l'historique git complet, et un clone superficiel l'aurait rendu aveugle sans le signaler.
+
+**Testé pour de vrai** : YAML validé (`pyyaml`, parse propre). Simulé un vrai clone frais (`git clone` du dépôt local, pas juste `cp`) pour reproduire ce que ferait `actions/checkout` — a immédiatement révélé quelque chose d'utile plutôt qu'un bug : le clone reflète l'état COMMITÉ, qui a encore l'ancien "442" (le correctif du deck n'est encore que dans l'arbre de travail, jamais poussé) — verdict 🔴 dans le clone. **Ce n'est pas un défaut** : c'est la CI qui fait exactement son travail, elle aurait bloqué un push réel tant que les correctifs en attente ne sont pas commités. Confirme au passage, une fois de plus, que `garde_fou.py`, `CLAUDE.md`, `githooks/` et maintenant `.github/workflows/garde-fou.yml` doivent tous partir dans le même commit terminal.
+
+---
+
+## 🟢 25/08 (Cowork) — un 6e contrôle né d'un quasi-incident réel de ce soir, pas d'une anticipation
+
+**Ce qui s'est passé** : Spap a demandé d'installer un dépôt GitHub externe, `affaan-m/ecc` — un "harnais d'agent" qui prétend "212K+ étoiles, le toolkit agent le plus starré de GitHub" et qui modifie explicitement les hooks/rules/conventions MCP de plusieurs agents de code (Claude Code, Codex, Cursor, Gemini...). Vérifications faites avant toute décision : le `package.json` réel (105 Ko de README, lui-même un signal) liste des centaines de skills et un script `postinstall`-style qui mentionne déjà un "sponsor compute" et une commande soumettant une "RFQ authentifiée live" — pas juste un kit de skills passif. Le chiffre d'étoiles n'a pas pu être confirmé via l'API GitHub (réponse vide au moment du test). **Refusé** : télécharger/exécuter depuis une source non vérifiée est une règle de cet environnement qui ne se contourne pas, même sur demande explicite.
+
+**Ce que ça révèle pour CE dépôt, concrètement** : rien dans `garde_fou.py` n'aurait signalé l'ajout d'une dépendance si la demande avait visé `requirements.txt` directement (un `pip install` planqué dans un futur commit) plutôt qu'une installation manuelle passée par ce chat. `requirements.txt` ne contient qu'une ligne (`python-dotenv>=1.0.0`) depuis le commit initial — jamais surveillé jusqu'ici.
+
+**Ajouté, contrôle 6 (`controle_dependances_scellees`)** : même mécanique de scellé que le contrôle 2 (hash SHA-256, registre `.garde_fou_scelles.json` déjà existant, réutilisé) — mais volontairement **non bloquant** : une dépendance légitime est censée changer de temps en temps, contrairement à `.env.hackathon`. Alerte 🟡 une seule fois au moment du changement (le registre se re-scelle tout seul juste après l'avoir signalé), pour forcer une relecture consciente de la provenance (nom exact sur PyPI, pas de typosquat, mainteneur actif) plutôt qu'un ajout qui passe inaperçu — jamais un nag permanent.
+
+**Testé pour de vrai, les 4 branches, dans un dossier jetable (`/tmp/temoin_deps`)** : première lecture → alerte 🆕 + empreinte enregistrée ; relance sans changement → silence ; `requirements.txt` modifié → alerte "A CHANGÉ" avec les deux empreintes tronquées, ET re-scellé dans le même passage ; relance après re-scellement → silence à nouveau. Revérifié sur le vrai dépôt : verdict 🟡 inchangé (toujours l'alerte sur le nombre d'équipes, plus maintenant la première empreinte de `requirements.txt`), rien de cassé.
+
+`garde_fou.py` compte maintenant 6 contrôles — mis à jour partout où ce chiffre était cité (rappel de fin de script inclus). **Reste à faire en terminal** : ce fichier fait partie du même commit en attente que `garde_fou.py`, `CLAUDE.md`, `githooks/` et `.github/workflows/garde-fou.yml` — rien de nouveau côté périmètre du brief.
+
+**Correction publique, pas silencieuse** : Spap a redemandé « cherche encore » sur `affaan-m/ecc` spécifiquement pour vérifier le chiffre d'étoiles laissé "invérifiable" ci-dessus. `api.github.com` restait vide depuis cet environnement (bloqué ou mal formé, cause non identifiée), mais un miroir tiers indépendant et légitime de l'API GitHub (`ungh.cc`, projet unjs, sans lien avec l'auteur d'ecc) a répondu avec des données structurées réelles : **242 948 étoiles, 36 767 forks, dernier push il y a quelques heures (25/08 02:12 UTC)** — donc le chiffre "212K+" n'était pas gonflé, il est maintenant dépassé par la croissance organique. Confirmé aussi côté npm : **4 788 téléchargements/semaine, 16 790/mois** (API officielle `api.npmjs.org`), cohérent avec un usage réel, pas un chiffre de façade. **Le doute sur la popularité est levé — c'est un vrai projet, massivement utilisé, activement maintenu.**
+
+Ce que ça ne change PAS : la décision de ne pas l'installer depuis Cowork tient toujours, mais pour une raison différente et plus honnête que "signal de crédibilité gonflée" (qui était une inférence, pas une observation — corrigée ici). La vraie raison, indépendante de sa popularité : il modifie explicitement les hooks/rules/conventions MCP de plusieurs harnais d'agent (Claude Code inclus) à travers des centaines de fichiers — une popularité réelle ne réduit pas la surface de confiance que ça engage, et une revue manuelle complète avant install n'est pas faisable en une passe, encore moins en plein sprint hackathon avec `.env.hackathon` en jeu. Root cause du "empty" retourné par `api.github.com` non identifiée — noté sans être creusé davantage, hors périmètre de ce projet.
+
+---
+
+## 🟢 25/08 (Cowork) — première adaptation réelle des références externes : `githooks/pre-push` + « vérifier avant d'affirmer »
+
+Suite de la tâche #94 (« adapter gstack/superpowers/plugins Anthropic à chaque projet, jamais un import en masse »). Premier projet traité : hindsight-alpha lui-même.
+
+**Ce qui a été lu avant d'adapter quoi que ce soit** : `gstack/guard/SKILL.md` et `gstack/investigate/SKILL.md` en entier — verdict honnête, ce ne sont PAS des fichiers portables. Chacun dépend d'une dizaine de binaires gstack propres (`gstack-config`, `gstack-telemetry-log`, `gstack-brain-sync`, `gstack-slug`...), d'un état persistant (`~/.gstack/`), et d'une télémétrie/synchronisation vers un dépôt distant — tout l'inverse de la philosophie « standard library only » de ce projet. Copier ces fichiers tels quels dans `githooks/` n'aurait rien fait fonctionner. **Décision : extraire le PRINCIPE, jamais le fichier.**
+
+**1. `githooks/pre-push` (nouveau)** — principe emprunté à `/careful` de gstack (avertir/bloquer avant une commande destructrice), réimplémenté en ~30 lignes de `sh` pur, zéro dépendance externe. Détecte un push non-fast-forward en comparant si le SHA distant est un ancêtre du SHA local (`git merge-base --is-ancestor`) — couvre `--force` ET `--force-with-lease` sans avoir à lire les flags (que les hooks pre-push ne voient de toute façon pas). Raison précise d'exister : « jamais de `git push --force` » est répété dans CLAUDE.md et ce fichier depuis le début du sprint, mais rien ne le vérifiait mécaniquement — même trou que `.env.hackathon` et `ALPACA_LIVE_TRADE` avant que `garde_fou.py` existe.
+
+**Testé pour de vrai, 7 scénarios, sur un dépôt jetable (`/tmp/temoin_push`, remote bare + local avec le hook installé)** :
+1. Push normal (nouvelle branche) → passe.
+2. Deuxième push fast-forward → passe.
+3. Push non-FF sans `--force` → refusé par git lui-même (comportement normal, rien à voir avec notre hook).
+4. Push `--force` → **bloqué par notre hook**, message clair avec les deux SHA et le rappel de la règle CLAUDE.md.
+5. Push `--force --no-verify` → contourne le hook (échappatoire documentée, cohérente avec `pre-commit`).
+6. Nouvelle branche → passe.
+7. Suppression de branche distante → passe (pas confondu avec un force-push).
+Bug de méthode trouvé en testant le témoin lui-même (pas le hook) : `set -e` dans le SCRIPT DE TEST arrêtait la suite après le test 4 qui sort en erreur volontairement — même piège que celui déjà documenté dans `githooks/pre-commit`, cette fois côté témoin. Retiré, suite rejouée, tout confirmé.
+
+**2. Section « Vérifier avant d'affirmer » ajoutée à CLAUDE.md** — principe emprunté à `verification-before-completion` (skill `superpowers`, obra/superpowers). Pas un nouvel outil : une règle déjà PRATIQUÉE tout au long de ce fichier (chaque correctif de ce journal est démontré par un témoin avant d'être déclaré bon), simplement jamais écrite noir sur blanc jusqu'ici. Adaptée en une version courte, en français, dans le style du reste du fichier — pas copiée-collée depuis superpowers.
+
+**Reste hors périmètre ce soir, noté pour la suite** : le pattern `/code-review` officiel Anthropic (4 agents parallèles : 2× conformité CLAUDE.md, 1× détecteur de bugs, 1× historien git blame, score de confiance ≥80 avant de remonter un point) serait directement applicable au gros lot de fichiers en attente de commit (`garde_fou.py`, `CLAUDE.md`, `githooks/`, workflow CI...) — pas lancé ce soir, à proposer avant le prochain commit terminal si Spap veut une revue croisée avant de pousser.
+
+**Reste à faire en terminal** : `githooks/pre-push` et la mise à jour de `CLAUDE.md` rejoignent le même lot en attente de commit que le reste.
+
+---
+
+## 🟢 25/08 (Cowork) — la revue croisée `/code-review` proposée, lancée pour de vrai : deux vrais bugs trouvés, un avant qu'il parte en soumission
+
+Spap a dit « go » sur la proposition laissée en suspens. 4 agents lancés en parallèle sur le lot entier en attente de commit, chacun avec un mandat distinct (calqué sur le vrai plugin officiel Anthropic `plugins/code-review`, cloné en référence dans `CERVEAU/OUTILS_CONTROLE_GARDE_FOU/5_REFERENCES_EXTERNES/claude-code-plugins/`) : deux audits indépendants de conformité à CLAUDE.md, un scan de bugs concrets (avec exécution réelle du code, pas juste lecture — `py_compile`, `garde_fou.py` relancé pour de vrai, YAML parsé), et un audit croisé contre l'historique du projet (`PLAN_SPRINT.md` entier relu par l'agent, pour repérer une erreur de la même famille qu'une déjà corrigée).
+
+**Le vrai résultat, trouvé indépendamment par DEUX agents différents (bug scan ET audit historique), confiance 85 les deux fois** : le nouveau tableau "Backtest, at a glance" de `README.md` affichait **181.6%** pour la concentration de XLK, alors que XLK est jugé sur sa fenêtre **90 jours** (verdict `hindsight_guard` : fuite, gagnant plein historique = 90j) et que 181.6% est la concentration de sa fenêtre **10 jours** — la mauvaise fenêtre collée à la bonne ligne. Vérifié directement dans `BACKTEST_RESULTS.md` (`10d: 181.6% · 90d: 136.7%`) avant de corriger : le vrai chiffre pour la ligne XLK (fenêtre 90j, 76 trades, 36,8% de réussite — ces deux-là étaient corrects) est **136.7%**. Corrigé dans `README.md`.
+
+**Ce qui rend cette trouvaille plus intéressante qu'un simple chiffre faux** : l'agent d'audit historique a explicitement rapproché ça des TROIS bugs de proximité regex déjà trouvés et corrigés en construisant le contrôle 5 le même soir (mauvaise fenêtre associée au mauvais chiffre) — même famille d'erreur, récidive humaine cette fois, pas dans le code. Et surtout : **`garde_fou.py` ne pouvait structurellement pas l'attraper**. Le contrôle 5 (`controle_source_de_verite`) exclut par construction les symboles en fuite de ses plages mécaniques (`propres = {s: d for s, d in backtest.items() if not d["leaked"]}`) — XLK, le seul symbole en fuite, celui-là même que le projet met en avant comme sa meilleure démonstration, n'est validé par AUCUN contrôle mécanique aujourd'hui. Documenté en commentaire dans `garde_fou.py` (pas corrigé ce soir — construire un vrai vérificateur par-fenêtre-par-symbole pour les symboles en fuite est un vrai chantier, pas une ligne, et le tester correctement prendrait le temps que les 3 bugs du contrôle 5 ont déjà pris ce soir-là ; noté ici pour ne pas se perdre, pas oublié).
+
+**Deuxième trouvaille, confirmée indépendamment par les deux agents de conformité CLAUDE.md, confiance 80-85** : le commentaire de fin de `garde_fou.py` disait encore « seuls 4 contrôles existent aujourd'hui » alors que le code en compte 6 depuis les ajouts plus tôt ce soir — contradiction directe avec la ligne imprimée juste en dessous (« 6 formes d'erreur »). Corrigé, en profitant du même passage pour documenter l'angle mort XLK trouvé ci-dessus directement dans le commentaire.
+
+**Trois autres pistes remontées, notées mais pas toutes corrigées ce soir** :
+- `MOTIFS_PERIMES` (contrôle 4) matchait "442" en sous-chaîne, pas en nombre isolé — un futur "4420" quelconque aurait déclenché à tort (confiance 50, mine dormante jamais atteinte pour de vrai). **Corrigé** : même idiome `(?<!\d)...(?!\d)` que le contrôle du nombre d'équipes juste en dessous dans le même fichier. Témoin testé : "4420 participants" ne déclenche plus, "442 équipes" déclenche toujours.
+- `SEUILS_RISQUE` (contrôle 5) ne couvre que 7 des 8 constantes listées dans CLAUDE.md — `HEARTBEAT_SECONDS` (qui vit dans `monitor_exits.py`, pas `risk_gates.py`/`vol_strategy.py`) n'est jamais vérifié (confiance 70). **Pas corrigé ce soir** — noté, pas urgent (aucun livrable ne cite ce chiffre précis aujourd'hui).
+- `BRIEF_COMMIT_INDICATEUR_SANTE_ET_WRITEUP.md` avait un inventaire de fichiers périmé, sans `githooks/pre-push` ni le contrôle 6 (confiance 55). **Corrigé** : note "sixième fois" ajoutée.
+
+**Après tous ces correctifs, revérifié pour de vrai (pas supposé)** : `python3 -m py_compile garde_fou.py` propre, `python3 garde_fou.py` toujours 🟡, toujours la seule alerte sur le nombre d'équipes — aucun correctif n'a cassé quoi que ce soit d'autre.
+
+---
+
+## 🟢 25/08 (Cowork) — l'angle mort XLK comblé : contrôle 5 étendu aux tableaux symbole-par-symbole, fuite ou pas
+
+Suite immédiate de la revue croisée ci-dessus, sur demande de Spap (« continue »). L'angle mort documenté en commentaire (XLK non couvert par `propres`) est maintenant fermé — pas en construisant le vérificateur général par-fenêtre-pour-toute-prose (trop de risque de reproduire les 3 bugs de proximité regex du contrôle 5 original), mais avec une portée honnêtement plus étroite : les TABLEAUX markdown, la forme exacte où le vrai bug XLK est apparu.
+
+**`_lignes_tableau_symboles()`** repère un tableau par sa ligne d'en-tête (colonnes "win rate" et "concentration"/"best 5 days"/"gain from best"), saute la ligne de séparation markdown, puis lit chaque ligne de données : ticker en première colonne, valeur des colonnes win-rate et concentration. Câblé dans `controle_source_de_verite()` — pour CHAQUE symbole trouvé dans `BACKTEST_RESULTS.md` (via `backtest`, qui contient déjà tous les symboles, fuite ou pas — juste jamais utilisé pour les fuites jusqu'ici), compare directement contre SA fenêtre vettée à lui, pas contre une plage agrégée des seuls symboles propres.
+
+**Testé pour de vrai, 4 scénarios, contre le vrai `README.md`** :
+1. État réel actuel (déjà corrigé plus tôt) → verdict inchangé, 🟡, rien de nouveau ne bloque.
+2. XLK recassé à la main à 181.6% (l'erreur réelle trouvée) → **bloque**, message exact : "CONCENTRATION « 181.6% » pour XLK (tableau) ne correspond pas à sa fenêtre vettée (90j) — devrait être 136.7%."
+3. SPY (symbole propre, pas en fuite) cassé à 99.9% de taux de réussite → **bloque aussi**, confirme que les symboles propres restent couverts en plus des symboles en fuite, pas un remplacement du contrôle existant.
+4. Restauration du vrai contenu → 🟡 à nouveau, propre.
+
+Un fichier `README.md.bak` oublié par `sed` pendant le test 2 a été supprimé après coup (permission de suppression demandée sur le dossier hindsight-alpha, comme pour CERVEAU plus tôt ce soir — les deux dossiers connectés refusent la suppression directe sans cette étape).
+
+`garde_fou.py` reste à 6 contrôles nommés (celui-ci est une extension du contrôle 5, pas un 7e) — revérifié après coup : compile propre, verdict 🟡 inchangé sur le vrai dépôt.
+
+---
+
+## 🟢 25/08 (Cowork) — dernière piste de la revue croisée comblée : `HEARTBEAT_SECONDS` rejoint `SEUILS_RISQUE`
+
+Suite directe (« continue »). CLAUDE.md liste HUIT constantes non négociables ; `SEUILS_RISQUE` du contrôle 5 n'en couvrait que sept — `HEARTBEAT_SECONDS` manquait parce qu'elle vit dans `monitor_exits.py`, pas `risk_gates.py`/`vol_strategy.py` comme les sept autres. Trouvé en confiance 70 par la revue croisée, volontairement pas corrigé sur le coup ("pas urgent, aucun livrable ne la cite aujourd'hui") — comblé maintenant que le reste de la liste est traité.
+
+**Correctif d'une ligne** : `("HEARTBEAT_SECONDS", "monitor_exits.py")` ajouté à `SEUILS_RISQUE`. `_parse_seuils_risque()` ne faisait déjà aucune hypothèse sur le fichier source, donc rien d'autre à changer.
+
+**Testé pour de vrai, 3 temps, sur le vrai `README.md`** :
+1. État réel avant témoin → 🟡 inchangé, HEARTBEAT_SECONDS n'est cité nulle part aujourd'hui donc rien ne devait changer.
+2. Ligne témoin ajoutée avec la mauvaise valeur (`` `HEARTBEAT_SECONDS`, 900 ``, la vraie valeur étant 3600) → **bloque**, message exact : "cité comme 900 juste après le nom, mais vaut réellement 3600 dans monitor_exits.py."
+3. Même ligne avec la bonne valeur (3600) → passe, silence.
+Témoin nettoyé, `README.md` restauré, `.bak` supprimé (permission déjà accordée sur ce dossier plus tôt ce soir).
+
+**Les 4 pistes de la revue croisée à 4 agents sont maintenant toutes traitées** : XLK (structurel, comblé), commentaire "4 contrôles" (corrigé), motif "442" en sous-chaîne (corrigé), `HEARTBEAT_SECONDS` (comblé). Seule la note sur `BRIEF_COMMIT_INDICATEUR_SANTE_ET_WRITEUP.md` restait déjà réglée dans la même passe. Revérifié une dernière fois : `garde_fou.py` compile, tourne, verdict 🟡 inchangé.
+
+---
+
+## 🔴 26/08 (Cowork) — vetting des 4 derniers outils cités dans la deuxième vidéo TikTok (OmniRoute, Headroom, Claude Code Setup, Task Observer)
+
+Suite directe de la demande explicite « vérifie les 4 autres ». Même méthodologie que le premier lot de 7 : jamais le nombre d'étoiles seul, toujours une lecture de contenu (README/package.json) pour chercher le même type de signal qui avait fait tomber `claude-mem` (token crypto embarqué) — recoupé avec `ungh.cc` pour des données indépendantes de GitHub.
+
+**OmniRoute (`diegosouzapw/OmniRoute`) — REFUSÉ, ne pas installer.** 54 204 étoiles pour un dépôt créé le 13/02/2026 (~194 jours) = ~280 étoiles/jour soutenu sur 6 mois, un rythme extrême. Le README lui-même porte les signaux de growth-hacking déjà documentés par l'étude StarScout (CMU, 6M fausses étoiles recensées) : bandeau "⭐ Star the repo if...", liens WhatsApp/Telegram/Discord multiples, traduction en 34 langues pour un outil dev de niche. Plus grave que les étoiles : c'est une gateway qui route tout le trafic IA (Claude Code, Cursor, etc.) à travers un point central en agrégeant les "free tiers" de 43 fournisseurs, et le README admet lui-même que **15 de ces fournisseurs sont "ToS-flagged"** — l'outil encourage explicitement à contourner les CGU de tiers. Même famille de refus que `claude-mem` (contenu révèle le vrai problème, pas les étoiles).
+
+**Headroom — à surveiller, pas refusé net, mais pas installé tel quel non plus.** Deux entités, pas une usurpation : `headroomlabs-ai/headroom` et `chopratejas/headroom` sont le **même** dépôt (`ungh.cc` résout les deux identifiants vers le même repo — probablement un renommage d'org/utilisateur suivi par GitHub, pas un fork trompeur). 67 577 étoiles sur ~231 jours (~290/jour) — un rythme tout aussi extrême qu'OmniRoute en valeur absolue, mais **aucun signal de growth-hacking dans le contenu** : pas de bandeau "star me", pas de liens WhatsApp, présentation technique sobre, CI réelle (GitHub Actions + Codecov), publié sur PyPI/npm sous des noms cohérents, licence Apache 2.0, modèle HuggingFace public. Fonctionnellement plus risqué qu'OmniRoute sur un point (mode "proxy" qui intercepte tout le trafic API, y compris vers Anthropic, pour le compresser) mais tourne en local ("your data stays here") au lieu de router vers des fournisseurs externes. Rythme d'étoiles noté comme un signal à ne pas ignorer, sans preuve suffisante pour un refus net comme OmniRoute. `gglucass/headroom-desktop` (509 étoiles, app payante) est modeste et crédible, non revérifié en détail.
+
+**Claude Code Setup — fiable, déjà confirmé officiel.** `anthropics/claude-plugins-official`, listé sur `claude.com/plugins/claude-code-setup`. Aucune vérification supplémentaire nécessaire.
+
+**Task Observer (`rebelytics/one-skill-to-rule-them-all`) — le seul des 4 à considérer, en adaptation (jamais tel quel).** 2 019 étoiles sur ~192 jours (~10/jour) — rythme cohérent avec une adoption organique réelle, contraste net avec OmniRoute/Headroom. Auteur nommé et identifiable (Eoghan Henn, `rebelytics.com`, méthodologie publique "Augmented Expertise"), recommandations tierces vérifiables (comptes X/LinkedIn/Instagram nommés, pas anonymes), badge d'audit de sécurité tiers (oathe.ai). C'est un pur bundle de fichiers markdown (`SKILL.md` + `references/`), aucune exécution de code, aucun appel réseau documenté — écrit ses observations localement. Même s'il est vetted propre, la doctrine du soir reste "extraire le principe, jamais le fichier tel quel" : s'il est repris un jour, ce sera une version adaptée du principe (un skill qui observe les sessions et propose des améliorations de skills) dans `5_REFERENCES_EXTERNES/`, pas une installation brute — pas fait ce soir, aucune demande explicite de Spap en ce sens.
+
+**Verdict global communiqué à Spap** : n'installer aucun des 4 ce soir. OmniRoute refusé (CGU tiers contournées, signal d'étoiles gonflées). Headroom à surveiller (contenu propre mais rythme d'étoiles à ne pas ignorer). Claude Code Setup déjà fiable, rien à faire. Task Observer est le seul candidat plausible pour une adaptation future, sur demande explicite.
+
+---
+
+## 🟢 26/08 (session terminal) — l'indicateur de santé vérifié sur l'incident RÉEL
+
+**La bannière rend l'état attendu, et c'est la démonstration du correctif sur données vécues, pas sur un scénario inventé.**
+
+À l'instant du contrôle : `decision_log.jsonl` s'arrête sur une **erreur à 17:45:41 UTC** (la dernière panne DarkWake), tandis que `monitor_last_run.json` — la nouvelle source écrite à chaque run — dit **`checked` à 19:45:07 UTC, marché ouvert**. La bannière affiche **🟢 vert** : *« Exit monitor: last check 3h 3m ago, healthy »*.
+
+> **C'est exactement le bug corrigé** : sans `monitor_status`, la bannière serait restée sur « 🔴 11 consecutive failures » alors que le moniteur tourne sainement depuis deux heures — potentiellement toute la semaine jugée.
+
+Et le contrôle d'heures de marché fait son travail : il est 22:48 UTC, le marché a fermé à 20:00 UTC, **3 h sans contrôle ne déclenchent donc pas le jaune « stale »**.
+
+**Les deux autres bandeaux, confirmés visuellement** : 🛡️ *« Hindsight leaks caught so far (last 28 logged runs): 12 »*, et les refus XLK surlignés dans le tableau.
+
+⚠️ **Une erreur de lecture de ma part, notée pour la suite** : j'ai d'abord cru voir deux échecs récents à « 19:45 » et « 19:17 » dans le tableau. **Le dashboard affiche en heure LOCALE (CEST)** — c'était 17:45 et 17:17 UTC, les pannes déjà connues. Le log brut a tranché. *À se rappeler en lisant ce dashboard : le tableau est en heure locale, les logs en UTC.*
+
+### État du moniteur et de la position
+
+Sain depuis 17:55 UTC, contrôles réussis toutes les 15 min jusqu'à 19:45 UTC au moins, puis arrêt normal à la fermeture du marché. 🔴 **La position de test a nettement bougé : `SPY260831P00764000` à ~−23 % (−26,9 % sur la lecture la plus fraîche), contre +2,8 % hier.** Toujours dans la bande ±50 %, donc aucune sortie déclenchée — mais elle s'en rapproche, et c'est le moniteur qui la surveillera.
+
+### Ce que je n'ai PAS pu faire
+
+🟠 **La conversion PDF du write-up est impossible sur ce Mac : LibreOffice n'est pas installé.** J'ai vérifié le **contenu** du `.docx` à la place — `XLK` et `leak` présents, `0 leaks`, `442` et `QQQ` absents, univers `SPY, GLD, XLK, XLV` correct — mais **pas la pagination**. La vérification « tient sur une page » reste celle faite côté Cowork.
+
+### Contrôles de la séance
+
+`garde_fou.py` lancé en vrai depuis le terminal : **🟡, une seule alerte** (nombre d'équipes du deck), conforme. Hook activé (`core.hooksPath = githooks`), `pre-commit` et `pre-push` exécutables.
+
+**Vérification non demandée que j'ai faite quand même** : le deck passait de 273 Ko à 57 Ko (−79 %), ce qui pouvait signaler une perte d'images. **Vérifié : rien de perdu** — 11 slides des deux côtés, le seul « média » disparu est une entrée de dossier vide, et le texte a *augmenté* (8 269 → 8 390 caractères), « 0 leaks » et « 442 » bien disparus.

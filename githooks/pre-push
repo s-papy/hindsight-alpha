@@ -1,0 +1,45 @@
+#!/bin/sh
+# githooks/pre-push — hindsight-alpha
+#
+# AJOUTÉ le 25/08/2026, en adaptant (pas en copiant) le principe de /careful
+# de gstack (github.com/garrytan/gstack, cloné en référence dans
+# CERVEAU/OUTILS_CONTROLE_GARDE_FOU/5_REFERENCES_EXTERNES/gstack/) : avertir
+# avant une commande destructrice, ici un push non-fast-forward (ce qu'un
+# `--force` ou `--force-with-lease` produit).
+#
+# Pourquoi celui-là précisément : « Jamais de git push --force » est une
+# contrainte non négociable du projet, répétée littéralement dans CLAUDE.md
+# et PLAN_SPRINT.md tout au long du sprint — mais avant ce hook, RIEN ne la
+# faisait respecter mécaniquement. C'est exactement le même trou que
+# garde_fou.py comblait déjà pour .env.hackathon et pour ALPACA_LIVE_TRADE :
+# une règle écrite noir sur blanc, jamais vérifiée par du code.
+#
+# Détecte un push non-fast-forward SANS dépendre du texte de la commande
+# (les hooks git pre-push ne voient pas les flags `--force`) : compare
+# directement si le SHA local descend du SHA distant. Un `--force` et un
+# `--force-with-lease` produisent tous les deux ce même signal, donc les deux
+# sont couverts sans avoir à les distinguer.
+cd "$(git rev-parse --show-toplevel)" || exit 1
+
+zero="0000000000000000000000000000000000000000"
+refuse=0
+
+while read -r local_ref local_sha remote_ref remote_sha; do
+    [ -z "$local_sha" ] && continue
+    # Nouvelle branche distante (remote_sha tout à zéro) : rien à comparer, OK.
+    [ "$remote_sha" = "$zero" ] && continue
+    # Suppression de branche (local_sha tout à zéro) : pas un force-push, OK.
+    [ "$local_sha" = "$zero" ] && continue
+
+    if ! git merge-base --is-ancestor "$remote_sha" "$local_sha" 2>/dev/null; then
+        echo ""
+        echo "PUSH REFUSÉ par githooks/pre-push : $local_ref"
+        echo "  $remote_sha (distant) n'est pas un ancêtre de $local_sha (local)"
+        echo "  → ceci nécessite --force ou --force-with-lease pour passer."
+        echo "  Règle non négociable du projet (CLAUDE.md) : jamais de git push --force."
+        echo "  Si c'est vraiment volontaire et discuté avec Spap : git push --no-verify"
+        refuse=1
+    fi
+done
+
+exit $refuse

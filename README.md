@@ -6,6 +6,47 @@ Entry for the **Alpaca AI Trading Agents Hackathon** (lablab.ai, deadline
 An options-trading agent that refuses to trust its own parameter selection
 until it's checked for hindsight leakage.
 
+**Live dashboard: [s-papy.github.io/hindsight-alpha](https://s-papy.github.io/hindsight-alpha)** —
+every run, every refusal, every real order, updated as the week runs.
+
+### TL;DR
+
+*Added 25/08, "cherche encore" pass — the link above and this summary were
+both missing before, and a judge with 5 minutes is exactly who that hurts.*
+
+The agent sweeps 5 volatility-window candidates per symbol, scores each one
+twice — once on the full price history, once on only what would have been
+knowable "yesterday" — and **refuses to trade any symbol where the two
+scores disagree**, instead of quietly trusting whichever version looks best.
+On real historical bars (current universe SPY/GLD/XLK/XLV), that check finds
+a genuine disagreement on XLK and refuses it live, every run, while SPY/GLD/XLV
+pass clean. Backtest edge on those three is real but thin and concentrated
+(see the honest numbers in `BACKTEST_RESULTS.md`) — the interesting result of
+this project isn't the P&L, it's that the refusal mechanism actually catches
+a real leak instead of only a hypothetical one. Paper trading only, zero real
+funds at risk.
+
+## Backtest, at a glance
+
+*Full detail, every window tested, and the honesty caveats around
+"concentration above 100%" and proxy-payoff units: `BACKTEST_RESULTS.md`.
+This table exists so a judge doesn't have to open that file just to see the
+headline numbers.*
+
+| Symbol | Vetted window | `hindsight_guard` | Trades (of ~657 bars) | Win rate | Gain from best 5 days |
+|---|---|---|---|---|---|
+| SPY | 10d | ✅ clean | 102 | 45.1% | 82.6% |
+| GLD | 20d | ✅ clean | 56 | 57.1% | 68.5% |
+| XLV | 10d | ✅ clean | 52 | 50.0% | 78.2% |
+| XLK | 90d | 🛡️ **LEAK — refused live** | 76 (not traded) | 36.8% | 136.7% |
+
+A concentration share above 100% (XLK's 136.7%) isn't an error — it means
+that symbol's best 5 days earned more than its entire net result, i.e. every
+other trade day combined lost money; the long-optionality payoff is expected
+to concentrate on a handful of large moves. High concentration on the three
+clean symbols too (68.5–82.6%) means a positive result from ~50-100 trades
+doesn't yet distinguish real edge from luck.
+
 ## The problem this solves
 
 Most simple trading-signal agents pick a "best" parameter (a lookback
@@ -147,6 +188,37 @@ regression tests:
   self-resetting (a blocked agent can't produce the win that would clear
   it, which is the point — stop and let a human look, don't quietly retry).
 
+### Where this sits in the existing literature — not invented from nothing
+
+*Added 25/08, "cherche encore" pass, after Spap asked to check whether the
+central mechanism had prior art. It does, and it's worth citing honestly
+rather than presenting `hindsight_guard` as sprung from nowhere.*
+
+The full-window-vs-in-sample disagreement test is a small, live-decision
+version of a real family of techniques in quantitative finance aimed at the
+same failure — a "winning" parameter that only wins because the selection
+criterion secretly saw data it shouldn't have: **Probability of Backtest
+Overfitting** and **combinatorially symmetric cross-validation** (Bailey,
+Borwein, López de Prado & Zhu, 2015 — compare an in-sample winner against
+its out-of-sample rank across symmetric partitions), and **walk-forward
+optimization** (Pardo — re-validate that an optimal parameter stays optimal
+as the window rolls forward), with the *spirit* of the **Deflated Sharpe
+Ratio**'s "don't trust a Sharpe you haven't corrected for how many things
+you tried" (Bailey & López de Prado, 2014).
+
+**Said plainly, both what's borrowed and what's not**: `hindsight_guard`
+borrows the core idea (an in-sample/out-of-sample winner disagreement is
+evidence of overfitting) but skips the formal statistical machinery those
+methods use — no multiple-testing correction across the 5 candidate windows,
+no combinatorial partitions, no bootstrap. What it does differently from all
+of the above: those methods validate a strategy **once, at design time**,
+then deploy it. This agent re-runs the same disagreement test **before every
+single live decision**, with a live refusal if it fails that day — a
+parameter that passed yesterday can still be refused today. That's the
+actual differentiator to lead with if a judge who knows this literature asks
+"isn't this just walk-forward validation" — it's the same question, asked
+every trade, not once.
+
 ### Why HV rank instead of momentum
 
 The first version of this agent used a plain time-series-momentum signal
@@ -159,6 +231,16 @@ the "options trading agent" brief. Trade-off written down for the judges:
 it's realized-vol rank, not implied-vol rank, because Alpaca doesn't expose
 historical option IV to sweep over — documented explicitly in
 `vol_strategy.py` rather than glossed over.
+
+**Honest fact worth surfacing here rather than only in `STRATEGY_COMPARISON.md`**:
+on the same real bars, `momentum_strategy.py` (the strategy NOT actually
+traded live) passes `hindsight_guard` clean on **4 of 4** symbols, while the
+live strategy (`vol_strategy.py`) only passes on **3 of 4** — XLK leaks under
+HV-rank. The strategy kept for real trading is the one that fits the
+"options-native" brief better, not the one with the cleanest leak-check
+record; `compare_strategies.py` and `STRATEGY_COMPARISON.md` exist
+specifically so that trade-off is measured and shown, not silently made and
+hidden. No threshold was adjusted after seeing this.
 
 ### Why the CLI, not the SDK
 
@@ -355,23 +437,38 @@ carefully protects the action, then treats its own trace of that action as
 a detail* — see `PLAN_SPRINT.md` for the full list, in order, most recent
 first.
 
+**Update, 25/08 — the TCC/Full Disk Access gap above is resolved**:
+`monitor_exits.py` is running on its `launchd` schedule for real (confirmed
+by its own log). A second, unrelated gap turned up the same day, found by
+accident (`git status` flagging an unexpected diff, not by looking for it):
+the job failed **11 times in a row** that afternoon, not from a permissions
+or config problem, but because the Mac was sleeping and `launchd` only fired
+it during brief maintenance wake-ups, too short for Wi-Fi to reconnect
+before the network call timed out — proven by matching each failure's
+timestamp to `pmset`'s sleep log, to the second. It recovered on its own
+once the Mac was actually awake, and hasn't failed since. Because Alpaca
+does **not** support bracket/OCO orders on options (confirmed against the
+real API, see `PLAN_SPRINT.md`), this client-side polling loop is the *only*
+mechanism protecting an open position — so for the judged week (31/08–3/09)
+the single most important non-code action is keeping the Mac powered and
+awake during US market hours. The dashboard now carries a client-computed
+health banner (age of last check + consecutive-failure count) specifically
+so a gap like this is visible on the public page instead of only in a local
+log file — see `docs/index.html`'s `renderMonitorHealth()`.
+
 **Not yet done, the real remaining gap**: the *dedicated* hackathon account
 (`.env.hackathon`) has never been connected — everything above ran on dev,
 on purpose, per the hackathon's own rule allowing any paper account during
-development. And `monitor_exits.py` — the script meant to catch a stop-loss
-between `agent.py`'s once-daily runs — is not actually running on schedule
-yet: the `launchd` job is installed with the right cadence, but macOS's TCC
-privacy protection on `~/Desktop` is blocking it from reading the script at
-all. Fixing that needs a real person clicking through System Settings
-(Full Disk Access), which is outside what this session can do.
+development. The competition rules require that dedicated account's starting
+balance to be **exactly $100,000**, and resetting a paper account to a
+specific balance invalidates its old API key — so the first action on
+kickoff morning (28/08) is `alpaca account get --quiet` against the
+dedicated account, before anything else touches it.
 
-Several terminal-handoff briefs exist from different points in the same
-day (`BRIEF_TEST_AGENT_TERMINAL.md`, `BRIEF_GIT_DASHBOARD_PUBLICATION.md`,
-`BRIEF_PUSH_GITHUB_PAGES.md`, `BRIEF_BACKTEST_REEL.md`,
-`BRIEF_COMMIT_FIXES_ET_BACKTEST.md`, `BRIEF_MULTI_POSITION_ET_COMPARAISON.md`,
-`BRIEF_VERIFICATION_FINALE_ET_COMMIT.md`) — **`BRIEF_DEBLOQUER_MONITOR_ET_KICKOFF.md`
-is the current one**, waiting on the TCC fix above before the rest of its
-checklist (28/08 account-switch procedure, real backtest re-run) can close
-out. The others are earlier snapshots, all superseded.
+Several terminal-handoff briefs exist from different points across the
+project (see `BRIEF_*.md` at the repo root) — **`BRIEF_COMMIT_INDICATEUR_SANTE_ET_WRITEUP.md`
+is the current one** as of 25/08 evening, covering the dashboard health
+banner and a small write-up wording fix. Earlier briefs are superseded
+snapshots, kept for the record rather than deleted.
 See `PLAN_SPRINT.md` for the full day-by-day plan and complete history of
 what was found and fixed.

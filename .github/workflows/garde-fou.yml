@@ -1,0 +1,45 @@
+# .github/workflows/garde-fou.yml
+#
+# AJOUTÉ le 25/08/2026, "cherche encore sur GitHub" : le hook local
+# (githooks/pre-commit) a deux trous que gitleaks documente lui-même comme
+# la raison d'être d'un "programme de scan en couches" — pre-commit local
+# PUIS scan en CI sur chaque push/PR, jamais l'un sans l'autre :
+#   1. Le hook local ne protège que les machines où quelqu'un a pensé à
+#      lancer `git config core.hooksPath githooks` une fois. Un clone neuf,
+#      sans cette étape, n'a AUCUNE protection.
+#   2. `git commit --no-verify` contourne le hook local par construction
+#      (échappatoire volontaire, documentée dans le hook) — rien ne
+#      rattrape ça une fois que c'est poussé sur un dépôt PUBLIC et jugé.
+#
+# Cette CI est la couche qui ne dépend d'aucune des deux : elle tourne sur
+# GitHub même, sur le vrai contenu poussé, visible comme coche verte/rouge
+# sur chaque commit et PR — y compris pour un juge qui parcourt le repo.
+name: garde-fou
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  verifier:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # fetch-depth: 0 est nécessaire ICI précisément : le contrôle 2
+          # de garde_fou.py (`.env.hackathon` scellé) lit
+          # `git log --all --full-history` pour vérifier qu'aucun secret
+          # n'a jamais traîné dans l'historique. Un clone superficiel
+          # (fetch-depth: 1, le défaut de actions/checkout) ne verrait que
+          # le dernier commit et rendrait ce contrôle aveugle sans le
+          # signaler — testé une fois avant de pousser, jamais après.
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: python3 garde_fou.py
+        run: python3 garde_fou.py

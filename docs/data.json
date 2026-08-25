@@ -1,14 +1,14 @@
 {
-  "generated_at": "2026-08-24T20:39:46.843566+00:00",
+  "generated_at": "2026-08-25T22:48:03.797320+00:00",
   "team": "Hindsight Alpha",
   "account": {
     "id": "523f7f05-1d67-4219-a96e-e65276f1dcf3",
     "account_number": "PA3I2OIKF5F4",
     "status": "ACTIVE",
-    "equity": "99901.84",
-    "cash": "98937.84",
-    "buying_power": "395751.36",
-    "portfolio_value": "99901.84"
+    "equity": "99623.71",
+    "cash": "98937.71",
+    "buying_power": "395750.84",
+    "portfolio_value": "99623.71"
   },
   "positions": [
     {
@@ -16,20 +16,20 @@
       "asset_id": "27880012-6dfa-4396-8901-ca54ac7b0240",
       "asset_marginable": true,
       "avg_entry_price": "4.69",
-      "change_today": "0.10046",
+      "change_today": "-0.27484",
       "cost_basis": "938",
-      "current_price": "4.82",
+      "current_price": "3.43",
       "exchange": "",
-      "lastday_price": "4.38",
-      "market_value": "964",
+      "lastday_price": "4.73",
+      "market_value": "686",
       "qty": "2",
       "qty_available": "2",
       "side": "long",
       "symbol": "SPY260831P00764000",
-      "unrealized_intraday_pl": "26",
-      "unrealized_intraday_plpc": "0.02772",
-      "unrealized_pl": "26",
-      "unrealized_plpc": "0.02772",
+      "unrealized_intraday_pl": "-260",
+      "unrealized_intraday_plpc": "-0.27484",
+      "unrealized_pl": "-252",
+      "unrealized_plpc": "-0.26866",
       "usd": {
         "avg_entry_price": "",
         "cost_basis": ""
@@ -37,6 +37,291 @@
     }
   ],
   "recent_decisions": [
+    {
+      "timestamp": "2026-08-25T17:45:41.926123+00:00",
+      "run_type": "exit_monitor",
+      "dry_run": false,
+      "outcome": "error",
+      "error": "AlpacaCLIError: alpaca clock failed (exit 1): {\n  \"code\": 0,\n  \"error\": \"could not reach https://paper-api.alpaca.markets/v2/clock: Get \\\"https://paper-api.alpaca.markets/v2/clock\\\": dial tcp: lookup paper-api.alpaca.markets: no such host\",\n  \"hint\": \"check your internet connection and base URL. Run `alpaca doctor` to verify configuration\",\n  \"status\": 0\n}"
+    },
+    {
+      "timestamp": "2026-08-25T17:17:25.267106+00:00",
+      "run_type": "exit_monitor",
+      "dry_run": false,
+      "outcome": "error",
+      "error": "AlpacaCLIError: alpaca clock failed (exit 1): {\n  \"code\": 0,\n  \"error\": \"could not reach https://paper-api.alpaca.markets/v2/clock: Get \\\"https://paper-api.alpaca.markets/v2/clock\\\": dial tcp: lookup paper-api.alpaca.markets: no such host\",\n  \"hint\": \"check your internet connection and base URL. Run `alpaca doctor` to verify configuration\",\n  \"status\": 0\n}"
+    },
+    {
+      "timestamp": "2026-08-25T16:45:17.497460+00:00",
+      "run_type": "exit_monitor",
+      "dry_run": false,
+      "outcome": "error",
+      "error": "AlpacaCLIError: alpaca clock failed (exit 1): {\n  \"code\": 0,\n  \"error\": \"could not reach https://paper-api.alpaca.markets/v2/clock: Get \\\"https://paper-api.alpaca.markets/v2/clock\\\": dial tcp: lookup paper-api.alpaca.markets: no such host\",\n  \"hint\": \"check your internet connection and base URL. Run `alpaca doctor` to verify configuration\",\n  \"status\": 0\n}"
+    },
+    {
+      "timestamp": "2026-08-25T16:34:06.902714+00:00",
+      "run_type": "exit_monitor",
+      "dry_run": false,
+      "outcome": "error",
+      "error": "AlpacaCLIError: alpaca clock failed (exit 1): {\n  \"code\": 0,\n  \"error\": \"could not reach https://paper-api.alpaca.markets/v2/clock: Get \\\"https://paper-api.alpaca.markets/v2/clock\\\": dial tcp: lookup paper-api.alpaca.markets: no such host\",\n  \"hint\": \"check your internet connection and base URL. Run `alpaca doctor` to verify configuration\",\n  \"status\": 0\n}"
+    },
+    {
+      "timestamp": "2026-08-25T16:00:10.541197+00:00",
+      "run_type": "exit_monitor",
+      "dry_run": false,
+      "outcome": "error",
+      "error": "AlpacaCLIError: alpaca clock failed (exit 1): {\n  \"code\": 0,\n  \"error\": \"could not reach https://paper-api.alpaca.markets/v2/clock: Get \\\"https://paper-api.alpaca.markets/v2/clock\\\": dial tcp: lookup paper-api.alpaca.markets: no such host\",\n  \"hint\": \"check your internet connection and base URL. Run `alpaca doctor` to verify configuration\",\n  \"status\": 0\n}"
+    },
+    {
+      "timestamp": "2026-08-25T15:33:29.459661+00:00",
+      "run_type": "exit_monitor",
+      "dry_run": false,
+      "outcome": "error",
+      "error": "AlpacaCLIError: alpaca clock failed (exit 1): {\n  \"code\": 0,\n  \"error\": \"could not reach https://paper-api.alpaca.markets/v2/clock: Get \\\"https://paper-api.alpaca.markets/v2/clock\\\": dial tcp: lookup paper-api.alpaca.markets: no such host\",\n  \"hint\": \"check your internet connection and base URL. Run `alpaca doctor` to verify configuration\",\n  \"status\": 0\n}"
+    },
+    {
+      "timestamp": "2026-08-25T14:59:51.729641+00:00",
+      "run_type": "exit_monitor",
+      "dry_run": false,
+      "outcome": "error",
+      "error": "AlpacaCLIError: alpaca clock failed (exit 1): {\n  \"code\": 0,\n  \"error\": \"could not reach https://paper-api.alpaca.markets/v2/clock: Get \\\"https://paper-api.alpaca.markets/v2/clock\\\": dial tcp: lookup paper-api.alpaca.markets: no such host\",\n  \"hint\": \"check your internet connection and base URL. Run `alpaca doctor` to verify configuration\",\n  \"status\": 0\n}"
+    },
+    {
+      "timestamp": "2026-08-25T14:35:26.656021+00:00",
+      "run_type": "exit_monitor",
+      "dry_run": false,
+      "outcome": "error",
+      "error": "AlpacaCLIError: alpaca clock failed (exit 1): {\n  \"code\": 0,\n  \"error\": \"could not reach https://paper-api.alpaca.markets/v2/clock: Get \\\"https://paper-api.alpaca.markets/v2/clock\\\": dial tcp: lookup paper-api.alpaca.markets: no such host\",\n  \"hint\": \"check your internet connection and base URL. Run `alpaca doctor` to verify configuration\",\n  \"status\": 0\n}"
+    },
+    {
+      "timestamp": "2026-08-25T14:00:02.933101+00:00",
+      "run_type": "exit_monitor",
+      "dry_run": false,
+      "outcome": "error",
+      "error": "AlpacaCLIError: alpaca clock failed (exit 1): {\n  \"code\": 0,\n  \"error\": \"could not reach https://paper-api.alpaca.markets/v2/clock: Get \\\"https://paper-api.alpaca.markets/v2/clock\\\": dial tcp: lookup paper-api.alpaca.markets: no such host\",\n  \"hint\": \"check your internet connection and base URL. Run `alpaca doctor` to verify configuration\",\n  \"status\": 0\n}"
+    },
+    {
+      "timestamp": "2026-08-25T13:42:15.177050+00:00",
+      "run_type": "exit_monitor",
+      "dry_run": false,
+      "outcome": "error",
+      "error": "AlpacaCLIError: alpaca clock failed (exit 1): {\n  \"code\": 0,\n  \"error\": \"could not reach https://paper-api.alpaca.markets/v2/clock: Get \\\"https://paper-api.alpaca.markets/v2/clock\\\": dial tcp: lookup paper-api.alpaca.markets: no such host\",\n  \"hint\": \"check your internet connection and base URL. Run `alpaca doctor` to verify configuration\",\n  \"status\": 0\n}"
+    },
+    {
+      "timestamp": "2026-08-25T13:13:34.582183+00:00",
+      "run_type": "exit_monitor",
+      "dry_run": false,
+      "outcome": "error",
+      "error": "AlpacaCLIError: alpaca clock failed (exit 1): {\n  \"code\": 0,\n  \"error\": \"could not reach https://paper-api.alpaca.markets/v2/clock: Get \\\"https://paper-api.alpaca.markets/v2/clock\\\": dial tcp: lookup paper-api.alpaca.markets: no such host\",\n  \"hint\": \"check your internet connection and base URL. Run `alpaca doctor` to verify configuration\",\n  \"status\": 0\n}"
+    },
+    {
+      "timestamp": "2026-08-25T10:02:50.192046+00:00",
+      "dry_run": true,
+      "symbols": [
+        "SPY",
+        "GLD",
+        "XLK",
+        "XLV"
+      ],
+      "outcome": "market_closed",
+      "market_open": false
+    },
+    {
+      "timestamp": "2026-08-24T21:13:33.737889+00:00",
+      "dry_run": true,
+      "symbols": [
+        "SPY",
+        "GLD",
+        "XLK",
+        "XLV"
+      ],
+      "outcome": "dry_run_tradeable",
+      "market_open": null,
+      "exit_actions": [
+        {
+          "symbol": "SPY260831P00764000",
+          "kind": "holding",
+          "text": "SPY260831P00764000: holding (+2.8%, thresholds are +50%/-50%)",
+          "pnl_pct": 0.0277
+        }
+      ],
+      "verdicts": [
+        {
+          "symbol": "SPY",
+          "tradeable": true,
+          "reason": "cheap-vol regime confirmed, hindsight_guard clean",
+          "direction": -1
+        },
+        {
+          "symbol": "GLD",
+          "tradeable": false,
+          "reason": "volatility not cheap today (HV rank 57.9)",
+          "direction": null
+        },
+        {
+          "symbol": "XLK",
+          "tradeable": false,
+          "reason": "hindsight_guard: winning HV window doesn't hold up in-sample",
+          "direction": null
+        },
+        {
+          "symbol": "XLV",
+          "tradeable": false,
+          "reason": "volatility not cheap today (HV rank 98.4)",
+          "direction": null
+        }
+      ],
+      "tradeable_symbols": [
+        "SPY"
+      ]
+    },
+    {
+      "timestamp": "2026-08-24T21:01:20.340350+00:00",
+      "dry_run": true,
+      "symbols": [
+        "SPY",
+        "GLD",
+        "XLK",
+        "XLV"
+      ],
+      "outcome": "dry_run_tradeable",
+      "market_open": null,
+      "exit_actions": [
+        {
+          "symbol": "SPY260831P00764000",
+          "kind": "holding",
+          "text": "SPY260831P00764000: holding (+2.8%, thresholds are +50%/-50%)",
+          "pnl_pct": 0.0277
+        }
+      ],
+      "verdicts": [
+        {
+          "symbol": "SPY",
+          "tradeable": true,
+          "reason": "cheap-vol regime confirmed, hindsight_guard clean",
+          "direction": -1
+        },
+        {
+          "symbol": "GLD",
+          "tradeable": false,
+          "reason": "volatility not cheap today (HV rank 57.9)",
+          "direction": null
+        },
+        {
+          "symbol": "XLK",
+          "tradeable": false,
+          "reason": "hindsight_guard: winning HV window doesn't hold up in-sample",
+          "direction": null
+        },
+        {
+          "symbol": "XLV",
+          "tradeable": false,
+          "reason": "volatility not cheap today (HV rank 98.4)",
+          "direction": null
+        }
+      ],
+      "tradeable_symbols": [
+        "SPY"
+      ]
+    },
+    {
+      "timestamp": "2026-08-24T20:57:25.739585+00:00",
+      "dry_run": true,
+      "symbols": [
+        "SPY",
+        "GLD",
+        "XLK",
+        "XLV"
+      ],
+      "outcome": "dry_run_tradeable",
+      "market_open": null,
+      "exit_actions": [
+        {
+          "symbol": "SPY260831P00764000",
+          "kind": "holding",
+          "text": "SPY260831P00764000: holding (+2.8%, thresholds are +50%/-50%)",
+          "pnl_pct": 0.0277
+        }
+      ],
+      "verdicts": [
+        {
+          "symbol": "SPY",
+          "tradeable": true,
+          "reason": "cheap-vol regime confirmed, hindsight_guard clean",
+          "direction": -1
+        },
+        {
+          "symbol": "GLD",
+          "tradeable": false,
+          "reason": "volatility not cheap today (HV rank 57.9)",
+          "direction": null
+        },
+        {
+          "symbol": "XLK",
+          "tradeable": false,
+          "reason": "hindsight_guard: winning HV window doesn't hold up in-sample",
+          "direction": null
+        },
+        {
+          "symbol": "XLV",
+          "tradeable": false,
+          "reason": "volatility not cheap today (HV rank 98.4)",
+          "direction": null
+        }
+      ],
+      "tradeable_symbols": [
+        "SPY"
+      ]
+    },
+    {
+      "timestamp": "2026-08-24T20:55:56.391521+00:00",
+      "dry_run": true,
+      "symbols": [
+        "SPY",
+        "GLD",
+        "XLK",
+        "XLV"
+      ],
+      "outcome": "dry_run_tradeable",
+      "market_open": null,
+      "exit_actions": [
+        {
+          "symbol": "SPY260831P00764000",
+          "kind": "holding",
+          "text": "SPY260831P00764000: holding (+2.8%, thresholds are +50%/-50%)",
+          "pnl_pct": 0.0277
+        }
+      ],
+      "verdicts": [
+        {
+          "symbol": "SPY",
+          "tradeable": true,
+          "reason": "cheap-vol regime confirmed, hindsight_guard clean",
+          "direction": -1
+        },
+        {
+          "symbol": "GLD",
+          "tradeable": false,
+          "reason": "volatility not cheap today (HV rank 57.9)",
+          "direction": null
+        },
+        {
+          "symbol": "XLK",
+          "tradeable": false,
+          "reason": "hindsight_guard: winning HV window doesn't hold up in-sample",
+          "direction": null
+        },
+        {
+          "symbol": "XLV",
+          "tradeable": false,
+          "reason": "volatility not cheap today (HV rank 98.4)",
+          "direction": null
+        }
+      ],
+      "tradeable_symbols": [
+        "SPY"
+      ]
+    },
     {
       "timestamp": "2026-08-24T20:32:31.810818+00:00",
       "dry_run": true,
@@ -482,5 +767,10 @@
       "chosen_symbol": "SPY",
       "direction": "bearish (put)"
     }
-  ]
+  ],
+  "monitor_status": {
+    "last_run_at": "2026-08-25T19:45:07.007211+00:00",
+    "outcome": "checked",
+    "market_open": true
+  }
 }

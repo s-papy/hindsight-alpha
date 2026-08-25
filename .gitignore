@@ -10,3 +10,5 @@ state.json.tmp
 docs/data.json.tmp
 monitor_exits.log
 monitor_exits_dedup.json
+monitor_last_run.json
+.garde_fou_scelles.json

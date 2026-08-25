@@ -32,9 +32,28 @@ from pathlib import Path
 import alpaca_cli
 import config
 import decision_log
+from monitor_exits import MONITOR_STATUS_FILE
 
 DOCS_DIR = Path(__file__).parent / "docs"
 DATA_FILE = DOCS_DIR / "data.json"
+
+
+def _read_monitor_status() -> dict | None:
+    """Best-effort read of monitor_exits.py's every-run status marker (see
+    MONITOR_STATUS_FILE's own comment in monitor_exits.py for why this exists
+    separately from decision_log.jsonl: found 25/08, by checking the dashboard
+    health banner against a real incident, that decision_log.jsonl alone
+    can't tell a reader whether the monitor is CURRENTLY healthy -- only
+    whether it was ever interesting -- because a routine successful check is
+    never logged there. Missing or corrupt file -> None, same non-blocking
+    default as every other best-effort read in this project (e.g. a bad
+    decision_log line just gets skipped, not fatal): a stale/missing status
+    file should degrade the dashboard's health banner to 'no data', never
+    break the whole snapshot build."""
+    try:
+        return json.loads(MONITOR_STATUS_FILE.read_text())
+    except (OSError, json.JSONDecodeError):
+        return None
 
 
 def build_snapshot() -> dict:
@@ -42,6 +61,7 @@ def build_snapshot() -> dict:
     account = alpaca_cli.get_account()
     positions = alpaca_cli.list_positions()
     recent = decision_log.read_log(limit=30)
+    monitor_status = _read_monitor_status()
 
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -66,6 +86,7 @@ def build_snapshot() -> dict:
         },
         "positions": positions,
         "recent_decisions": recent,
+        "monitor_status": monitor_status,
     }
 
 

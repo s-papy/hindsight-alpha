@@ -67,6 +67,27 @@ from risk_gates import ExitAction
 # run-machine-specific bookkeeping, same category as state.json itself.
 DEDUP_FILE = Path(__file__).parent / "monitor_exits_dedup.json"
 
+# Unconditional every-run status marker -- deliberately separate from
+# decision_log.jsonl, which only records NOTEWORTHY runs (see the filtering
+# logic in main()'s finally block). That filter is correct for
+# decision_log.jsonl's job (a curated, durable trace of what happened worth
+# keeping forever), but found 25/08 by checking it against a real incident,
+# not by reasoning about it in the abstract: it created a blind spot. The
+# scheduled job failed 11 times in a row (DarkWake/DNS, see PLAN_SPRINT.md),
+# then recovered on its own at 17:55 and kept succeeding -- but a healthy
+# "holding, nothing to do" check is never noteworthy, so NOT ONE entry ever
+# recorded that recovery. A dashboard health indicator reading only
+# decision_log.jsonl's exit_monitor entries would keep showing "11
+# consecutive failures" for the rest of the week, hours after the problem
+# was actually gone -- a false alarm that never clears itself, which is
+# worse than no indicator at all. This file exists so publish_dashboard.py
+# has something that reflects the TRUE most recent run, success or not,
+# regardless of whether that run was interesting enough to keep forever.
+# Gitignored, same category as DEDUP_FILE and state.json -- run-machine-
+# specific, republished into docs/data.json (which IS tracked) by
+# publish_dashboard.py, never committed directly itself.
+MONITOR_STATUS_FILE = Path(__file__).parent / "monitor_last_run.json"
+
 # How often a STILL-UNRESOLVED failure gets re-logged to decision_log.jsonl
 # (and therefore onto the public dashboard) while it persists unchanged.
 # Chosen against the concrete number this was written to fix: unfiltered,
@@ -99,6 +120,24 @@ def _save_dedup_state(state: Dict[str, str]) -> None:
     except OSError as e:
         print(f"  WARNING: could not persist {DEDUP_FILE.name} ({type(e).__name__}: {e}) -- "
               "a persistent failure may get re-logged more often than the usual heartbeat until this is fixed.")
+
+
+def _write_last_run_status(record: Dict[str, object], now: datetime) -> None:
+    """Best-effort, every-run write -- see MONITOR_STATUS_FILE's own comment
+    for why this exists. Deliberately never allowed to interfere with the
+    real exit-protection logic: catches broadly (not just OSError) because
+    this is pure bookkeeping for a dashboard indicator, not risk state --
+    the worst case of a failure here is a stale/missing health banner, never
+    a blocked or corrupted position close."""
+    try:
+        MONITOR_STATUS_FILE.write_text(json.dumps({
+            "last_run_at": now.isoformat(),
+            "outcome": record.get("outcome", "unknown"),
+            "market_open": record.get("market_open"),
+        }))
+    except Exception as e:
+        print(f"  WARNING: could not persist {MONITOR_STATUS_FILE.name} ({type(e).__name__}: {e}) -- "
+              "the dashboard's health indicator may show a stale status until this is fixed.")
 
 
 def _filter_for_logging(
@@ -269,6 +308,11 @@ def main() -> None:
         # it' family as the five bugs fixed earlier today. Degrading to 'log
         # everything this run' is the safe direction: noisier, never silent.
         now = datetime.now(timezone.utc)
+        # Unconditional, runs before the noteworthy-log decision below and
+        # regardless of it -- this is the one write in this block that must
+        # happen every single time, noteworthy or not, so a dashboard reader
+        # always has a true "as of when" answer. See MONITOR_STATUS_FILE.
+        _write_last_run_status(record, now)
         try:
             dedup_state = _load_dedup_state()
             surfaced, dedup_state = _filter_for_logging(actions, dedup_state, now)

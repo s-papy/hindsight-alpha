@@ -1,0 +1,46 @@
+#!/bin/sh
+# githooks/pre-commit — hindsight-alpha
+#
+# AJOUTÉ le 25/08/2026, en comparant garde_fou.py à l'écosystème réel de
+# vérification pré-commit (pre-commit.com, gitleaks, danger-js) : le trou
+# le plus profond n'était pas un contrôle manquant, c'était l'absence de
+# tout mécanisme forçant `garde_fou.py` à tourner. Un script qu'il faut
+# PENSER à lancer à la main ne protège rien le jour où on est pressé —
+# exactement le défaut que garde-fou/OUTILS_CONTROLE_GARDE_FOU dénonce
+# ailleurs sous une autre forme ("un outil qui existe mais qu'on ne lance
+# pas ne sert à rien").
+#
+# ⚠️ Ce dossier N'EST PAS activé automatiquement par git (contrairement à
+# .git/hooks/, qui n'est lui-même jamais versionné donc jamais partagé
+# entre machines). Active-le une fois par clone :
+#
+#     git config core.hooksPath githooks
+#
+# Après ça, chaque `git commit` relance garde_fou.py et refuse le commit
+# si le verdict est 🔴. Un verdict 🟡 n'empêche rien (par design — voir
+# garde_fou.py : "publiable avec réserve" reste publiable).
+
+# 🔴 PAS de `set -e` ici, corrigé dans la minute en testant ce hook pour de
+# vrai : avec `set -e`, un `python3 garde_fou.py` qui sort en erreur (1)
+# tue le script AVANT que la ligne suivante (`code=$?`) ne s'exécute — donc
+# le message "COMMIT REFUSÉ" personnalisé plus bas ne s'affichait JAMAIS,
+# même si le commit était bien bloqué (par accident, via le code de sortie
+# brut du sous-processus). Constaté sur le premier témoin lancé.
+cd "$(git rev-parse --show-toplevel)" || exit 1
+
+if [ ! -f garde_fou.py ]; then
+    exit 0
+fi
+
+python3 garde_fou.py
+code=$?
+
+if [ "$code" -ne 0 ]; then
+    echo ""
+    echo "COMMIT REFUSÉ par garde_fou.py (verdict 🔴 ci-dessus)."
+    echo "Corrige le dossier, jamais garde_fou.py, pour faire taire ça."
+    echo "Pour committer quand même en connaissance de cause : git commit --no-verify"
+    exit 1
+fi
+
+exit 0

@@ -30,7 +30,6 @@ paragraph when it's time to make a slide.
 from __future__ import annotations
 
 import argparse
-import json
 from datetime import datetime, timezone
 from pathlib import Path
 from statistics import mean
@@ -43,7 +42,6 @@ from vol_strategy import (
     MIN_TRADING_DAYS_FOR_SWEEP,
     Bar,
     _vol_strategy_returns,
-    daily_returns,
     score_hv_window,
 )
 

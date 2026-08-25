@@ -72,7 +72,6 @@ Run: python agent.py [--symbols SPY,GLD,XLK,XLV] [--dry-run]
 from __future__ import annotations
 
 import argparse
-import json
 from dataclasses import dataclass
 from typing import Optional
 
