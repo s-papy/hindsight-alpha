@@ -31,7 +31,7 @@ import re
 import subprocess
 import sys
 import zipfile
-from datetime import date, datetime
+from datetime import date, timedelta, datetime
 
 RACINE = os.path.dirname(os.path.abspath(__file__))
 
@@ -81,7 +81,16 @@ def controle_journal() -> None:
         except ValueError:
             bloque("PLAN_SPRINT.md", "ligne %d : date impossible (%s)" % (i, m.group(0)))
             continue
-        if d > aujourdhui:
+        # Tolérance d'un jour, et ce n'est pas du laxisme : sans elle ce
+        # contrôle rend un verdict DIFFÉRENT selon la machine qui l'exécute.
+        # Constaté pour de vrai le 26/08 — deux titres datés 26/08 passaient
+        # en local (Mac en CEST, où c'était déjà le 26) et BLOQUAIENT la CI
+        # GitHub (runner en UTC, où il était encore le 25 à 22h51), sur le
+        # même commit. Les dates de PLAN_SPRINT.md sont écrites dans le
+        # fuseau de Spap (Europe/Zurich, UTC+1/+2), donc une entrée peut
+        # légitimement être "demain" pour un runner UTC. Un jour d'avance est
+        # normal ; deux ne le sont pas, et restent bloqués.
+        if d > aujourdhui + timedelta(days=1):
             bloque(
                 "PLAN_SPRINT.md",
                 "ligne %d : DATE DANS LE FUTUR — « %s » (%s > %s)"

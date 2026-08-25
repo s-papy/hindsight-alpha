@@ -1505,3 +1505,19 @@ Sain depuis 17:55 UTC, contrôles réussis toutes les 15 min jusqu'à 19:45 UTC 
 `garde_fou.py` lancé en vrai depuis le terminal : **🟡, une seule alerte** (nombre d'équipes du deck), conforme. Hook activé (`core.hooksPath = githooks`), `pre-commit` et `pre-push` exécutables.
 
 **Vérification non demandée que j'ai faite quand même** : le deck passait de 273 Ko à 57 Ko (−79 %), ce qui pouvait signaler une perte d'images. **Vérifié : rien de perdu** — 11 slides des deux côtés, le seul « média » disparu est une entrée de dossier vide, et le texte a *augmenté* (8 269 → 8 390 caractères), « 0 leaks » et « 442 » bien disparus.
+
+### 🔴 Et la CI, dès son premier vrai run, a bloqué le dépôt — pour un bug DANS le garde-fou
+
+`garde_fou.py` rendait **🟡 en local et 🔴 en CI, sur le même commit.** Cause : son contrôle « date dans le futur » compare à `date.today()`, donc **au fuseau de la machine qui l'exécute**. Deux titres datés `26/08` passaient sur ce Mac (CEST, où il était déjà le 26 à 00h51) et bloquaient le runner GitHub (UTC, où il était encore le 25 à 22h51).
+
+**Un contrôle dont le verdict dépend de la machine ne contrôle rien** — c'est la même famille que le `dayofweek` sans fuseau de BeeHive et que les heures du cron de `monitor_exits`.
+
+**Corrigé** par une tolérance d'un jour, et ce n'est pas du laxisme : les dates de ce fichier sont écrites dans le fuseau de Spab (UTC+1/+2), donc une entrée peut légitimement être « demain » pour un runner UTC. **Vérifié dans les deux sens** : une vraie date à J+5 **bloque toujours**, et sous `TZ=UTC` le dépôt passe 🟡.
+
+*(Le second 🟡 de la CI — « requirements.txt, première lecture » — est normal sur un clone frais : l'empreinte s'enregistre au premier run.)*
+
+### 🟢 Le hook `pre-push` prouvé, après deux tests ratés de ma part
+
+Mes deux premières tentatives ont rendu « Everything up-to-date » : le push normal avait déjà tout envoyé, donc **git court-circuite avant d'appeler le hook**. Ça ne prouvait rien, et je ne l'ai pas compté comme vérifié.
+
+Refait avec une **vraie divergence d'historique** (commit amendé après push) : `--force` **ET** `--force-with-lease` sont tous deux **refusés**, avec le message qui cite la règle de `CLAUDE.md`, et **le distant n'est pas écrasé** — vérifié en relisant son SHA après coup.
