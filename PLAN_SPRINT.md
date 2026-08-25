@@ -1060,3 +1060,54 @@ C'est aussi une limite qui mérite d'être **dite** plutôt que tue : un juge qu
 **Chiffres recoupés un par un contre les fichiers sources, tous justes** : concentration « 68,5–82,6 % » = GLD 20d 68,5 % et SPY 10d 82,6 % (`BACKTEST_RESULTS.md`) ; « 52–102 trades » = XLV 10d 52 et SPY 10d 102 ; « win rate 45,1–57,1 % » = SPY 45,1 % et GLD 57,1 % ; désaccord XLK (90d plein / 10d in-sample) exact ; Sharpe 1,60 / 1,96 / 1,44 = 1,598 / 1,956 / 1,442 arrondis (`STRATEGY_COMPARISON.md`).
 
 🟡 **Une imprécision de vocabulaire, signalée sans être corrigée** (le write-up est un livrable de Spap) : il écrit « Sharpe 1.60 » là où la source dit « **in-sample** Sharpe », et `STRATEGY_COMPARISON.md` porte un avertissement explicite disant de ne pas lire cette colonne comme un verdict isolé — le classement s'inverse selon la statistique choisie. Le write-up reste honnête par ailleurs (il assume la concentration et le refus sur XLK), mais ajouter « in-sample » coûterait deux mots et fermerait la seule prise possible sur ce paragraphe.
+
+---
+
+## 🔴 25/08 (Terminal) — trouvé par accident, et c'est le point le plus grave de la journée : **le moniteur de sorties n'a pas tourné une seule fois aujourd'hui**
+
+*Pas cherché : repéré parce que `git status` montrait `decision_log.jsonl` modifié alors que je n'y avais rien écrit. Le fichier contenait **11 échecs consécutifs** du job launchd, de 13:13 à 17:45 UTC, tous identiques.*
+
+### Le symptôme
+
+```
+AlpacaCLIError: alpaca clock failed (exit 1):
+"could not reach https://paper-api.alpaca.markets/v2/clock:
+ dial tcp: lookup paper-api.alpaca.markets: no such host"
+```
+
+`monitor_exits.py` meurt à la toute première ligne utile (`alpaca_cli.get_clock()`, ligne 176), avant d'avoir regardé la moindre position. **Onze fois de suite.** Le dernier échec datait de quelques minutes quand je l'ai trouvé.
+
+### Ce que ce n'est PAS — éliminé par test, pas par raisonnement
+
+- **Pas le `PATH`** : le binaire `alpaca` est bien dans `/Users/s-pap/.local/bin`, qui est explicitement sur le `PATH` du plist.
+- **Pas l'environnement minimal de launchd** : rejoué `alpaca clock get` avec exactement `PATH`+`HOME`+les deux clés, et même **sans** `HOME` — **les trois réussissent**.
+- **Pas une mauvaise config du job** : `launchctl kickstart -k` déclenché à la main → **succès, code 0**, position lue correctement (`SPY260831P00764000: holding (-20.0%)`).
+
+### La cause, prouvée par recoupement horaire
+
+`pmset -g log` montre que le Mac a dormi toute la journée sur batterie, ne se réveillant qu'en **DarkWake** (réveil de maintenance) 2 à 6 secondes à la fois. En convertissant les horodatages d'échec (UTC) en heure locale, **chacun tombe à la seconde près sur un DarkWake** :
+
+| échec du job (local) | DarkWake `pmset` | écart |
+|---|---|---|
+| 17:33:29 | 17:33:28 | 1 s |
+| 18:00:10 | 18:00:10 | 0 s |
+| 18:34:06 | 18:34:06 | 0 s |
+| 18:45:17 | 18:45:12 | 5 s |
+| 19:17:25 | 19:17:22 | 3 s |
+| 19:45:41 | 19:45:40 | 1 s |
+
+launchd honore `StartCalendarInterval` pendant ces réveils de maintenance, mais le Wi-Fi n'est pas réassocié à ce moment-là : le DNS échoue, le job meurt, et la machine se rendort 2 à 6 secondes plus tard. Le test manuel réussit uniquement parce que le Mac était réveillé pour de bon (`Wake ... lid/UserActivity` à 19:46).
+
+C'est aussi ce qui explique les horodatages **hors grille** (13:13, 13:42, 14:35, 16:45, 17:17…) alors que le job est planifié aux :00/:15/:30/:45 — ce ne sont pas les créneaux prévus, ce sont les réveils.
+
+### Pourquoi c'est grave pour le 31/08 → 3/09
+
+**Les sorties automatiques sont le seul mécanisme de protection des positions de ce projet** — et la section précédente vient d'établir qu'Alpaca **refuse les ordres bracket/OCO sur les options**, donc il n'existe aucun filet côté broker pour prendre le relais. Les deux faits se combinent : si le Mac dort pendant la semaine jugée, une position peut dépasser −50 % sans que rien ne la ferme, et sans qu'aucune alerte ne parte. Les 11 échecs d'aujourd'hui sont passés totalement inaperçus — ils n'ont été vus que parce que `git status` a signalé un fichier modifié.
+
+### Pistes, à trancher par Spap — rien n'a été implémenté ici
+
+1. **Le plus simple et le plus sûr** : Mac branché sur secteur et empêché de dormir pendant les heures de marché de la semaine jugée (`caffeinate -dimsu` lancé le matin, ou Réglages → Batterie → empêcher la veille sur adaptateur). Ne touche à aucun code.
+2. **Rendre le job résilient** : une reprise sur échec DNS dans `monitor_exits.py` (quelques tentatives espacées) — mais inutile si la machine se rendort en 2 secondes, le réveil est trop court pour attendre le Wi-Fi.
+3. **Rendre l'échec visible** : aujourd'hui un job mort n'alerte personne. Le tableau de bord ne distingue pas « rien à faire » de « n'a jamais tourné ».
+
+*Conformément au brief, aucun code, aucun plist et aucun seuil n'ont été modifiés sur cette base — c'est un constat mesuré, pas une décision prise.*
