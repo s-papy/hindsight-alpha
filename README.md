@@ -253,11 +253,6 @@ python agent.py                # if vetted, places a real (paper) options order
   `vol_strategy.py` vs `momentum_strategy.py` on the same real bars.
   Writes `STRATEGY_COMPARISON.md`. See its module docstring for why the two
   families' raw payoffs aren't directly comparable numbers, and what is.
-- `alpaca_client.py` — dead code from an earlier draft (alpaca-py SDK
-  version, superseded by `alpaca_cli.py` for the hackathon's "MCP or CLI"
-  requirement). Left in place because Cowork's sandbox can't delete files
-  in this shared folder; nothing imports it. Safe to delete by hand.
-
 *(Found 24/08, "cherche encore": this file list used to be split into two
 disconnected halves by the "Hosted dashboard" section sitting in between —
 the second half dangled with no heading, right after unrelated prose about
