@@ -919,3 +919,47 @@ Le commentaire au-dessus explique avoir corrigé le cas où TOUS les symboles pa
 - **`.git/index.lock`** (0 octet, horodaté de cette session) — le warning déjà observé plusieurs fois aujourd'hui ("unable to unlink .git/index.lock: Operation not permitted") vient de ce fichier fantôme, lui aussi non supprimable par Cowork. **N'a bloqué aucune opération git testée aujourd'hui** (status, log, diff, et même les scénarios de test avec un vrai remote local ont tous fonctionné) — vraisemblablement un artefact du montage réseau de ce dossier côté Cowork, pas une vraie corruption de l'index git réel sur le Mac. À vérifier/supprimer côté terminal si une vraie opération git bloque un jour (`rm .git/index.lock`), mais rien d'urgent constaté.
 
 **Verdict global : le code est vert, rien de cassé. Le seul vrai rangement en attente (`alpaca_client.py`) était déjà connu et documenté — ce passage l'a juste re-confirmé avec des tests plutôt que de le supposer, et a trouvé les deux fichiers de service que cette session elle-même a laissés traîner.**
+
+---
+
+## ✅ 25/08 (Terminal) — les 4 correctifs Cowork vérifiés puis committés, et les 3 fichiers nettoyés — avec une réserve honnête sur les dry-runs
+
+*Session terminal faisant suite au brief `BRIEF_COMMIT_4_CORRECTIFS_ET_NETTOYAGE.md`. Point de départ vérifié : `HEAD` == `origin/main` == `1ae7b7c`, rien entre les deux. Résultat : commits `afaef46` (les 4 correctifs) et `4aae387` (suppression du code mort), **poussés** — `git ls-remote` confirme `refs/heads/main` == `4aae387`.*
+
+### 🟡 La réserve, d'abord : les deux dry-runs n'ont rien prouvé
+
+`python agent.py --dry-run` et `python monitor_exits.py --dry-run` tournent tous les deux **proprement** (`monitor_exits` sort en code 0), mais tous les deux sortent sur **« Market is closed »** avant d'atteindre la moindre ligne modifiée par les 4 correctifs. Le test de non-régression demandé au brief est donc **inerte** : il confirme que rien ne plante au démarrage, rien de plus. Écrit ici plutôt que rapporté comme un « dry-run propre » qui aurait laissé croire que les chemins corrigés avaient été traversés.
+
+**Compensé par des tests ciblés sur les chemins réellement changés**, tous exécutés pour de vrai :
+
+- **`publish_dashboard.git_publish()`** — dépôt jetable avec un vrai remote local, deux scénarios. (a) fichier étranger indexé + dashboard inchangé → commit correctement sauté, `HEAD` immobile, le fichier étranger reste indexé et son contenu intact ; (b) fichier étranger indexé + dashboard vraiment modifié → `git show --name-only` confirme que le commit contient **exclusivement** `docs/data.json`, message conforme, push effectif, et le fichier étranger toujours indexé et intact après coup.
+- **`risk_gates._record_exit_outcome()`** — 4 scénarios, avec `STATE_FILE` redirigé vers un fichier temporaire. Compte différent → re-baseline (compteur à 1 et non 2, `starting_equity` suit le nouveau compte, `traded_today` de A non hérité par B) avec un `NOTE:` visible en sortie, pas un changement silencieux ; même compte perte → 1→2 sans re-baseline parasite, `traded_today` préservé ; même compte gain → reset à 0 ; `account_id` absent → ancien comportement aveugle, aucune exception. **Le vrai `state.json` a été relu après coup et est intact** (`account_id`, `consecutive_losses`, `starting_equity` inchangés).
+- **Agrégation d'outcome (`agent.py`)** — 5 combinaisons, dont le cas du bug (`no_contract_found` + `error`, zéro risk gate atteint → `"mixed"`) et le cas non-régressé (tous `risk_gate_blocked` → inchangé).
+- **`docs/index.html`** — entrée `mixed` présente ligne 282, classe `badge-muted` bien définie dans la feuille de style ligne 113 (le badge n'aurait pas été stylé sinon), `node --check` propre sur le JS extrait.
+- **`backtest.py`** — `get_type_hints()` résout maintenant les deux fonctions annotées.
+- **`ExitAction.__str__`** — vérifié intact, comme demandé : le seul hunk de `risk_gates.py` dans cette zone est à la ligne 720, `__str__` est à la 580.
+
+### 🟢 Deux pistes creusées, toutes deux écartées après vérification
+
+1. **`risk_gates.py` utilise `Optional[...]` dans la nouvelle signature** — soupçon immédiat d'avoir réintroduit exactement le défaut que le correctif n°4 corrigeait dans `backtest.py`. **Faux** : `Optional` est bien importé ligne 74, et l'import réel du module le confirme. Vérifié avant de committer plutôt que supposé d'après la ressemblance.
+2. **`trades` vide → `"mixed"`** — le nouveau `else` attrape aussi `len(trade_outcomes) == 0`, ce qui afficherait « mixed outcomes — see trades below » sans aucun trade en dessous. **Inatteignable** : `agent.py` fait un `return` anticipé quand `tradeable_verdicts` est vide (`outcome = "no_edge"`, ligne 264) et un autre pour `--dry-run`, et chaque branche de la boucle fait un `append`. Le correctif n'a donc pas ouvert ce trou — vérifié en lisant les gardes réelles, pas en le supposant.
+
+### 🔵 Le contraste mesuré sur les suppressions
+
+**`rm` fonctionne sans problème depuis le terminal réel**, sur les deux fichiers que Cowork avait confirmé ne pas pouvoir supprimer (`Operation not permitted`) :
+
+- `__TEST_DELETE_PERMISSION__.tmp` — supprimé.
+- `.git/index.lock` — supprimé. Vérifié d'abord qu'**aucun processus git ne tournait** (le lock avait 34 minutes et 0 octet — orphelin, pas actif) : supprimer un lock détenu par un vrai processus aurait corrompu l'index. `git status` fonctionne normalement après coup.
+
+C'est bien la restriction du bac à sable Cowork qui était en cause, pas une permission du Mac ni une corruption de l'index — l'hypothèse que Cowork avait formulée est confirmée.
+
+- `alpaca_client.py` — retiré par `git rm`. Avant suppression, **re-vérifié qu'aucun `.py` ne l'importe** : le premier `grep --include=*.py` avait échoué silencieusement sur le glob zsh et renvoyé un « aucun import » qui était un **faux négatif** — refait proprement, les seules occurrences dans tout le dépôt sont de la prose dans `README.md`, `PLAN_SPRINT.md` et les briefs. La puce du `README.md` qui le documentait est retirée dans le **même commit**, pour ne pas laisser la liste de fichiers pointer vers un fichier disparu. Les 13 `.py` restants compilent et s'importent proprement après coup.
+
+### 📋 Deux écarts avec le brief, signalés
+
+- Un **second fichier untracked** non listé au brief : `BRIEF_COMMIT_4_CORRECTIFS_ET_NETTOYAGE.md`, le brief lui-même. Committé, conformément à la convention du dépôt (11 briefs déjà suivis par git).
+- **`decision_log.jsonl` a gagné une ligne** du fait de mes propres dry-runs (`outcome: "market_closed"`, correctement étiquetée `dry_run: true`). Conservée et committée : le log est append-only par convention, et c'est la trace honnête d'une exécution réelle.
+
+### 🔒 Périmètre respecté
+
+`.env.hackathon` et le compte du kickoff jamais touchés — vérifié avant tout appel que `.env` pointe bien vers le compte de dev (`523f7f05-…`, préfixe de clé `PKLVR2` vs `PKXKP3` pour le hackathon). Aucun `--live`, aucun seuil de risque modifié, position de test non fermée, stratégie non basculée, aucun `--force`.
