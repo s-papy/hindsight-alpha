@@ -253,7 +253,7 @@ Le `raise DataQualityError` est imbriqué dans un `try/except ValueError` : si `
 - Compte paper **neuf, jamais réutilisé**, dédié à cette soumission, soldé à 100 000 $.
 - Le P&L jugé porte sur l'activité réelle du compte pendant la semaine du hackathon — pas une démo ponctuelle.
 - Soumission : dépôt GitHub public + appli hébergée avec URL publique + ID du compte Alpaca + vidéo + deck de slides + write-up d'une page (logique IA, garde-fous de risque, implémentation infra).
-- Bonus optionnel : jusqu'à 5 posts X/LinkedIn taguant @lablabai et @AlpacaHQ.
+- **"Social engagement" n'est PAS qu'un bonus** — corrigé 25/08 après avoir relu la page officielle lablab.ai ligne par ligne : c'est un des **5 critères de jugement officiels** du classement principal (P&L Performance, Technology Implementation, Creativity & Originality, Presentation & Execution, **Social engagement**), en plus d'être un prix séparé ($500/équipe + 1 mois Algo Trader Plus par membre, 2 équipes gagnantes). Jusqu'à 5 posts X/LinkedIn taguant @lablabai et @AlpacaHQ, comptés dans la soumission finale. Brouillons prêts dans `SOCIAL_POSTS_DRAFT.md`.
 
 ## Réalisme du calendrier
 
@@ -276,7 +276,7 @@ Le vrai obstacle n'est pas le code (déjà en grande partie écrit et testé hor
 
 **29/08 → 03/08 (en réalité 29/08 → 03/09) — la semaine de trading**
 9. Laisser l'agent tourner et trader selon son cycle. Vérifier chaque jour que le check `hindsight_guard` s'exécute correctement et que le tableau de bord reflète l'activité réelle.
-10. Publier au fil de l'eau sur X/LinkedIn (jusqu'à 5 posts, piste bonus) — montrer le raisonnement, pas juste le résultat.
+10. Publier au fil de l'eau sur X/LinkedIn (jusqu'à 5 posts — **critère de jugement officiel, pas juste une piste bonus**, voir plus bas) — montrer le raisonnement, pas juste le résultat. Brouillons prêts dans `SOCIAL_POSTS_DRAFT.md`, à personnaliser et poster soi-même.
 11. Ajuster si quelque chose casse (contrat introuvable, ordre rejeté, etc.) — journaliser chaque incident, ça nourrit le write-up et la vidéo ("comment l'agent gère l'imprévu" est un bon angle de présentation).
 
 **03/09 → 04/09, 17:00 CEST — finalisation**
@@ -963,3 +963,100 @@ C'est bien la restriction du bac à sable Cowork qui était en cause, pas une pe
 ### 🔒 Périmètre respecté
 
 `.env.hackathon` et le compte du kickoff jamais touchés — vérifié avant tout appel que `.env` pointe bien vers le compte de dev (`523f7f05-…`, préfixe de clé `PKLVR2` vs `PKXKP3` pour le hackathon). Aucun `--live`, aucun seuil de risque modifié, position de test non fermée, stratégie non basculée, aucun `--force`.
+
+---
+
+## 🔴 25/08 (Cowork) — exigence trouvée en lisant la page officielle du hackathon, jamais vérifiable avant le 28 : solde de départ à $100 000 EXACT
+
+*Demandé explicitement par Spap : chercher la concurrence, les éditions passées, les axes non couverts. Ceci vient de la lecture de la page officielle lablab.ai elle-même (onglet "Account Requirements"), jamais lue ligne à ligne avant aujourd'hui.*
+
+**Citation exacte, section "ADDITIONAL REQUIREMENTS" :** *"Competition account starting balance must be set to $100,000."* Et section "REQUIRED FOR JUDGING" : *"For your final submission, create a brand-new Alpaca paper trading account dedicated to this hackathon. Projects run on an existing or reused account will not be eligible for judging."*
+
+**Le compte dédié (`PA3K8MP3MF0U` / `.env.hackathon`) n'a jamais été touché — donc son solde réel n'a JAMAIS été vérifié**, seulement simulé en mocks (`starting_equity: 100000.0` dans un test, voir plus haut dans ce fichier). Recherché : un compte paper Alpaca fraîchement créé démarre à $100k par défaut, donc si `PA3K8MP3MF0U` a été créé par le flux normal d'inscription sans jamais être "reset" vers un autre montant, il devrait déjà être conforme. **Mais ça reste une supposition tant que personne n'a lancé `alpaca account get` dessus.**
+
+**Piège opérationnel trouvé en même temps, à ne pas découvrir le 28 au pire moment** : sur Alpaca, remettre à zéro un compte paper (bouton "reset", avec un solde de départ choisi) **invalide l'ancienne clé API** — il faut en régénérer une nouvelle et mettre `.env.hackathon` à jour. Donc SI le solde n'est pas exactement $100k et qu'un reset est nécessaire, ça entraîne automatiquement une régénération de clé, pas juste un changement de chiffre.
+
+**Action concrète pour le kickoff (28/08), en tout premier, avant toute autre chose** :
+1. `alpaca account get --quiet` sur le compte dédié — confirmer `cash`/`equity`/`portfolio_value` == 100000.00 exactement.
+2. Si ce n'est pas le cas : reset avec $100 000 explicitement demandé dans le dashboard Alpaca, **puis régénérer la clé API et mettre à jour `.env.hackathon`** avant tout autre appel.
+3. Ne lancer `agent.py` qu'après cette confirmation — sinon le premier run pourrait re-baseliner `state.json` sur un solde de départ qui n'est pas le bon, ce qui fausserait tout calcul de drawdown hebdomadaire (`WEEKLY_LOSS_LOCK_PCT`) pour le reste de la semaine jugée.
+
+Non actionnable avant le 28 par construction (interdiction de toucher ce compte) — noté ici pour que ce ne soit pas oublié dans l'excitation du kickoff.
+
+---
+
+## 🟡 25/08 (Cowork) — regarder en face : la fréquence de trade réelle sur la semaine jugée est probablement très basse
+
+*Demandé explicitement par Spap. Pas un bug, pas une recommandation de toucher aux seuils — un chiffre qu'il vaut mieux connaître avant le 28 que découvrir pendant.*
+
+**La fenêtre réelle de marché ouvert, calculée jour par jour (pas supposée)** : kickoff vendredi 28/08 à 15h00 UTC, clôture des soumissions vendredi 4/09 à 15h00 UTC.
+- 28/08 (ven) : partiel, après le kickoff — peu de marge pour trader le jour même, entre la bascule de compte et la mise en route.
+- 29-30/08 : marché fermé (week-end).
+- 31/08 (lun), 1er/09 (mar), 2/09 (mer), 3/09 (jeu) : **4 jours pleins**.
+- 4/09 (ven) : la deadline (15h UTC) tombe à peu près à l'heure d'ouverture du marché US — quasiment aucune fenêtre de trading avant la clôture des soumissions.
+- **Pas de Labor Day dans la fenêtre** — vérifié par calcul de date, pas supposé : Labor Day US 2026 tombe le lundi **7 septembre**, après la deadline. Une inquiétude que j'ai eue puis écartée en calculant, pas en devinant.
+
+**Fréquence de trade réelle mesurée** (`BACKTEST_RESULTS.md`, fenêtre vettée par symbole) : SPY 26,0 % · GLD 14,6 % · XLV 13,2 % (XLK actuellement recalé par `hindsight_guard`, donc 3 symboles réellement disponibles aujourd'hui). Moyenne ≈ **17,9 %**.
+
+**Estimation grossière** (fréquence historique moyenne traitée comme une probabilité par jour et par symbole — approximation, PAS une prévision : les régimes de vol cheap sont autocorrélés dans la réalité, pas indépendants jour à jour) : 4 jours × 3 symboles × 17,9 % ≈ **2 trades espérés sur toute la semaine jugée**.
+
+**Ce que ça veut dire pour le critère #1 ("P&L Performance")** : avec 1 à 3 trades sur la semaine, le résultat sera dominé par la chance sur ce petit nombre de trades, pas une démonstration robuste d'edge — que le trade gagne ou perde. Ce n'est pas un défaut caché : le write-up le dit déjà explicitement ("53–83 % du gain vient des 5 meilleurs jours"). Mais ça veut dire concrètement que les 4 autres critères (Technology Implementation, Creativity & Originality, Presentation & Execution, Social engagement) pèseront probablement plus lourd que le P&L brut dans le classement final — raison de plus d'y investir à fond (voir `SOCIAL_POSTS_DRAFT.md`, le write-up mis à jour).
+
+**Un levier existe, mais c'est la décision de Spap, pas la mienne** : élargir `DEFAULT_UNIVERSE` (aujourd'hui 4 symboles, `SPY/GLD/XLK/XLV`) à d'autres secteurs non corrélés augmenterait le nombre de tentatives par jour sans toucher un seul seuil de risque nommé (`MAX_RISK_PCT_PER_TRADE`, `CHEAP_VOL_PERCENTILE`, etc. — `risk_gates.SECTOR_MAP` est déjà conçu pour être étendu). Pas fait ici : ça change le comportement de trading réel, même sans toucher un seuil, et c'est exactement le genre de décision ("élargir l'univers" a déjà été fait une fois aujourd'hui "à la direction explicite de Spap") qui doit rester la sienne.
+
+---
+
+## 🟡 25/08 (Cowork) — piste trouvée dans la communauté Alpaca, à VÉRIFIER avant d'y toucher : ordres bracket/OCO côté serveur
+
+*Demandé explicitement par Spap ("cherche les axes non couverts"). Trouvé en lisant "The Weekly Roundup #1" d'Alpaca (alpaca.markets/learn) : un billet communautaire de Rudraksh Mishra décrit l'usage d'ordres bracket Alpaca pour gérer le risque "when local trading bot processes stop running" — exactement le point faible structurel non couvert ici.*
+
+**Le point faible, nommé précisément** : aujourd'hui, le take-profit/stop-loss de ce projet est appliqué exclusivement par **polling côté client** — `agent.py` (une fois par jour) et `monitor_exits.py` (toutes les 15 min via launchd) interrogent les positions et ferment celles qui dépassent leur seuil. **Si les deux processus sont down en même temps** (crash machine, launchd mort, coupure réseau prolongée), rien ne protège une position ouverte — aucun ordre stop-loss n'existe côté broker. C'est exactement le scénario "policies not enforced in code are worthless" que ce projet dénonce ailleurs, appliqué cette fois à son propre mécanisme d'enforcement.
+
+**Ce qui existe chez Alpaca** (vérifié par recherche, pas supposé) : les ordres **bracket** (OTOCO — entrée + take-profit + stop-loss soumis ensemble) et **OCO** (les deux ordres de sortie soumis après coup sur une position déjà ouverte) sont bien documentés côté **actions**. **Non confirmé pour les OPTIONS spécifiquement** — la documentation trouvée ne mentionne pas explicitement ce cas, et les options sont un ajout plus récent à l'API Alpaca que les actions.
+
+**Pourquoi ce n'est PAS implémenté aujourd'hui** : ça nécessite un accès réseau réel à l'API Alpaca pour vérifier la vraie capacité, ce que le bac à sable Cowork n'a pas. Et même si c'est supporté, ajouter un ordre bracket/OCO est un changement de comportement de soumission d'ordre — pas un seuil de risque au sens strict, mais assez proche pour mériter la décision de Spap plutôt qu'être fait silencieusement.
+
+**À vérifier lors d'une prochaine session terminal** (pas urgent avant le 28, mais à garder sous le coude) :
+1. `alpaca order submit --help` — les flags `--order-class`, `--take-profit-limit-price`, `--stop-loss-stop-price` (ou équivalents) existent-ils, et fonctionnent-ils sur un symbole OCC (option) ?
+2. Si oui, tester en dry/paper sur le compte de dev : soumettre un bracket order réel sur une option, confirmer que le take-profit et le stop-loss apparaissent bien comme des ordres actifs côté Alpaca (visibles via `alpaca order list`), pas juste acceptés silencieusement puis ignorés.
+3. Si ça marche : ce serait un ÉLÉMENT DE PLUS pour "Technology Implementation" (critère de jugement) et une vraie amélioration de résilience — mais **implémenter en PLUS du polling existant, jamais à sa place** (le polling gère aussi la comptabilité interne — `consecutive_losses`, `decision_log.jsonl` — qu'un ordre bracket côté broker ne fait pas).
+4. Si ce n'est pas supporté sur les options : le documenter honnêtement comme une limite connue plutôt que de laisser le sujet ouvert sans réponse.
+
+---
+
+## ✅ 25/08 (Terminal) — bracket/OCO sur options : **NON supporté par Alpaca**, la question est close, mesurée contre l'API réelle
+
+*Réponse à la seule vraie tâche technique du brief `BRIEF_RECHERCHE_HACKATHON_DEJA_FAITE.md`. Testé sur le compte de **dev** (`523f7f05-…`, `.env`), marché ouvert, `options_trading_level: 3`. `.env.hackathon` jamais touché.*
+
+### La réponse, avec la preuve exacte
+
+```
+POST https://paper-api.alpaca.markets/v2/orders  ->  HTTP 422
+{"code": 42210000, "error": "complex orders not supported for options trading"}
+```
+
+Obtenu sur `GLD260901C00430000` (call proche de la monnaie, bid 3,82), avec `--order-class bracket`, `--take-profit '{"limit_price":"6.00"}'`, `--stop-loss '{"stop_price":"1.00"}'`. **Identique pour `--order-class oco` et `--order-class oto`** (même code 42210000). Ce n'est donc pas une particularité de `bracket` : c'est toute la famille des ordres complexes qui est fermée aux options chez Alpaca.
+
+### Le contrôle qui rend ce verdict solide
+
+Un rejet seul ne prouve rien — il pouvait venir de mes paramètres, du symbole ou du compte. **Le même ordre, mêmes symbole / qty / prix limite / time-in-force, sans `--order-class`, est ACCEPTÉ** (`id=7f26c102-…`, `order_class: simple`, `status: pending_new`). Le seul facteur qui change entre l'accepté et le rejeté est la classe d'ordre. Le rejet porte bien sur elle.
+
+**À ne pas confondre avec un test concluant : `alpaca order submit --dry-run` accepte parfaitement le bracket sur une option** et imprime un corps de requête impeccable (`order_class: bracket` avec ses deux jambes). Ce flag n'imprime que la requête locale, il ne l'envoie jamais. S'être arrêté là aurait produit la conclusion exactement inverse de la vérité.
+
+### Nettoyage — le compte est rendu tel qu'il a été trouvé
+
+L'ordre de contrôle accepté a été **annulé** : `status: canceled`, `filled_qty: 0`, plus aucun ordre ouvert. La position de test `SPY260831P00764000` (qty 2) est intacte, et aucune position n'a été créée — le prix limite était volontairement placé très en dessous du marché (2,00 $ contre un bid à 3,82 $) précisément pour qu'aucun test ne puisse remplir.
+
+### Ce que ça implique pour le projet
+
+**Rien à changer.** `manage_exits()` par polling n'est pas un pis-aller en attendant mieux : c'est le **seul** mécanisme disponible pour des sorties automatiques sur options chez Alpaca. La piste « bracket côté broker » issue de la recherche communautaire est fermée pour ce projet, et le point 3 du brief (« implémenter en plus du polling ») est sans objet. Conformément au brief, **aucun code n'a été modifié** sur cette base.
+
+C'est aussi une limite qui mérite d'être **dite** plutôt que tue : un juge qui se demande pourquoi les sorties sont surveillées par un cron toutes les 15 minutes au lieu d'être posées chez le broker a maintenant une réponse mesurée, avec le code d'erreur de l'API à l'appui.
+
+### 📄 Write-up vérifié au passage
+
+`submission/Hindsight_Alpha_Writeup.docx` — géométrie réelle lue dans le XML : **Letter 8,5×11", marges 0,43"/0,5", zéro saut de page explicite**, corps en 9–9,5 pt, 673 mots. Rendu à cette géométrie exacte via Chrome headless : **1 page**, remplie à environ la moitié de la hauteur — la contrainte « one-page write-up » du règlement est tenue avec de la marge. *(Réserve : ce rendu passe par `textutil`→HTML, donc il est fidèle sur la longueur, pas sur la typographie finale de Word.)*
+
+**Chiffres recoupés un par un contre les fichiers sources, tous justes** : concentration « 68,5–82,6 % » = GLD 20d 68,5 % et SPY 10d 82,6 % (`BACKTEST_RESULTS.md`) ; « 52–102 trades » = XLV 10d 52 et SPY 10d 102 ; « win rate 45,1–57,1 % » = SPY 45,1 % et GLD 57,1 % ; désaccord XLK (90d plein / 10d in-sample) exact ; Sharpe 1,60 / 1,96 / 1,44 = 1,598 / 1,956 / 1,442 arrondis (`STRATEGY_COMPARISON.md`).
+
+🟡 **Une imprécision de vocabulaire, signalée sans être corrigée** (le write-up est un livrable de Spap) : il écrit « Sharpe 1.60 » là où la source dit « **in-sample** Sharpe », et `STRATEGY_COMPARISON.md` porte un avertissement explicite disant de ne pas lire cette colonne comme un verdict isolé — le classement s'inverse selon la statistique choisie. Le write-up reste honnête par ailleurs (il assume la concentration et le refus sur XLK), mais ajouter « in-sample » coûterait deux mots et fermerait la seule prise possible sur ce paragraphe.
