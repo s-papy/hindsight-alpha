@@ -55,10 +55,53 @@ def alerte(fichier: str, message: str) -> None:
 # piège que celui trouvé et corrigé chez SNIPER le 07-08/08 (une ligne de
 # journal datée d'un jour pas encore arrivé). Jamais reproduit ici, mais
 # le contrôle est gratuit et le principe est le même journal.
+def _journal_volontairement_local() -> bool:
+    """True si PLAN_SPRINT.md est DÉCLARÉ dans .gitignore.
+
+    AJOUTÉ le 26/08/2026, et il faut dire pourquoi, parce que ça ressemble de
+    loin à « modifier le script pour le faire taire » — ce que ce projet
+    s'interdit.
+
+    Ce soir, PLAN_SPRINT.md a été retiré du suivi git (il reste sur le disque,
+    l'historique n'a pas été réécrit). Le contrôle 1 a alors bloqué EN CI :
+    dans un checkout propre, le fichier n'existe pas du tout. Croix rouge sur
+    le dépôt public — celle-là même dont CLAUDE.md vante la visibilité.
+
+    La prémisse du contrôle a changé, pas sa valeur. « Le journal manque » est
+    un vrai défaut quand le journal EST censé être là ; c'est une situation
+    ATTENDUE quand le fichier est explicitement déclaré local. On distingue
+    donc les deux, plutôt que de relâcher le contrôle dans les deux cas.
+
+    Le critère est .gitignore et pas une variable d'environnement `CI` : un
+    verdict qui dépend de la machine est exactement le défaut corrigé au
+    commit précédent (« the future-date check gave a different verdict per
+    machine »). .gitignore est versionné, donc le critère est le même partout.
+
+    FAIL-CLOSED : si .gitignore est illisible, on ne peut pas conclure, donc on
+    ne relâche RIEN — le contrôle reste bloquant.
+    """
+    try:
+        with open(os.path.join(RACINE, ".gitignore"), encoding="utf-8") as fh:
+            return any(l.strip() == "PLAN_SPRINT.md" for l in fh)
+    except OSError:
+        return False
+
+
 def controle_journal() -> None:
     chemin = os.path.join(RACINE, "PLAN_SPRINT.md")
     if not os.path.exists(chemin):
-        bloque("PLAN_SPRINT.md", "JOURNAL ABSENT — aucun journal de bord trouvé.")
+        if _journal_volontairement_local():
+            # Surtout PAS un silence. Le contrôle n'a rien vérifié ici et doit
+            # le dire : sans cette ligne, un 🟢 de CI laisserait croire que les
+            # dates du journal ont été relues, alors que personne ne les a
+            # regardées. Il reste pleinement effectif sur la machine où le
+            # journal vit — c'est là qu'il est écrit, donc là qu'il peut mentir.
+            alerte("PLAN_SPRINT.md",
+                   "absent de ce clone, et c'est ATTENDU : déclaré dans .gitignore, "
+                   "donc volontairement local. Ce contrôle n'a RIEN vérifié ici ; "
+                   "il reste effectif là où le journal existe.")
+        else:
+            bloque("PLAN_SPRINT.md", "JOURNAL ABSENT — aucun journal de bord trouvé.")
         return
     aujourdhui = date.today()
     lignes = open(chemin, encoding="utf-8").read().split("\n")
