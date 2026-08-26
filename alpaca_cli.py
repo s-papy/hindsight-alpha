@@ -151,12 +151,51 @@ def run(args: List[str]) -> Any:
     if not stdout:
         return None
     try:
-        return json.loads(stdout)
+        payload = json.loads(stdout)
     except json.JSONDecodeError as e:
         raise AlpacaCLIError(
             f"could not parse JSON from `alpaca {' '.join(args)}`: {e}\n"
             f"first 500 chars of output: {stdout[:500]}"
         )
+
+    # AJOUTE le 26/08/2026. Jusqu'ici, seul le CODE DE SORTIE decidait s'il y
+    # avait erreur. Or le CLI a une forme d'erreur documentee dans sa sortie
+    # elle-meme -- `{"code": 0, "error": "could not reach ..."}`, vue telle
+    # quelle dans decision_log.jsonl. Rien ne garantit que ce corps arrive
+    # TOUJOURS avec un code de sortie non nul.
+    #
+    # CE QUE COUTERAIT L'OUBLI, trace bout en bout:
+    #   get_clock()      -> rend le dict d'erreur; `.get("is_open", False)`
+    #                       vaut False; monitor_exits conclut "market closed,
+    #                       nothing to monitor", journalise outcome
+    #                       "market_closed" et NON "error", et la banniere du
+    #                       tableau de bord affiche 🟢 "healthy (market was
+    #                       closed at last check)".
+    #                       Une API injoignable devient un marche ferme, et la
+    #                       page dit VERT.
+    #   list_positions() -> le dict n'a pas de cle "positions", la valeur de
+    #                       repli n'est pas une liste, la fonction rend [].
+    #                       "Aucune position ouverte" -- donc manage_exits ne
+    #                       verifie AUCUN stop-loss.
+    #
+    # Les deux degradent en silence, du cote dangereux, dans le seul mecanisme
+    # qui protege une position ouverte.
+    #
+    # PORTEE HONNETE: le cas observe sortait en code 1, donc etait deja
+    # attrape. Ce correctif ferme un chemin LATENT, il ne corrige pas une
+    # panne constatee. Il est pose parce que le cout d'avoir tort est
+    # exactement le mode de panne que ce projet existe pour empecher, et
+    # parce qu'une valeur qu'on ne sait pas interpreter n'est pas une
+    # permission de supposer.
+    #
+    # Seule une valeur VRAIE declenche: une charge legitime portant
+    # `"error": null` ou `"error": ""` reste une reponse valide.
+    if isinstance(payload, dict) and payload.get("error"):
+        raise AlpacaCLIError(
+            f"`alpaca {' '.join(args)}` exited {result.returncode} but returned an "
+            f"error payload: {payload.get('error')!r}"
+        )
+    return payload
 
 
 def get_account() -> dict:
@@ -171,12 +210,42 @@ def get_clock() -> dict:
 
 
 def list_positions() -> List[dict]:
+    """Positions ouvertes. Leve plutot que de rendre [] sur une reponse
+    inexploitable.
+
+    CORRIGE le 26/08/2026. La derniere ligne etait
+    `return data if isinstance(data, list) else []`: toute reponse que cette
+    fonction ne savait pas lire devenait "aucune position ouverte".
+
+    C'est le pire repli possible ICI precisement. `manage_exits()` boucle sur
+    ce que rend cette fonction: une liste vide veut dire "rien a surveiller",
+    donc AUCUN stop-loss n'est verifie. Et comme Alpaca ne supporte pas les
+    ordres bracket/OCO sur options -- verifie contre la vraie API -- cette
+    boucle est le seul mecanisme protegeant une position ouverte. Un malentendu
+    de format se serait traduit par une position reelle laissee sans
+    surveillance, sans une ligne de journal pour le dire.
+
+    "Je n'ai pas compris la reponse" n'est pas "il n'y a rien". Un vrai vide --
+    stdout vide, ou une liste vide -- reste bien sur un vide legitime.
+    """
     data = run(["position", "list"])
     if data is None:
         return []
+    if isinstance(data, list):
+        return data
     if isinstance(data, dict):
-        data = data.get("positions", list(data.values())[0] if data else [])
-    return data if isinstance(data, list) else []
+        positions = data.get("positions")
+        if isinstance(positions, list):
+            return positions
+        if not data:
+            return []
+    raise AlpacaCLIError(
+        "could not read the position list from `alpaca position list`: expected a "
+        f"list, or a dict with a 'positions' list, got {type(data).__name__} "
+        f"with keys {sorted(data)[:6] if isinstance(data, dict) else '(n/a)'}. "
+        "Refusing to report 'no open positions' from a response this function "
+        "does not understand -- that would silently skip every stop-loss check."
+    )
 
 
 # Half-width of the strike window requested around spot when hunting for a

@@ -660,3 +660,126 @@ class TestInvariantDAlignement(unittest.TestCase):
                       "le backtest n'exclut plus hv[i] de sa propre distribution")
         self.assertIn(":-1]", live,
                       "le chemin live n'exclut plus hv[-1] de sa propre distribution")
+
+
+class TestFrontiereCLI(unittest.TestCase):
+    """La frontière avec l'extérieur : ce que `run()` accepte comme réponse.
+
+    DEUX REPLIS SILENCIEUX, tous deux du côté dangereux, tous deux dans le
+    seul mécanisme qui protège une position ouverte.
+
+    1. `run()` ne jugeait que le CODE DE SORTIE. Or le CLI a une forme
+       d'erreur dans sa sortie elle-même — `{"code": 0, "error": "could not
+       reach ..."}`, vue telle quelle dans decision_log.jsonl. Rien ne
+       garantit que ce corps arrive toujours avec un code non nul.
+
+       Tracé bout en bout : `get_clock()` rendrait le dict d'erreur,
+       `.get("is_open", False)` vaudrait False, le moniteur conclurait
+       « market closed », journaliserait `market_closed` et NON `error`, et la
+       bannière afficherait **🟢 healthy**. Une API injoignable devenue un
+       marché fermé, avec la page au vert.
+
+    2. `list_positions()` finissait par `return data if isinstance(data, list)
+       else []`. Toute réponse incomprise devenait « aucune position ouverte »
+       — donc `manage_exits()` ne vérifiait AUCUN stop-loss, sans une ligne de
+       journal pour le dire.
+
+    PORTÉE HONNÊTE : le cas d'erreur observé sortait en code 1, donc était déjà
+    attrapé. Ces tests ferment des chemins LATENTS. Ils sont là parce que le
+    coût d'avoir tort est exactement le mode de panne que ce projet existe pour
+    empêcher.
+    """
+
+    def setUp(self):
+        # Sauvegarder TOUT ce que ces tests remplacent. La premiere version ne
+        # gardait que `run`, et le dernier test laissait un `list_positions`
+        # piege en place: quatre tests suivants echouaient sur un etat pollue
+        # par un autre. L'ironie est notee -- une suite qui epingle des defauts
+        # d'isolation en avait un.
+        self._sauve = {nom: getattr(alpaca_cli, nom)
+                       for nom in ("run", "list_positions")}
+
+    def tearDown(self):
+        for nom, valeur in self._sauve.items():
+            setattr(alpaca_cli, nom, valeur)
+
+    def test_une_charge_derreur_leve_meme_avec_un_code_de_sortie_nul(self):
+        import json as _json
+        import types
+        vrais = (alpaca_cli._require_binary, alpaca_cli._check_cli_version,
+                 alpaca_cli.subprocess)
+        import config
+        vrai_creds = config.require_credentials
+
+        class Resultat:
+            returncode, stderr = 0, ""
+            stdout = _json.dumps({"code": 0, "error": "could not reach https://..."})
+
+        alpaca_cli._require_binary = lambda: None
+        alpaca_cli._check_cli_version = lambda: None
+        config.require_credentials = lambda: None
+        alpaca_cli.subprocess = types.SimpleNamespace(
+            run=lambda *a, **k: Resultat(), TimeoutExpired=Exception)
+        try:
+            with self.assertRaises(alpaca_cli.AlpacaCLIError) as ctx:
+                alpaca_cli.run(["clock"])
+            self.assertIn("error payload", str(ctx.exception))
+        finally:
+            (alpaca_cli._require_binary, alpaca_cli._check_cli_version,
+             alpaca_cli.subprocess) = vrais
+            config.require_credentials = vrai_creds
+
+    def test_une_cle_error_vide_reste_une_reponse_valide(self):
+        """Contre-épreuve : `error: null` ne doit pas faire échouer un appel
+        parfaitement normal."""
+        import json as _json
+        import types
+        vrais = (alpaca_cli._require_binary, alpaca_cli._check_cli_version,
+                 alpaca_cli.subprocess)
+        import config
+        vrai_creds = config.require_credentials
+
+        for valeur in (None, ""):
+            class Resultat:
+                returncode, stderr = 0, ""
+                stdout = _json.dumps({"id": "abc", "error": valeur})
+
+            alpaca_cli._require_binary = lambda: None
+            alpaca_cli._check_cli_version = lambda: None
+            config.require_credentials = lambda: None
+            alpaca_cli.subprocess = types.SimpleNamespace(
+                run=lambda *a, **k: Resultat(), TimeoutExpired=Exception)
+            try:
+                with self.subTest(valeur=valeur):
+                    self.assertEqual(alpaca_cli.run(["account", "get"])["id"], "abc")
+            finally:
+                (alpaca_cli._require_binary, alpaca_cli._check_cli_version,
+                 alpaca_cli.subprocess) = vrais
+                config.require_credentials = vrai_creds
+
+    def test_un_vrai_vide_reste_un_vide(self):
+        """Le correctif ne doit pas transformer une absence légitime de
+        position en erreur."""
+        for charge in (None, [], {"positions": []}, {}):
+            with self.subTest(charge=charge):
+                alpaca_cli.run = lambda a, _c=charge: _c
+                self.assertEqual(alpaca_cli.list_positions(), [])
+
+    def test_une_reponse_incomprise_ne_devient_pas_aucune_position(self):
+        """Le cœur du défaut : « je n'ai pas compris » n'est pas « il n'y a
+        rien ». Rendre [] ici ferait sauter TOUS les stop-loss en silence."""
+        for charge in ({"code": 0, "data": "?"}, "une chaîne", 42):
+            with self.subTest(charge=charge):
+                alpaca_cli.run = lambda a, _c=charge: _c
+                with self.assertRaises(alpaca_cli.AlpacaCLIError):
+                    alpaca_cli.list_positions()
+
+    def test_lexception_remonte_jusqu_a_manage_exits(self):
+        """Elle doit atteindre monitor_exits, qui la journalise en `error` et
+        fait passer la bannière au rouge — visible, pas silencieux."""
+        def leve():
+            raise alpaca_cli.AlpacaCLIError("réponse illisible")
+        alpaca_cli.list_positions = leve
+        # tearDown restaure -- pas de finally bricole ici.
+        with self.assertRaises(alpaca_cli.AlpacaCLIError):
+            risk_gates.manage_exits(dry_run=False)
