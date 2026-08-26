@@ -168,7 +168,7 @@ inside it. See `risk_gates.py`:
 
 The strategy is not the deliverable — the agent is. These controls come from
 an Alpaca-published reference architecture and a trading-agent architecture
-guide, and live in `risk_gates.py` unless noted, each with regression tests:
+guide, and live in `risk_gates.py` unless noted:
 
 - **Sector concentration cap** (`MAX_SECTOR_EXPOSURE_PCT`, 1.5% of equity):
   caps committed premium per sector (`SECTOR_MAP`), not just per underlying.
@@ -289,6 +289,7 @@ cp .env.example .env
 # Alpaca dashboard, Home page -> API Keys widget). Never the live-account keys.
 
 # 4. Run
+python3 -m unittest test_risk_gates   # 12 offline tests, no credentials needed
 python test_connection.py      # confirms CLI install + credentials + network
 python agent.py --dry-run      # runs the full leakage check, no order placed
 python agent.py                # if vetted, places a real (paper) options order
@@ -322,6 +323,11 @@ python agent.py                # if vetted, places a real (paper) options order
   build step, no framework, fetches `./data.json` and renders it. Meant to
   be served by GitHub Pages from this repo's `docs/` folder — see "Hosted
   dashboard" below.
+- `test_risk_gates.py` — regression tests for the exit chain and the
+  consecutive-loss breaker: threshold units, boundary, counter increment and
+  reset, per-position isolation when one close fails, unreadable P&L. Standard
+  library only, fully mocked — no network, no credentials, no order. Run with
+  `python3 -m unittest test_risk_gates -v`; also run in CI on every push.
 - `test_connection.py` — run first; confirms CLI install + `.env` + network
   access all work.
 - `config.py` — loads `.env`, hard-refuses to run against anything that
