@@ -1,13 +1,25 @@
 # Hindsight Alpha
 
+[![garde-fou](https://github.com/s-papy/hindsight-alpha/actions/workflows/garde-fou.yml/badge.svg)](https://github.com/s-papy/hindsight-alpha/actions/workflows/garde-fou.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Paper trading only](https://img.shields.io/badge/trading-paper%20only-brightgreen.svg)](#status)
+
+**An options-trading agent that refuses to trade when its own parameter
+selection fails an out-of-sample check — re-run before every decision, not once
+at design time.**
+
 Entry for the **Alpaca AI Trading Agents Hackathon** (lablab.ai, deadline
 04/09/2026). Team: Hindsight Alpha.
 
-An options-trading agent that refuses to trust its own parameter selection
-until it's checked for hindsight leakage.
-
 **Live dashboard: [s-papy.github.io/hindsight-alpha](https://s-papy.github.io/hindsight-alpha)** —
-every run, every refusal, every real order, updated as the week runs.
+every run, every refusal, every real order.
+
+| | |
+|---|---|
+| **The mechanism** | scores each parameter twice — full history vs. yesterday-only — and refuses the symbol when the two winners disagree |
+| **Does it catch anything real?** | yes: XLK is refused live, every run, on real bars |
+| **Risk** | paper trading only, enforced in code; per-trade, total-exposure, sector, drawdown and consecutive-loss caps |
+| **Proof it runs** | real paper order filled and closed; 12 offline regression tests; CI green on every push |
 
 ### TL;DR
 
