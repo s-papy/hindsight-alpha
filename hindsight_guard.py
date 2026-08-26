@@ -33,6 +33,7 @@ MIT license. Standard library only.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Sequence
 
@@ -51,10 +52,18 @@ class LeakageReport:
     in_sample_winner: Any
     in_sample_clears_bar: bool
     threshold: float
+    unscorable: List[Any] = field(default_factory=list)
     agrees: bool = field(init=False)
 
     def __post_init__(self) -> None:
-        self.agrees = (self.full_winner == self.in_sample_winner) and self.in_sample_clears_bar
+        # `unscorable` domine tout le reste: si un candidat n'a pas pu etre
+        # note, on ne peut pas dire lequel gagne, donc on ne dit pas qu'il n'y
+        # a pas de fuite.
+        self.agrees = (
+            not self.unscorable
+            and self.full_winner == self.in_sample_winner
+            and self.in_sample_clears_bar
+        )
 
     def summary(self) -> str:
         lines = []
@@ -62,6 +71,15 @@ class LeakageReport:
             lines.append(
                 f"OK: full-window winner ({self.full_winner!r}) matches the in-sample "
                 f"winner and clears the threshold ({self.threshold})."
+            )
+        elif self.unscorable:
+            lines.append(
+                "CANNOT CONCLUDE: score_fn returned a non-finite value (NaN or "
+                "infinity) for " + ", ".join(repr(c) for c in self.unscorable) + "."
+            )
+            lines.append(
+                "  -> a candidate that could not be scored is not a candidate that "
+                "lost. Refusing to certify this selection as leak-free."
             )
         else:
             lines.append("LEAK DETECTED: this selection depends on data outside the in-sample window.")
@@ -115,8 +133,43 @@ def check_selection_leakage(
         says agrees=False. Useful as a hard gate in a pipeline; leave False
         to just inspect the report.
     """
+    if not candidates:
+        # `max()` sur un dictionnaire vide leve "max() arg is an empty
+        # sequence", ce qui ne dit rien a l'appelant de ce qu'il a mal fait.
+        raise ValueError(
+            "check_selection_leakage() needs at least one candidate; got none. "
+            "With a single candidate the disagreement test is vacuous by "
+            "construction (the same candidate wins both windows), so two or "
+            "more is what makes this check meaningful."
+        )
+
     full_scores = {c: score_fn(c, "full") for c in candidates}
     in_sample_scores = {c: score_fn(c, "in_sample") for c in candidates}
+
+    # AJOUTE le 26/08/2026. `max()` compare avec `>`, et toute comparaison avec
+    # NaN rend False. Consequence mesuree, et elle depend de l'ORDRE:
+    #
+    #     scores {"A": nan, "B": 1.0}  -> gagnant A, agrees=False  (echoue ferme)
+    #     scores {"A": 1.0, "B": nan}  -> gagnant A, agrees=TRUE   (le NaN est
+    #                                     silencieusement ecarte, et le garde
+    #                                     certifie l'absence de fuite)
+    #
+    # Un candidat qu'on n'a PAS PU noter n'est pas un candidat qui a perdu. Si
+    # le vrai meilleur candidat echoue a se noter sur une fenetre -- donnee
+    # manquante, division par zero -- il disparait sans bruit et un autre est
+    # certifie propre. C'est un echec silencieux au coeur meme du mecanisme que
+    # cette bibliotheque existe pour fournir.
+    #
+    # Non atteignable aujourd'hui par vol_strategy.py (`_sharpe` rend 0.0 sur
+    # un ecart-type nul ou moins de deux points, et la porte qualite-donnees
+    # refuse les barres aberrantes en amont). Mais cette bibliotheque est
+    # explicitement concue pour un `score_fn` quelconque -- son propre
+    # docstring dit qu'elle ne touche jamais aux donnees -- donc le cas est
+    # ouvert pour tout autre appelant.
+    unscorable = [
+        c for c in candidates
+        if not math.isfinite(full_scores[c]) or not math.isfinite(in_sample_scores[c])
+    ]
 
     full_winner = max(full_scores, key=full_scores.get)
     in_sample_winner = max(in_sample_scores, key=in_sample_scores.get)
@@ -130,6 +183,7 @@ def check_selection_leakage(
         in_sample_winner=in_sample_winner,
         in_sample_clears_bar=in_sample_clears_bar,
         threshold=threshold,
+        unscorable=unscorable,
     )
 
     if raise_on_leak and not report.agrees:

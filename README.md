@@ -125,8 +125,9 @@ For each symbol:
    window twice — once on the full bar history, once restricted to
    everything except the most recent 20 bars (what would actually have been
    knowable the day before "today"). Compares the two winners.
-4. **If they disagree, or nothing clears the Sharpe bar in-sample, the agent
-   refuses to trade and prints why.** This is the point of the project —
+4. **If they disagree, if nothing clears the Sharpe bar in-sample, or if any
+   candidate could not be scored at all, the agent refuses to trade and prints
+   why.** This is the point of the project —
    not a better signal, but an agent honest about when its own selection
    process doesn't hold up out of sample.
 5. If vetted, checks today's volatility regime with the trusted window. If

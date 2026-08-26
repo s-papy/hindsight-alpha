@@ -43,6 +43,7 @@ WHAT EACH TEST PINS, AND WHY IT WOULD MATTER
 from __future__ import annotations
 
 import json
+import math
 import os
 import shutil
 import sys
@@ -354,3 +355,96 @@ class TestGardePaperUniquement(unittest.TestCase):
                         os.environ.pop("ALPACA_LIVE_TRADE", None)
                     else:
                         os.environ["ALPACA_LIVE_TRADE"] = ancien
+
+
+class TestHindsightGuard(unittest.TestCase):
+    """Le mécanisme central du projet : le test de fuite lui-même.
+
+    Il tient en une quarantaine de lignes, et c'est là que ça compte — si ce
+    verdict est faux, tout l'argument du projet tombe.
+
+    LE DÉFAUT TROUVÉ, ET IL DÉPENDAIT DE L'ORDRE. `max()` compare avec `>`, et
+    toute comparaison avec NaN rend False. Mesuré avant correctif :
+
+        {"A": nan, "B": 1.0}  -> gagnant A, agrees=False  (échoue fermé)
+        {"A": 1.0, "B": nan}  -> gagnant A, agrees=TRUE   (le NaN est écarté
+                                  en silence, et le garde CERTIFIE l'absence
+                                  de fuite)
+
+    Un candidat qu'on n'a pas pu noter n'est pas un candidat qui a perdu. Si le
+    vrai meilleur échoue à se noter sur une fenêtre, il disparaît sans bruit et
+    un autre est déclaré propre.
+
+    PORTÉE HONNÊTE : non atteignable aujourd'hui par `vol_strategy.py` — vérifié
+    sur barres courtes, prix plats et un prix à zéro, tous donnent 0.0 fini.
+    Mais cette bibliothèque est explicitement conçue pour un `score_fn`
+    quelconque, donc le cas est ouvert pour tout autre appelant.
+    """
+
+    @staticmethod
+    def _verdict(full, in_sample, seuil=0.0):
+        from hindsight_guard import check_selection_leakage
+        return check_selection_leakage(
+            list(full), lambda c, w: (full if w == "full" else in_sample)[c],
+            threshold=seuil)
+
+    def test_un_score_non_fini_empeche_de_conclure_quelle_que_soit_sa_position(self):
+        """Le cœur du défaut : le verdict ne doit pas dépendre de l'ordre."""
+        nan = float("nan")
+        for scores, position in (({"A": nan, "B": 1.0}, "premier"),
+                                 ({"A": 1.0, "B": nan}, "second"),
+                                 ({"A": 1.0, "B": float("inf")}, "infini")):
+            with self.subTest(position=position):
+                r = self._verdict(scores, dict(scores))
+                self.assertFalse(r.agrees,
+                                 "un score non fini en %s position laisse certifier "
+                                 "l'absence de fuite" % position)
+                self.assertTrue(r.unscorable, "le candidat fautif doit être nommé")
+                self.assertIn("CANNOT CONCLUDE", r.summary())
+
+    def test_le_cas_normal_nest_pas_affecte(self):
+        """Contrepartie : un garde qui refuse tout ne sert à rien."""
+        r = self._verdict({"A": 2.0, "B": 1.0}, {"A": 2.0, "B": 1.0})
+        self.assertTrue(r.agrees)
+        self.assertEqual(r.unscorable, [])
+
+    def test_un_desaccord_reste_une_fuite(self):
+        r = self._verdict({"A": 2.0, "B": 1.0}, {"B": 2.0, "A": 1.0})
+        self.assertFalse(r.agrees)
+        self.assertIn("LEAK DETECTED", r.summary())
+
+    def test_rien_au_dessus_du_seuil_reste_un_refus(self):
+        r = self._verdict({"A": 2.0, "B": 1.0}, {"A": -1.0, "B": -2.0})
+        self.assertFalse(r.agrees)
+        self.assertFalse(r.in_sample_clears_bar)
+
+    def test_le_seuil_est_strict(self):
+        """Pile au seuil ne passe pas : `>` et non `>=`."""
+        self.assertFalse(self._verdict({"A": 9.0}, {"A": 0.0}).in_sample_clears_bar)
+        self.assertTrue(self._verdict({"A": 9.0}, {"A": 1e-9}).in_sample_clears_bar)
+
+    def test_aucun_candidat_donne_une_erreur_qui_explique(self):
+        """`max() arg is an empty sequence` ne dit rien à l'appelant."""
+        with self.assertRaises(ValueError) as ctx:
+            self._verdict({}, {})
+        self.assertIn("at least one candidate", str(ctx.exception))
+
+    def test_la_vraie_fonction_de_score_ne_produit_jamais_de_non_fini(self):
+        """Vérifie la portée annoncée plus haut plutôt que de l'affirmer.
+
+        Barres absentes, trop courtes, prix strictement plats, et un prix à
+        zéro — le cas qui pourrait diviser par zéro."""
+        import vol_strategy
+        from vol_strategy import Bar
+        cas = {
+            "aucune barre": [],
+            "une barre": [Bar(close=100.0)],
+            "prix plats": [Bar(close=100.0) for _ in range(300)],
+            "un prix a zero": [Bar(close=100.0)] * 150 + [Bar(close=0.0)] + [Bar(close=100.0)] * 150,
+        }
+        for nom, barres in cas.items():
+            for split in ("full", "in_sample"):
+                with self.subTest(cas=nom, split=split):
+                    score = vol_strategy.score_hv_window(10, split, barres)
+                    self.assertTrue(math.isfinite(score),
+                                    "score_hv_window rend un non-fini sur %r" % nom)
