@@ -51,4 +51,4 @@
 
 ⚠️ **Et surtout, ne jamais classer les rendements cumulés** : `momentum` est en permanence dans le marché, donc son « +65,83 % » sur GLD est essentiellement du buy-and-hold filtré — GLD seul a fait **+126,96 %** sur la même période.
 
-**Décision : aucune.** *Basculer la stratégie appartient à Spap. Ce document donne désormais les trois chiffres qui tirent dans des sens différents, plutôt qu'un seul qui tranche à sa place.*
+**Décision : aucune.** *Basculer la stratégie relève d'une décision humaine explicite. Ce document donne désormais les trois chiffres qui tirent dans des sens différents, plutôt qu'un seul qui tranche à sa place.*
