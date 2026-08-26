@@ -25,8 +25,8 @@ window was folded into the selection criterion. See demo_tsmom.py at
 https://github.com/<user>/hindsight-guard for the real numbers.
 
 This copy is vendored into hindsight-alpha (same author, MIT license) so the
-agent has no path-dependent import to the sibling repo. Canonical source:
-CERVEAU/hindsight-guard/hindsight_guard.py.
+agent has no path-dependent import to the sibling repo. Canonical source: the
+author's separate hindsight-guard repository.
 
 MIT license. Standard library only.
 """

@@ -255,16 +255,14 @@ a human-driven AI host attached (Claude Desktop, Cursor). This agent runs
 as a scheduled sweep-then-decide command — the CLI's exact use case, not
 the MCP server's. See `alpaca_cli.py` for the subprocess wrapper.
 
-## Why this can't run inside Cowork's sandbox
+## What the agent needs to run
 
-Cowork's bash sandbox only allows outbound calls to an allowlisted set of
-domains; `paper-api.alpaca.markets` and `data.alpaca.markets` are not on it,
-and the `alpaca` CLI binary can't be installed/run there either. This code
-was written and unit-testable there (with mocked/synthetic data), but live
-testing requires a real terminal with normal internet access — hence this
-being handed off to run on your Mac directly.
+A normal terminal with outbound network access to `paper-api.alpaca.markets`
+and `data.alpaca.markets`, plus the `alpaca` CLI binary. The code is written
+to be unit-testable offline against mocked data, but any live run — placing a
+paper order, reading real bars — needs that network access.
 
-## Setup (run in a real terminal, not Cowork)
+## Setup (run once, in a terminal)
 
 ```bash
 # 1. Install the Alpaca CLI (not a pip package)
@@ -344,15 +342,13 @@ browser verification. Merged back into one list here.)*
 
 Required by the submission ("Demo application platform", "Application
 URL"). Hosting choice: **GitHub Pages serving `docs/`**, not a separate
-server — same pattern already used for another of Spap's projects
-(SNIPER's D31 dashboard). The reasoning: the public page never needs to see
+server — a pattern already proven on an earlier project. The reasoning: the public page never needs to see
 an API key. `publish_dashboard.py` runs locally (wherever `agent.py` runs,
 with real credentials in `.env`), writes a plain JSON snapshot, and that
 snapshot — not a live connection — is what gets committed and served.
 Nothing publicly reachable ever touches Alpaca directly.
 
-Setup (once, in a real terminal — already done; see `BRIEF_DEBLOQUER_MONITOR_ET_KICKOFF.md`
-for the current terminal handoff):
+Setup (once, in a terminal — already done):
 
 ```bash
 python publish_dashboard.py         # writes docs/data.json
@@ -370,8 +366,7 @@ explicit each time, not a silent default.
 
 **Verified for real in a real browser** (not just parsed offline): a local
 server + Chrome session confirmed all three sections render, zero console
-errors, and the figures match `docs/data.json` exactly (see PLAN_SPRINT.md,
-"session terminal n°2"). Every later change to `docs/index.html` (the
+errors, and the figures match `docs/data.json` exactly. Every later change to `docs/index.html` (the
 multi-symbol `renderTrade()` rewrite, the `exit_actions` rendering fix, the
 `outcomeBadge()` signature change) was re-checked offline the same way the
 first version was before that live check — HTML tag balance, `node --check`
@@ -408,7 +403,7 @@ Agreed plan, given that:
 
 *This section was stale until 24/08 evening — it still said "not yet run
 end-to-end," found and corrected in a "cherche encore" pass after noticing
-`PLAN_SPRINT.md` already documented a real run. Worth remembering: a status
+the project's own engineering log already documented a real run. Worth remembering: a status
 paragraph that isn't updated when reality changes is exactly the kind of
 silent code/doc gap this project exists to catch elsewhere — including in
 itself.*
@@ -419,8 +414,8 @@ Zero real funds at risk — paper trading only, enforced in `config.py`.
 dedicated hackathon account): CLI installed and verified, a real paper
 option order was submitted and later closed via a real take-profit/stop-loss
 check, and the hosted dashboard was visually confirmed in a real browser
-showing that real data. See `PLAN_SPRINT.md`'s "Premier test réel réussi"
-section for the exact order IDs and what was found and fixed along the way
+showing that real data. The exact order IDs and what was found and fixed
+along the way are recorded in the project's engineering log
 (four real code/API mismatches, including one — the options-contracts
 pagination bug — that would have silently refused every trade forever).
 
@@ -434,8 +429,8 @@ an in-progress exit, the duplicate-order guard fired for real, and
 `hindsight_guard` genuinely rejected XLK live. Five more real bugs turned up
 in that same session's "cherche encore" passes, all one family — *the code
 carefully protects the action, then treats its own trace of that action as
-a detail* — see `PLAN_SPRINT.md` for the full list, in order, most recent
-first.
+a detail*. The full list is kept in the project's engineering log, most
+recent first.
 
 **Update, 25/08 — the TCC/Full Disk Access gap above is resolved**:
 `monitor_exits.py` is running on its `launchd` schedule for real (confirmed
@@ -448,7 +443,7 @@ before the network call timed out — proven by matching each failure's
 timestamp to `pmset`'s sleep log, to the second. It recovered on its own
 once the Mac was actually awake, and hasn't failed since. Because Alpaca
 does **not** support bracket/OCO orders on options (confirmed against the
-real API, see `PLAN_SPRINT.md`), this client-side polling loop is the *only*
+real API), this client-side polling loop is the *only*
 mechanism protecting an open position — so for the judged week (31/08–3/09)
 the single most important non-code action is keeping the Mac powered and
 awake during US market hours. The dashboard now carries a client-computed
@@ -464,11 +459,3 @@ balance to be **exactly $100,000**, and resetting a paper account to a
 specific balance invalidates its old API key — so the first action on
 kickoff morning (28/08) is `alpaca account get --quiet` against the
 dedicated account, before anything else touches it.
-
-Several terminal-handoff briefs exist from different points across the
-project (see `BRIEF_*.md` at the repo root) — **`BRIEF_COMMIT_INDICATEUR_SANTE_ET_WRITEUP.md`
-is the current one** as of 25/08 evening, covering the dashboard health
-banner and a small write-up wording fix. Earlier briefs are superseded
-snapshots, kept for the record rather than deleted.
-See `PLAN_SPRINT.md` for the full day-by-day plan and complete history of
-what was found and fixed.

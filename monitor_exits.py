@@ -8,7 +8,7 @@ architecture (alpaca.markets/learn, May 2026) runs its "position monitor"
 every 15 minutes, independent of the entry-decision cycle. Before this
 script existed, risk_gates.manage_exits() only ran at the very start of
 each agent.py invocation -- if agent.py is scheduled once a day (still an
-open choice, see PLAN_SPRINT.md "Choix a trancher avant le 28"), a position
+open choice, tracked in the engineering log), a position
 that blows past its -50% stop-loss an hour after that run would sit open,
 unmanaged, until the next day's run. That is a real gap in exit discipline,
 not a cosmetic one: risk_gates.py's whole reason for existing is that
@@ -29,7 +29,8 @@ entries, never manage_exits).
 
 Run: python monitor_exits.py [--dry-run]
 
-Scheduling (do this on the real Mac, in a real terminal -- Cowork cannot
+Scheduling (do this on the machine that runs the agent, in a terminal -- a
+sandboxed environment cannot
 set up a persistent scheduled job on Spap's machine):
 
     # cron, every 15 minutes during US market hours (9:30-16:00 ET), weekdays
@@ -73,7 +74,7 @@ DEDUP_FILE = Path(__file__).parent / "monitor_exits_dedup.json"
 # decision_log.jsonl's job (a curated, durable trace of what happened worth
 # keeping forever), but found 25/08 by checking it against a real incident,
 # not by reasoning about it in the abstract: it created a blind spot. The
-# scheduled job failed 11 times in a row (DarkWake/DNS, see PLAN_SPRINT.md),
+# scheduled job failed 11 times in a row (DarkWake/DNS),
 # then recovered on its own at 17:55 and kept succeeding -- but a healthy
 # "holding, nothing to do" check is never noteworthy, so NOT ONE entry ever
 # recorded that recovery. A dashboard health indicator reading only
@@ -251,7 +252,7 @@ def main() -> None:
         # noise would fully evict agent.py's actual once-daily entry
         # decisions from the "recent decisions" section of the public
         # dashboard, exactly what a judge would look at. Logging remains
-        # complete and honest (nothing hidden -- see PLAN_SPRINT.md for the
+        # complete and honest (nothing hidden -- see the engineering log for the
         # reasoning), it's just not logging routine non-events.
         # The test is INVERTED on purpose -- fixed 24/08, third "cherche
         # encore" pass, after reproducing what the original version dropped.

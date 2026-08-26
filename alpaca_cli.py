@@ -28,7 +28,7 @@ to return "structured JSON" but the exact field names for a couple of
 commands (`data bars`, options contracts via raw API) weren't shown with a
 sample payload in the docs available while writing this offline. Parsing
 here defensively tries the REST API's known shapes (short keys like "c" for
-close, "bars" nested by symbol) — flagged explicitly in BRIEF_TEST_AGENT_TERMINAL.md
+close, "bars" nested by symbol) — flagged explicitly during a real-terminal test pass
 as the first thing to verify once this runs against the real CLI, with
 `--schema` (a real CLI flag) as the way to check without spending a call.
 """

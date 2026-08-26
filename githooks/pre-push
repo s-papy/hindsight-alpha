@@ -2,14 +2,13 @@
 # githooks/pre-push — hindsight-alpha
 #
 # AJOUTÉ le 25/08/2026, en adaptant (pas en copiant) le principe de /careful
-# de gstack (github.com/garrytan/gstack, cloné en référence dans
-# CERVEAU/OUTILS_CONTROLE_GARDE_FOU/5_REFERENCES_EXTERNES/gstack/) : avertir
+# de gstack (github.com/garrytan/gstack, lu en référence) : avertir
 # avant une commande destructrice, ici un push non-fast-forward (ce qu'un
 # `--force` ou `--force-with-lease` produit).
 #
 # Pourquoi celui-là précisément : « Jamais de git push --force » est une
 # contrainte non négociable du projet, répétée littéralement dans CLAUDE.md
-# et PLAN_SPRINT.md tout au long du sprint — mais avant ce hook, RIEN ne la
+# tout au long du sprint — mais avant ce hook, RIEN ne la
 # faisait respecter mécaniquement. C'est exactement le même trou que
 # garde_fou.py comblait déjà pour .env.hackathon et pour ALPACA_LIVE_TRADE :
 # une règle écrite noir sur blanc, jamais vérifiée par du code.

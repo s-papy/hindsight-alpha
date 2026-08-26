@@ -2,9 +2,8 @@
 reads. Run this after (or as part of) each agent.py run.
 
 Hosting choice: GitHub Pages serving the docs/ folder of this same public
-repo, not a separate server. Two reasons: it reuses a pattern Spap already
-has running for another project's dashboard (SNIPER's D31/precision_vote.py
-on GitHub Pages), and — more importantly — it means the API secret keys
+repo, not a separate server. Two reasons: it reuses a dashboard pattern
+already proven on an earlier project, and — more importantly — it means the API secret keys
 never have to live anywhere except this machine's .env. A hosted server
 approach would need the keys wherever it runs; a static page instead just
 needs a JSON snapshot regenerated locally, committed, and pushed. The public

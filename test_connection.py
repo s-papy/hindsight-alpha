@@ -1,6 +1,7 @@
 """Run this FIRST, before agent.py. Confirms the `alpaca` CLI is installed,
 your .env credentials work, and this machine can actually reach Alpaca's
-paper API (the Cowork sandbox cannot — this is why it needs to run in a
+paper API (a sandboxed environment without outbound access cannot — this is
+why it needs to run in a
 real terminal).
 
 Run: python test_connection.py
@@ -31,7 +32,7 @@ def main() -> None:
     # compare a "PA..." string against a UUID -- never equal by construction,
     # so this check would print a false "mismatch" warning on every single
     # correctly-configured run. Compare against account_number instead (see
-    # PLAN_SPRINT.md, 24/08 pass -- the same id/account_number confusion was
+    # engineering log, 24/08 pass -- the same id/account_number confusion was
     # just found and fixed in publish_dashboard.py's dashboard display).
     actual_account_number = account.get("account_number")
     if config.ACCOUNT_ID and actual_account_number and actual_account_number != config.ACCOUNT_ID:

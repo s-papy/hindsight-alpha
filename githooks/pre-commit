@@ -6,7 +6,7 @@
 # le plus profond n'était pas un contrôle manquant, c'était l'absence de
 # tout mécanisme forçant `garde_fou.py` à tourner. Un script qu'il faut
 # PENSER à lancer à la main ne protège rien le jour où on est pressé —
-# exactement le défaut que garde-fou/OUTILS_CONTROLE_GARDE_FOU dénonce
+# exactement le défaut qu'un garde-fou dénonce
 # ailleurs sous une autre forme ("un outil qui existe mais qu'on ne lance
 # pas ne sert à rien").
 #

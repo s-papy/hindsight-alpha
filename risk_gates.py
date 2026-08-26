@@ -276,7 +276,7 @@ def _record_starting_equity(equity: float, state: dict, account_id: Optional[str
 
     account_id is compared against whatever is already saved in state.json.
     Without this check, switching .env from the dev account to the dedicated
-    hackathon account at kickoff (a planned step, see PLAN_SPRINT.md) would
+    hackathon account at kickoff (a planned step) would
     silently compare the new account's real equity against the OLD account's
     starting_equity -- two unrelated numbers, since state.json is a single
     shared file with no account awareness. That could either falsely trip
@@ -414,7 +414,7 @@ def already_traded_today(underlying: str) -> bool:
     Added 24/08, second pass -- named "idempotency keys on every order...
     a retry after a timeout sends the order twice" in an external
     architecture guide researched after Spap asked what would improve the
-    AGENT, not the strategy (see PLAN_SPRINT.md)."""
+    AGENT, not the strategy."""
     state = _load_state()
     record = state.get("traded_today", {})
     return record.get("date") == _today() and underlying.upper() in record.get("symbols", [])
@@ -448,7 +448,7 @@ def is_halted() -> tuple:
     which also only blocks entries).
 
     Added 24/08, second pass, after Spap asked what would improve the
-    AGENT (not the strategy) and external research (see PLAN_SPRINT.md)
+    AGENT (not the strategy) and external research
     on both a Alpaca-published reference architecture and a separate
     trading-agent guide independently named an untested/inaccessible kill
     switch as a real production failure mode: "a kill switch nobody can
@@ -556,7 +556,7 @@ class ExitAction:
     failure dedup logic in monitor_exits.py: deciding "is this the same
     problem as last time" by re-parsing a sentence built for a human to
     read (matching ": holding (" as the one routine substring) was already
-    fragile -- the exact gap PLAN_SPRINT.md flagged as "the last place in
+    fragile -- the exact gap the engineering log flagged as "the last place in
     the code where a human-readable string decides control flow" once the
     other four were fixed earlier. `kind` and the structured fields below
     are what callers should branch on; `text` / `__str__` exist purely for
@@ -855,7 +855,7 @@ def check_gates(
     # into a brand-new account with zero real trades on it -- the same
     # failure shape _record_starting_equity was already written to prevent
     # for starting_equity/locked, just not extended to these two newer
-    # fields when they were added. See PLAN_SPRINT.md for the caught-and-
+    # fields when they were added. See the engineering log for the caught-and-
     # fixed writeup; found by testing this exact scenario, not by
     # inspection.
     if already_traded_today(underlying):

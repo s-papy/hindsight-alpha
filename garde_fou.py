@@ -6,15 +6,16 @@
 POURQUOI IL EXISTE
 ===================
 Né le 25/08/2026, après que Spap a remarqué qu'aucun garde-fou ne tournait
-sur ce projet — contrairement à SNIPER, JEU BLOCKCHAIN ou
-OUTILS_CONTROLE_GARDE_FOU, qui en ont un depuis longtemps. Ce script
+sur ce projet — contrairement à d'autres projets internes, qui en ont un
+depuis longtemps. Ce script
 démarre PETIT, volontairement : chaque contrôle ci-dessous vient soit du
 strict minimum recommandé par la méthode (skill garde-fou-generique :
 journal + horodatage), soit d'une vraie erreur déjà commise et documentée
-dans CE projet, jamais d'une anticipation. Voir PLAN_SPRINT.md pour le
-détail de chaque incident cité en commentaire.
+dans CE projet, jamais d'une anticipation. Le détail de chaque incident cité
+en commentaire est conservé dans le journal d'ingénierie du projet.
 
-Règle non négociable héritée de SNIPER : ON NE MODIFIE JAMAIS CE SCRIPT
+Règle non négociable, héritée d'un projet antérieur : ON NE MODIFIE JAMAIS
+CE SCRIPT
 POUR LE FAIRE TAIRE. Si un contrôle est trop bruyant ou faux, on corrige
 le contrôle avec une vraie raison écrite ici — jamais en le supprimant
 pour effacer une alerte gênante. Si un contrôle bloque à tort, dis-le à
@@ -52,8 +53,8 @@ def alerte(fichier: str, message: str) -> None:
 # telle quelle : PLAN_SPRINT.md fait office de journal de bord de ce
 # projet. Chaque section datée (「## ... JJ/MM ...」) est relue ; une
 # date qui tombe dans le futur par rapport à `date` est bloquante — même
-# piège que celui trouvé et corrigé chez SNIPER le 07-08/08 (une ligne de
-# journal datée d'un jour pas encore arrivé). Jamais reproduit ici, mais
+# piège qu'un défaut déjà trouvé et corrigé sur un projet antérieur les
+# 07-08/08 (une ligne de journal datée d'un jour pas encore arrivé). Jamais reproduit ici, mais
 # le contrôle est gratuit et le principe est le même journal.
 def _journal_volontairement_local() -> bool:
     """True si PLAN_SPRINT.md est DÉCLARÉ dans .gitignore.
@@ -145,7 +146,8 @@ def controle_journal() -> None:
 # Née de la contrainte répétée littéralement des dizaines de fois dans
 # cette session : « ne jamais toucher .env.hackathon ni le compte
 # PA3K8MP3MF0U avant le kickoff du 28/08 ». C'est l'équivalent exact d'un
-# fichier *SCELLE*.md chez SNIPER — sauf que la pire façon de le "modifier"
+# fichier « scellé » sur un projet antérieur — sauf que la pire façon de le
+# "modifier"
 # ici serait de le committer par erreur (fuite de clé API), pas de changer
 # son contenu. Donc le contrôle mécanique porte sur DEUX choses vérifiables
 # sans jamais lire le fichier lui-même : (a) il ne doit JAMAIS être suivi
@@ -204,11 +206,11 @@ def controle_env_hackathon_scelle() -> None:
             % historique.replace("\n", " / "),
         )
 
-    # 🔴 AJOUTÉ le 25/08 en comparant ce script à celui, mature, d'
-    # OUTILS_CONTROLE_GARDE_FOU : ne pas être suivi par git protège contre
+    # 🔴 AJOUTÉ le 25/08 en comparant ce script à un autre, plus mature :
+    # ne pas être suivi par git protège contre
     # une FUITE (poussée sur GitHub), mais ne dit RIEN sur une modification
-    # purement locale, jamais commitée — exactement le trou que
-    # verifier_scelles.py comble chez SNIPER en hashant le contenu. "Intouché
+    # purement locale, jamais commitée — exactement le trou qu'un contrôle par
+    # hachage du contenu comble ailleurs. "Intouché
     # même par accident" veut dire intouché tout court, pas seulement "pas
     # poussé". Donc : hash au premier passage, comparaison ensuite.
     fichier_scelle = os.path.join(RACINE, ".env.hackathon")
@@ -522,8 +524,7 @@ def _fmt(x: float) -> str:
 
 
 # 🟢 AJOUTÉ le 25/08 en revue croisée multi-agents avant commit (inspirée du
-# plugin officiel Anthropic `/code-review`, cloné en référence dans
-# CERVEAU/OUTILS_CONTROLE_GARDE_FOU/5_REFERENCES_EXTERNES/claude-code-plugins/) :
+# plugin officiel Anthropic `/code-review`, lu en référence) :
 # deux agents indépendants ont trouvé, chacun à confiance 85, que
 # README.md citait 181.6% pour la concentration de XLK — le chiffre de sa
 # fenêtre 10j, alors que XLK est jugé sur sa fenêtre 90j vettée (136.7%).
@@ -879,7 +880,7 @@ def main() -> int:
         print("VERDICT : 🟢 APPROUVÉ — aucun contrôle en défaut.")
         code = 0
 
-    # Emprunté tel quel au garde-fou d'OUTILS_CONTROLE_GARDE_FOU, affiché à
+    # Emprunté tel quel au garde-fou d'un projet antérieur, affiché à
     # CHAQUE run, même vert : 6 contrôles existent aujourd'hui (mis à jour au
     # fil du 25/08, ce commentaire trainait encore à "4" — trouvé par une
     # revue croisée multi-agents avant ce commit, corrigé dans la foulée),
@@ -889,7 +890,7 @@ def main() -> int:
     # construction les symboles en fuite de ses plages mécaniques, donc un
     # chiffre erroné sur XLK ne serait vu par AUCUN contrôle actuel (trouvé
     # le 25/08 en revue croisée, corrigé dans README.md, pas encore comblé
-    # mécaniquement — voir PLAN_SPRINT.md).
+    # mécaniquement).
     print()
     print("  ⚠️  Même au vert : ce script attrape 6 formes d'erreur précises,")
     print("     pas le fond. Un dossier qu'il approuve peut encore être faux.")

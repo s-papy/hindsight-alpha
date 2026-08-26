@@ -8,7 +8,7 @@ the project's own scoring code (vol_strategy.py), not a new implementation
 that could quietly disagree with what the live agent does.
 
 Requires network access to Alpaca's data API via the CLI (alpaca_cli.py) --
-same reason this can't run inside Cowork's sandbox as everything else that
+same reason it needs a terminal with real network access as everything else
 touches the real API. Run from a real terminal:
 
     python backtest.py                      # default universe SPY,GLD,XLK,XLV
@@ -191,7 +191,7 @@ def main() -> None:
     for symbol in symbols:
         # try/except added 24/08, "cherche encore" -- same unguarded pattern
         # just found and fixed in agent.py's live entry loop (see
-        # PLAN_SPRINT.md, 16th pass): alpaca_cli.get_daily_bars() can raise
+        # engineering log, 16th pass): alpaca_cli.get_daily_bars() can raise
         # DataQualityError (stale/implausible bars) or AlpacaCLIError (a CLI
         # hiccup) for any ONE symbol. Unguarded, that would crash this whole
         # script -- losing the results already computed for every symbol

@@ -13,7 +13,7 @@ monitor_exits_dedup.json
 monitor_last_run.json
 .garde_fou_scelles.json
 
-# Notes internes de handoff Cowork -> terminal, et journal de bord du sprint.
+# Notes de travail internes et journal d'ingénierie du sprint.
 # Ajouté le 26/08/2026 : ces fichiers restent SUR LE DISQUE et continuent de
 # servir de journal et de passation entre sessions — ils ne sont simplement
 # plus publiés sur la page GitHub, qui n'a à montrer que le README, le code et
