@@ -448,3 +448,121 @@ class TestHindsightGuard(unittest.TestCase):
                     score = vol_strategy.score_hv_window(10, split, barres)
                     self.assertTrue(math.isfinite(score),
                                     "score_hv_window rend un non-fini sur %r" % nom)
+
+
+class TestPlafondsDeRisque(BaseExit):
+    """Le dimensionnement : combien d'argent l'agent expose réellement.
+
+    Vérifié à la main le 26/08 et trouvé CORRECT — aucun défaut. Ces tests
+    existent parce que cette logique n'avait aucune couverture, alors que
+    c'est elle qui décide du montant risqué. Un correctif futur sur les
+    plafonds n'aurait rien eu pour le rattraper.
+
+    Le plafond SECTEUR est un cas particulier : avec l'univers actuel il y a un
+    seul symbole par secteur, donc le blocage par sous-jacent duplique le
+    couvre toujours en premier — le README l'admet explicitement. Le test
+    l'exerce en élargissant `SECTOR_MAP`, ce qui est exactement la situation
+    que le README annonce (« stops being a no-op the moment the universe grows
+    past one symbol per sector »). Sans ça, on ne saurait pas si ce contrôle
+    marche, seulement qu'il n'est jamais atteint.
+    """
+
+    EQUITE = 100000.0
+
+    def setUp(self):
+        super().setUp()
+        alpaca_cli.get_account = lambda: {
+            "id": "compte-test", "equity": str(self.EQUITE),
+            "portfolio_value": str(self.EQUITE)}
+        alpaca_cli.get_option_ask_price = lambda s: 2.80
+        self._secteurs = dict(risk_gates.SECTOR_MAP)
+
+    def tearDown(self):
+        risk_gates.SECTOR_MAP.clear()
+        risk_gates.SECTOR_MAP.update(self._secteurs)
+        super().tearDown()
+
+    @staticmethod
+    def _ouverte(symbole, cout):
+        return {"symbol": symbole, "asset_class": "us_option",
+                "cost_basis": str(cout), "unrealized_plpc": "0.0", "qty": "1"}
+
+    def _decide(self, ouvertes=(), ask=2.80, sous_jacent="XLV",
+                option="XLV260831C00150000"):
+        self.positions = list(ouvertes)
+        alpaca_cli.get_option_ask_price = lambda s: ask
+        return risk_gates.check_gates(sous_jacent, option)
+
+    @staticmethod
+    def _autorise(d):
+        return bool(getattr(d, "allowed", getattr(d, "ok", False)))
+
+    def test_le_cout_est_par_CONTRAT_de_cent_actions(self):
+        """Une option se cote par action, se vend par contrat de 100.
+
+        Sans le facteur 100, un ask de 12 $ compterait pour 12 $ au lieu de
+        1200 $ — et l'agent achèterait environ 83 fois trop."""
+        d = self._decide(ask=12.00)   # 1200 $ le contrat, plafond par trade 1000 $
+        self.assertFalse(self._autorise(d),
+                         "un contrat à 1200 $ passe sous un plafond de 1000 $ — "
+                         "le facteur 100 a disparu")
+        self.assertIn("1,200", str(getattr(d, "reason", "")))
+
+    def test_le_plafond_par_trade_dimensionne_a_la_baisse(self):
+        d = self._decide(ask=2.80)    # 280 $ le contrat, 1000 $ disponibles
+        self.assertTrue(self._autorise(d))
+        self.assertIn("3 contract", str(getattr(d, "reason", "")),
+                      "3 × 280 = 840 $ tient sous 1000 $, 4 n'y tiendrait pas")
+
+    def test_les_positions_deja_ouvertes_reduisent_le_budget_restant(self):
+        """Le point que le README met en avant : une 2e position ne repart pas
+        avec un 1 % tout neuf, elle puise dans le 3 % commun."""
+        d = self._decide([self._ouverte("SPY260831P00500000", 2500)])
+        self.assertTrue(self._autorise(d))
+        self.assertIn("1 contract", str(getattr(d, "reason", "")),
+                      "500 $ restants sous le plafond total : un seul contrat")
+
+        d = self._decide([self._ouverte("SPY260831P00500000", 2900)])
+        self.assertFalse(self._autorise(d), "100 $ restants, un contrat en coûte 280")
+
+        d = self._decide([self._ouverte("SPY260831P00500000", 3000)])
+        self.assertFalse(self._autorise(d))
+        self.assertIn("total exposure cap", str(getattr(d, "reason", "")))
+
+    def test_le_plafond_par_secteur_somme_plusieurs_symboles(self):
+        risk_gates.SECTOR_MAP["VHT"] = "healthcare"
+        risk_gates.SECTOR_MAP["IHI"] = "healthcare"
+
+        d = self._decide([self._ouverte("VHT260831C00250000", 1000)])
+        self.assertTrue(self._autorise(d))
+        self.assertIn("1 contract", str(getattr(d, "reason", "")))
+
+        d = self._decide([self._ouverte("VHT260831C00250000", 1500)])
+        self.assertFalse(self._autorise(d))
+        self.assertIn("sector concentration cap", str(getattr(d, "reason", "")))
+
+        # deux symboles du MÊME secteur doivent s'additionner
+        d = self._decide([self._ouverte("VHT260831C00250000", 800),
+                          self._ouverte("IHI260831C00050000", 800)])
+        self.assertFalse(self._autorise(d),
+                         "800 + 800 dans le même secteur dépasse 1500 et devrait bloquer")
+
+    def test_un_autre_secteur_ne_consomme_pas_le_budget_sante(self):
+        """Contre-épreuve : un plafond qui bloquerait tout ne prouverait rien."""
+        d = self._decide([self._ouverte("XLK260831C00200000", 1500)])
+        self.assertTrue(self._autorise(d),
+                        "1500 $ en technologie bloquent une entrée en santé — "
+                        "les secteurs ne sont pas séparés")
+
+    def test_jamais_deux_positions_sur_le_meme_sous_jacent(self):
+        d = self._decide([self._ouverte("XLV260831P00140000", 500)])
+        self.assertFalse(self._autorise(d))
+        self.assertIn("already holding", str(getattr(d, "reason", "")))
+
+    def test_le_plafond_de_positions_simultanees(self):
+        ouvertes = [self._ouverte(s, 200) for s in
+                    ("SPY260831C00500000", "GLD260831C00200000",
+                     "XLK260831C00200000", "IWM260831C00200000")]
+        d = self._decide(ouvertes)
+        self.assertFalse(self._autorise(d))
+        self.assertIn("concurrent-position cap", str(getattr(d, "reason", "")))
