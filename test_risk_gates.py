@@ -289,9 +289,22 @@ class TestGardePaperUniquement(unittest.TestCase):
     """
 
     def _demarre(self, valeur):
-        """True si `require_credentials()` laisse démarrer avec cette valeur."""
+        """True si `require_credentials()` laisse démarrer avec cette valeur.
+
+        Des identifiants FACTICES sont injectés, et ce n'est pas cosmétique :
+        `require_credentials()` sort d'abord sur des clés manquantes, AVANT
+        d'atteindre le contrôle paper. Sans eux, ce test mesurerait la présence
+        d'un `.env` au lieu du comportement de la garde.
+
+        Trouvé par la CI : ces tests passaient en local — où un `.env` existe —
+        et échouaient sur GitHub, où il n'y en a pas. Un environnement propre
+        est le seul juge honnête d'un test. `load_dotenv()` n'écrase pas une
+        variable déjà présente, donc l'injection fait autorité dans les deux
+        environnements."""
         import subprocess
         env = dict(os.environ)
+        env["ALPACA_API_KEY"] = "cle-factice-pour-test"
+        env["ALPACA_SECRET_KEY"] = "secret-factice-pour-test"
         if valeur is None:
             env.pop("ALPACA_LIVE_TRADE", None)
         else:
