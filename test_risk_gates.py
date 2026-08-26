@@ -449,22 +449,13 @@ class TestHindsightGuard(unittest.TestCase):
                                     "score_hv_window rend un non-fini sur %r" % nom)
 
 
-class TestPlafondsDeRisque(BaseExit):
-    """Le dimensionnement : combien d'argent l'agent expose réellement.
-
-    Vérifié à la main le 26/08 et trouvé CORRECT — aucun défaut. Ces tests
-    existent parce que cette logique n'avait aucune couverture, alors que
-    c'est elle qui décide du montant risqué. Un correctif futur sur les
-    plafonds n'aurait rien eu pour le rattraper.
-
-    Le plafond SECTEUR est un cas particulier : avec l'univers actuel il y a un
-    seul symbole par secteur, donc le blocage par sous-jacent duplique le
-    couvre toujours en premier — le README l'admet explicitement. Le test
-    l'exerce en élargissant `SECTOR_MAP`, ce qui est exactement la situation
-    que le README annonce (« stops being a no-op the moment the universe grows
-    past one symbol per sector »). Sans ça, on ne saurait pas si ce contrôle
-    marche, seulement qu'il n'est jamais atteint.
-    """
+class HarnaisPlafonds:
+    """Le décor commun aux tests de dimensionnement : un compte à équité
+    fixe, un prix d'option stable, et de quoi fabriquer des positions
+    ouvertes. Sorti en mixin le 26/08 : TestCoutIllisible en a besoin, et
+    en héritant de TestPlafondsDeRisque il RÉ-EXÉCUTAIT ses sept tests —
+    62 tests annoncés dont 7 doublons. Un compte de tests gonflé est une
+    forme discrète du même problème que le reste de ce fichier traque."""
 
     EQUITE = 100000.0
 
@@ -495,6 +486,24 @@ class TestPlafondsDeRisque(BaseExit):
     @staticmethod
     def _autorise(d):
         return bool(getattr(d, "allowed", getattr(d, "ok", False)))
+
+
+class TestPlafondsDeRisque(HarnaisPlafonds, BaseExit):
+    """Le dimensionnement : combien d'argent l'agent expose réellement.
+
+    Vérifié à la main le 26/08 et trouvé CORRECT — aucun défaut. Ces tests
+    existent parce que cette logique n'avait aucune couverture, alors que
+    c'est elle qui décide du montant risqué. Un correctif futur sur les
+    plafonds n'aurait rien eu pour le rattraper.
+
+    Le plafond SECTEUR est un cas particulier : avec l'univers actuel il y a un
+    seul symbole par secteur, donc le blocage par sous-jacent duplique le
+    couvre toujours en premier — le README l'admet explicitement. Le test
+    l'exerce en élargissant `SECTOR_MAP`, ce qui est exactement la situation
+    que le README annonce (« stops being a no-op the moment the universe grows
+    past one symbol per sector »). Sans ça, on ne saurait pas si ce contrôle
+    marche, seulement qu'il n'est jamais atteint.
+    """
 
     def test_le_cout_est_par_CONTRAT_de_cent_actions(self):
         """Une option se cote par action, se vend par contrat de 100.
@@ -1103,6 +1112,66 @@ class TestEcrituresConcurrentes(unittest.TestCase):
                 1 / 0
         with risk_gates._state_lock(timeout_s=0.5):
             pass  # doit être obtenable : si on arrive ici, il a bien été relâché
+
+
+class TestCoutIllisible(HarnaisPlafonds, BaseExit):
+    """Une position ouverte dont on ne sait pas lire le montant engagé.
+
+    _total_committed() la comptait pour ZÉRO dollar — choix explicite dans son
+    docstring (« counting as 0 [...] doesn't block sizing »). Donc une donnée
+    illisible AGRANDISSAIT le budget de risque au lieu de le fermer.
+
+    Mesuré le 26/08, équité $100 000, plafond global 3 % :
+        3 positions à $900   lisibles   -> taille 1 contrat
+        les MÊMES            illisibles -> taille 3 contrats
+        3 positions à $2 900 lisibles   -> REFUSE (8,7 % déjà exposé)
+        les MÊMES            illisibles -> ouvre une position pleine
+
+    La porte refusait correctement dès qu'elle savait lire. Elle cessait
+    d'exister exactement quand l'agent avait perdu la trace de son exposition.
+    """
+
+    def _illisible(self, symbole, montant=900.0):
+        pos = self._ouverte(symbole, montant)
+        del pos["cost_basis"]
+        return pos
+
+    def test_un_cout_illisible_refuse_l_entree_nouvelle(self):
+        """Mord : avant correctif, ces trois positions donnaient AUTORISE."""
+        d = self._decide([self._illisible(s) for s in ("AAA", "BBB", "CCC")])
+        self.assertFalse(self._autorise(d),
+                         "une entrée a été autorisée alors que l'exposition "
+                         "totale était illisible")
+        self.assertIn("cost_basis", d.reason)
+
+    def test_une_seule_position_illisible_suffit(self):
+        """Le budget est une SOMME : un seul terme manquant la fausse."""
+        positions = [self._ouverte("AAA", 900.0), self._ouverte("BBB", 900.0),
+                     self._illisible("CCC")]
+        d = self._decide(positions)
+        self.assertFalse(self._autorise(d))
+        self.assertIn("CCC", d.reason,
+                      "le refus ne nomme pas la position fautive")
+
+    def test_le_refus_n_est_pas_aveugle(self):
+        """Contrôle : sans ce test, refuser TOUJOURS passerait le test du
+        dessus. Des montants lisibles doivent continuer à passer."""
+        d = self._decide([self._ouverte(s, 900.0) for s in ("AAA", "BBB")])
+        self.assertTrue(self._autorise(d),
+                        "des montants parfaitement lisibles sont refusés")
+
+    def test_les_sorties_ne_sont_pas_affectees(self):
+        """La promesse écrite dans le message de refus : « Exits are
+        unaffected ». Une position en perte doit rester fermable même si son
+        cost_basis est illisible — la sortie se décide sur unrealized_plpc, pas
+        sur le montant engagé. Si ce test tombe, le correctif a transformé une
+        entrée refusée en position qu'on ne peut plus fermer."""
+        perdante = self._illisible("AAA")
+        perdante["unrealized_plpc"] = "-0.55"
+        self.positions = [perdante]
+        actions = risk_gates.manage_exits(dry_run=False)
+        self.assertTrue(actions, "aucune sortie déclenchée sur une position "
+                                 "à -55 % dont le coût est illisible")
 
 
 if __name__ == "__main__":

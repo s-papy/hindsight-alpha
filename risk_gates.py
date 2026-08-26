@@ -426,6 +426,44 @@ def _extract_float(position: dict, key: str) -> Optional[float]:
     return None
 
 
+def positions_au_cout_illisible(open_positions: List[dict]) -> List[str]:
+    """Les positions ouvertes dont on n'arrive pas a lire le montant engage.
+
+    AJOUTE le 26/08/2026. _total_committed() comptait ces positions pour ZERO
+    dollar -- son propre docstring l'assumait : « counting as 0, not skipped
+    silently [...] doesn't block sizing on data the CLI failed to provide
+    cleanly ». Le choix est explicite, et c'est le mauvais cote : une donnee
+    ILLISIBLE agrandissait le budget de risque au lieu de le fermer.
+
+    Mesure, equite $100 000, plafond global 3% = $3 000 :
+
+        3 positions a $900   lisibles  -> engage $2 700 -> taille 1 contrat
+        les MEMES            illisibles-> engage $0     -> taille 3 contrats
+        3 positions a $2 900 lisibles  -> REFUSE (8,7% deja expose)
+        les MEMES            illisibles-> ouvre une position pleine
+        3 positions a $25 000 lisibles -> REFUSE (75% deja expose)
+        les MEMES            illisibles-> ouvre une position pleine
+
+    La porte refuse correctement DES QU'ELLE SAIT LIRE. Elle cesse d'exister
+    exactement quand l'agent a perdu la trace de son exposition. Le depassement
+    est borne par MAX_OPEN_POSITIONS x MAX_RISK_PCT_PER_TRADE, soit 4% pour un
+    plafond annonce a 3% -- mais le principe est ce qui compte : on n'ajoute pas
+    du risque au moment precis ou l'on ne sait plus combien on en porte.
+
+    Atteignabilite NON demontree : l'API Alpaca renvoie toujours cost_basis, et
+    la frontiere alpaca_cli leve desormais sur une reponse illisible plutot que
+    de rendre une liste vide. C'est donc du code defensif -- mais du code
+    defensif qui avait ANTICIPE le cas et choisi l'echec ouvert. On garde
+    l'avertissement imprime, on refuse seulement l'entree NOUVELLE ; les sorties
+    ne passent pas par ici et restent intactes, ce qui est l'ordre des priorites
+    de tout ce fichier."""
+    illisibles = []
+    for pos in open_positions:
+        if _extract_float(pos, "cost_basis") is None:
+            illisibles.append(str(pos.get("symbol", "<symbole inconnu>")))
+    return illisibles
+
+
 def _total_committed(open_positions: List[dict]) -> float:
     """Sum of cost_basis across every open option position -- what's already
     at risk before sizing a new trade. Positions whose cost_basis can't be
@@ -992,6 +1030,21 @@ def check_gates(
         )
 
     open_positions = alpaca_cli.list_open_option_positions()
+
+    # Avant tout dimensionnement : sait-on seulement ce qu'on porte deja ?
+    # Voir positions_au_cout_illisible() pour la mesure. Place ici, donc AVANT
+    # le plafond sectoriel comme avant le plafond global -- les deux reposent
+    # sur la meme somme.
+    illisibles = positions_au_cout_illisible(open_positions)
+    if illisibles:
+        return RiskDecision(
+            False,
+            "cannot read cost_basis for open position(s): "
+            + ", ".join(illisibles)
+            + " -- refusing a NEW entry while total exposure is unmeasurable. "
+            "Counting them as $0 would let the exposure caps pass on data that "
+            "is missing, not small. Exits are unaffected. Fix or close the "
+            "position(s), or re-run once the API returns a complete payload.")
 
     already_on_this_underlying = {
         alpaca_cli.option_underlying(pos) for pos in open_positions
