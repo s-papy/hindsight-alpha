@@ -162,9 +162,14 @@ inside it. See `risk_gates.py`:
   if even 1 contract doesn't fit) AND a 3% of equity cap on the TOTAL
   premium committed across every open position combined, so a 2nd or 3rd
   concurrent position shrinks the budget left for further ones instead of
-  each getting its own fresh 1%. A 3% weekly drawdown lock that persists in
-  `state.json` across days so a bad stretch actually stops the agent instead
-  of letting it keep re-entering — this compares total account equity
+  each getting its own fresh 1%. A 3% drawdown lock that persists in `state.json`
+  across days so a bad stretch actually stops the agent instead of letting it
+  keep re-entering. **Named "weekly" in the code, but measured from the first
+  equity ever recorded for the account, not from the start of each week** —
+  there is no week-boundary reset. That is deliberate and on the safe side: it
+  never releases on its own, matching the consecutive-loss breaker's "stop and
+  let a human look" rule. The trade-off, stated plainly: a drawdown from a
+  *peak* does not trip it if equity is still above the original baseline — this compares total account equity
   (already reflecting every open position combined) to the recorded
   starting equity, so it was already measuring combined drawdown, not a
   single isolated position.

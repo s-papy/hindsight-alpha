@@ -896,3 +896,90 @@ class TestDeduplicationDesSymboles(unittest.TestCase):
         # commentaire ne teste rien. Trouvé par mutation.
         self.assertIn("symbols = list(dict.fromkeys(", source,
                       "agent.py ne dédoublonne plus la liste de symboles")
+
+
+class TestVerrouDePerte(BaseExit):
+    """Le verrou de repli — et ce que son nom ne dit pas.
+
+    Il s'appelle `WEEKLY_LOSS_LOCK_PCT`, et le README parlait d'un « 3% weekly
+    drawdown lock ». Mesuré le 26/08 : **il n'est pas hebdomadaire**. Il compare
+    à `starting_equity`, posée une fois par compte et jamais rebaselinée
+    autrement que sur un changement de compte. Aucune logique de frontière de
+    semaine n'existe dans le fichier — ni `isocalendar`, ni `weekday`, ni date
+    de référence dans `state.json`.
+
+    Le comportement est GARDÉ, parce qu'il penche du bon côté : il ne se
+    relâche jamais seul, comme le disjoncteur de pertes consécutives. Ces tests
+    épinglent ce qu'il fait réellement, pour qu'un futur « correctif » qui
+    ajouterait une remise à zéro hebdomadaire soit un choix délibéré et non un
+    glissement — et pour que le prochain lecteur ne soit pas trompé par le nom.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.equite = [100000.0]
+        alpaca_cli.get_account = lambda: {
+            "id": "compte-test", "equity": str(self.equite[0]),
+            "portfolio_value": str(self.equite[0])}
+        alpaca_cli.get_option_ask_price = lambda s: 2.80
+        self.positions = []
+
+    def _decide(self, equite):
+        self.equite[0] = equite
+        d = risk_gates.check_gates("SPY", "SPY260831C00500000")
+        return bool(getattr(d, "allowed", False)), str(getattr(d, "reason", ""))
+
+    def test_le_verrou_se_declenche_au_dela_du_seuil(self):
+        self.assertTrue(self._decide(100000.0)[0], "la référence doit être posée sans blocage")
+        self.assertTrue(self._decide(97500.0)[0], "-2,5% est sous le seuil de 3%")
+        autorise, raison = self._decide(96000.0)
+        self.assertFalse(autorise, "-4% doit déclencher le verrou")
+        self.assertIn("loss lock", raison)
+
+    def test_le_verrou_est_collant_meme_si_l_equite_remonte(self):
+        """« Une mauvaise passe arrête vraiment l'agent » — pas jusqu'au
+        prochain rebond."""
+        self._decide(100000.0)
+        self._decide(96000.0)                       # déclenche
+        autorise, raison = self._decide(100000.0)   # tout est revenu
+        self.assertFalse(autorise, "le verrou s'est relâché tout seul")
+        self.assertIn("already active", raison)
+
+    def test_un_state_corrompu_ne_devErrouille_pas(self):
+        """Un plantage en pleine écriture ne doit pas dé-pauser un agent qui
+        devait avoir cessé de trader."""
+        self._decide(100000.0)
+        self._decide(96000.0)
+        risk_gates.STATE_FILE.write_text('{"locked": true, "starting_equ', encoding="utf-8")
+        autorise, raison = self._decide(100000.0)
+        self.assertFalse(autorise)
+        self.assertIn("corrupted", raison)
+
+    def test_la_reference_ne_suit_PAS_le_sommet_ni_la_semaine(self):
+        """Le point que le nom cache. Ce test échouera si quelqu'un ajoute un
+        jour une vraie remise à zéro hebdomadaire ou un suivi du sommet — et
+        c'est voulu : ce serait un changement de politique, pas un détail."""
+        self.assertTrue(self._decide(100000.0)[0])   # référence = 100 000
+        self.assertTrue(self._decide(110000.0)[0])   # +10%
+
+        # -4,5% depuis le sommet, mais toujours au-dessus de la référence.
+        autorise, _ = self._decide(105000.0)
+        self.assertTrue(
+            autorise,
+            "le verrou s'est déclenché sur une baisse depuis le SOMMET : la "
+            "référence a changé de sens, ce que le code ne fait pas aujourd'hui")
+
+        # -3,5% depuis la référence d'origine : là, il doit bloquer.
+        self.assertFalse(self._decide(96500.0)[0])
+
+    def test_aucune_date_de_reference_n_est_stockee(self):
+        """Corollaire direct : rien dans l'état ne permettrait une remise à
+        zéro hebdomadaire. Si une clé de date apparaît un jour, ce test le
+        signale — il faudra alors décider explicitement du comportement."""
+        self._decide(100000.0)
+        etat = self.etat()
+        cles_de_date = [k for k in etat
+                        if k != "traded_today" and ("week" in k or "date" in k)]
+        self.assertEqual(cles_de_date, [],
+                         "une clé de date est apparue dans state.json : le "
+                         "verrou est-il devenu réellement hebdomadaire ?")

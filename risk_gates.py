@@ -110,6 +110,32 @@ MAX_RISK_PCT_PER_TRADE = 0.01   # cap premium spent on any single trade at 1% of
 MAX_TOTAL_RISK_PCT = 0.03       # cap combined premium across ALL open positions at once at 3% of equity
 MAX_SECTOR_EXPOSURE_PCT = 0.015 # cap combined premium within any ONE sector at 1.5% of equity (half the total cap)
 WEEKLY_LOSS_LOCK_PCT = 0.03     # stop trading for the week if equity drops 3% from the start
+# NOM TROMPEUR, mesure faite le 26/08/2026 et CONSERVEE telle quelle.
+#
+# Ce verrou n'est pas hebdomadaire. Il compare l'equite courante a
+# `starting_equity`, posee UNE FOIS par compte et jamais rebaselinee autrement
+# que sur un changement de compte -- il n'existe aucune logique de frontiere de
+# semaine dans ce fichier: ni isocalendar, ni weekday, ni date de reference
+# dans state.json. C'est donc "depuis la premiere execution", pour toujours.
+#
+# Deux consequences mesurees, opposees:
+#   +10% puis -4,5% DEPUIS LE SOMMET  -> passe (on est encore au-dessus de
+#                                       la reference d'origine)
+#   -3,5% etale sur plusieurs semaines -> bloque, et ne se relache jamais seul
+#
+# LE COMPORTEMENT EST GARDE, le nom corrige en commentaire. Implementer une
+# vraie remise a zero hebdomadaire AFFAIBLIRAIT le controle: il se relacherait
+# chaque lundi, alors que la philosophie de ce fichier est explicitement
+# l'inverse (le disjoncteur de pertes consecutives ne se reinitialise pas non
+# plus, "stop and let a human look, don't quietly retry").
+#
+# La constante n'est pas renommee: CLAUDE.md inscrit WEEKLY_LOSS_LOCK_PCT dans
+# la liste des seuils qu'on ne touche pas sans decision explicite, et un
+# renommage brouillerait cette regle pour un gain cosmetique.
+#
+# Pour le hackathon, la distinction est sans effet: le compte dedie demarre a
+# exactement 100 000 $ le 28/08 et la fenetre jugee va du 31/08 au 03/09 --
+# "depuis la premiere execution" et "cette semaine" designent la meme periode.
 MAX_OPEN_POSITIONS = 4          # never hold more than 4 positions at once, one per underlying
 TAKE_PROFIT_PCT = 0.50          # close a position once unrealized gain hits +50% of premium paid
 STOP_LOSS_PCT = 0.50            # close a position once unrealized loss hits -50% of premium paid
