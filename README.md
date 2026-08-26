@@ -325,7 +325,11 @@ python agent.py                # if vetted, places a real (paper) options order
   `state.json` (gitignored, created on first run).
 - `monitor_exits.py` — standalone exit-only monitor, schedulable
   independently of `agent.py`'s once-a-day cycle. See its module docstring
-  for the "why" and cron/launchd setup.
+  for the "why".
+- `launchagents/` — the two macOS scheduling definitions, versioned rather
+  than living only on one machine: the exit monitor (every 15 minutes through
+  the session, including the close) and a `caffeinate` job that keeps the
+  machine awake through market hours.
 - `decision_log.py` — appends one JSON record per run to `decision_log.jsonl`
   (committed, not gitignored — it's evidence of what the agent decided and
   why, every day of the hackathon, not a secret).
@@ -434,6 +438,16 @@ judged week the machine must stay powered and awake through US market hours. The
 dashboard now shows a health banner — age of last check, consecutive-failure
 count — so a gap like that is visible on the public page instead of only in a
 local log.
+
+**The schedule now covers the closing bell.** The exit monitor ran every 15
+minutes from 15:00 to 21:45 local — but the US session closes at 22:00 local.
+The last 15 minutes of every session, the highest-volume window of the day,
+had no check. A position crossing its stop there would have stayed open until
+the next morning's first check, roughly 17 hours later, through the entire
+overnight gap. Two slots added at 21:52 and 21:58; the remaining blind spot is
+2 minutes. Both scheduling definitions now live in `launchagents/` — before,
+the only mechanism protecting an open position existed nowhere but one
+machine.
 
 **Keeping the machine awake is now a configuration, not a habit.** That
 incident happened because staying awake depended on someone being at the
