@@ -12,3 +12,20 @@ monitor_exits.log
 monitor_exits_dedup.json
 monitor_last_run.json
 .garde_fou_scelles.json
+
+# Notes internes de handoff Cowork -> terminal, et journal de bord du sprint.
+# Ajouté le 26/08/2026 : ces fichiers restent SUR LE DISQUE et continuent de
+# servir de journal et de passation entre sessions — ils ne sont simplement
+# plus publiés sur la page GitHub, qui n'a à montrer que le README, le code et
+# les résultats.
+#
+# L'historique git n'a PAS été réécrit : les anciens commits qui les
+# contiennent restent tels quels. Choix assumé de Spap, pas un oubli — aucun
+# force-push n'a été fait ni n'est nécessaire.
+#
+# garde_fou.py continue de lire PLAN_SPRINT.md directement sur le disque, pas
+# via git : son contrôle 1 fonctionne donc toujours en local. En CI, où le
+# fichier n'existe pas du tout, ce contrôle se dégrade proprement.
+BRIEF_*.md
+PLAN_SPRINT.md
+SOCIAL_POSTS_DRAFT.md
