@@ -13,6 +13,14 @@ Every test here mocks the CLI layer — no network, no credentials, no order eve
 submitted — and redirects `STATE_FILE` to a temporary directory, so running the
 suite can never touch the real `state.json` or a real account.
 
+`alpaca_cli.run()` — the single point through which this module reaches the CLI,
+and therefore the network — is replaced by a raise. Any path left unstubbed
+fails loudly here instead of quietly hitting a real account. That net is not
+theoretical: the first version of this file stubbed `get_option_quote` while the
+code calls `get_option_ask_price`, so on a machine with the CLI installed the
+call went out for real and the test passed for the wrong reason. CI, having no
+CLI, went red and exposed it.
+
 WHAT EACH TEST PINS, AND WHY IT WOULD MATTER
 --------------------------------------------
 - **Units.** `unrealized_plpc` is a *fraction* (-0.42 = -42%), the thresholds
@@ -68,18 +76,36 @@ class BaseExit(unittest.TestCase):
         self._vrai_state = risk_gates.STATE_FILE
         risk_gates.STATE_FILE = self.tmp / "state.json"
 
+        # `run()` est le SEUL point par lequel ce module atteint le CLI, donc
+        # le reseau. On le remplace par une explosion : tout chemin qu'on aurait
+        # oublie de boucher echoue bruyamment ICI, au lieu de partir sur le vrai
+        # compte.
+        #
+        # Ce filet n'est pas theorique. Sa premiere version bouchait
+        # `get_option_quote`, alors que le code appelle `get_option_ask_price`.
+        # Sur une machine ou le CLI `alpaca` est installe, l'appel partait donc
+        # POUR DE VRAI et le test passait pour la mauvaise raison ; la CI, sans
+        # CLI, a rougi et revele la fuite. Boucher fonction par fonction ne
+        # suffit pas -- il faut fermer la porte, pas les fenetres une a une.
         self._vrais = {
             nom: getattr(alpaca_cli, nom, None)
-            for nom in ("list_positions", "close_position", "get_account",
-                        "get_clock", "get_option_quote")
+            for nom in ("run", "list_positions", "close_position", "get_account",
+                        "get_clock", "get_option_ask_price")
         }
+
+        def _interdit(*a, **k):
+            raise AssertionError(
+                "un test a tente d'atteindre le CLI Alpaca (donc le reseau) : "
+                "args=%r. Bouche la fonction concernee dans setUp." % (a,))
+
+        alpaca_cli.run = _interdit
         self.closed: list[str] = []
         alpaca_cli.list_positions = lambda: list(self.positions)
         alpaca_cli.close_position = self._close
         alpaca_cli.get_account = lambda: {
             "id": "compte-test", "equity": "100000.0", "portfolio_value": "100000.0"}
         alpaca_cli.get_clock = lambda: {"is_open": True}
-        alpaca_cli.get_option_quote = lambda s: {"ask_price": "4.69"}
+        alpaca_cli.get_option_ask_price = lambda s: 4.69
         self.positions: list[dict] = []
         self.close_leve_sur: set[str] = set()
 
