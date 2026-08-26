@@ -312,7 +312,7 @@ function isUsMarketHoursNow() {
   // actually suspicious. monitor_exits.py is scheduled during market hours
   // only (its own module docstring: "*/15 9-16 * * 1-5" ET) -- outside that
   // window it is SUPPOSED to be silent for many hours, every night and every
-  // weekend. Added 25/08, "cherche encore" pass, after realizing a naive
+  // weekend. Added 25/08, review pass, after realizing a naive
   // age-only staleness check would light up yellow every single evening --
   // a banner that cries wolf nightly teaches everyone to ignore it exactly
   // when a real gap during real market hours needs attention. Uses Intl's
@@ -457,7 +457,7 @@ function outcomeBadge(d) {
   // (added 24/08) reuses the generic outcome "checked" for both a real dry
   // run report and (since the same-day logging-hygiene fix) an actual or
   // simulated position close, so the outcome string alone isn't enough to
-  // label it correctly. Found 24/08, "cherche encore": monitor_exits.py
+  // label it correctly. Found 24/08, on re-review: monitor_exits.py
   // records were falling through to a generic muted "checked" badge with
   // an empty Trade cell and no verdicts -- technically not broken, but
   // uninformative exactly where a judge would want to see WHAT closed.
@@ -553,7 +553,7 @@ function renderDecisions(decisions) {
       // catch, not any other reason a symbol was marked untradeable (no
       // edge, regime check, market data staleness, etc). Highlighted with
       // a distinct color and a shield icon, added 25/08: found in a
-      // "cherche encore" pass that this is the single most concrete proof
+      // review pass, that this is the single most concrete proof
       // of the project's differentiating idea, and it was rendered
       // identically to every other refusal reason -- easy to miss on a
       // quick scan, which is exactly the scan a judge does first.

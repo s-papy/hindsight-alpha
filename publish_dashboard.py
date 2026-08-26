@@ -132,7 +132,7 @@ def git_publish() -> None:
     paths = ["docs/data.json", "decision_log.jsonl"]
     subprocess.run(["git", "add", *paths], check=True)
     # Both calls below are scoped to `paths` on purpose -- found 24/08,
-    # "cherche encore". `git diff --cached --quiet` with NO pathspec checks
+    # a review pass. `git diff --cached --quiet` with NO pathspec checks
     # the whole index, not just the two files just staged above: if anything
     # else happened to already be staged in this working tree at this exact
     # moment (a terminal session mid multi-file review, say -- this repo's

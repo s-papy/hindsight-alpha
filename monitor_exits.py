@@ -1,7 +1,7 @@
 """Standalone position-exit monitor -- runs ONLY risk_gates.manage_exits(),
 independent of agent.py's once-a-day entry-evaluation cycle.
 
-Why this exists: found 24/08, second pass, after Spap asked what would
+Why this exists: found 24/08, second pass, after asking what would
 improve the AGENT (not the strategy) and pointed at researching competitors
 and past hackathons for the answer. An Alpaca-published reference
 architecture (alpaca.markets/learn, May 2026) runs its "position monitor"
@@ -31,7 +31,7 @@ Run: python monitor_exits.py [--dry-run]
 
 Scheduling (do this on the machine that runs the agent, in a terminal -- a
 sandboxed environment cannot
-set up a persistent scheduled job on Spap's machine):
+set up a persistent scheduled job on the operator's machine):
 
     # cron, every 15 minutes during US market hours (9:30-16:00 ET), weekdays
     */15 9-16 * * 1-5 cd /path/to/hindsight-alpha && /usr/bin/python3 monitor_exits.py >> monitor_exits.log 2>&1

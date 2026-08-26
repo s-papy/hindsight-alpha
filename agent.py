@@ -27,7 +27,7 @@ position management isn't conditional on today's signal.
 Since 24/08, EVERY symbol that clears steps 2-5 is attempted, not just the
 first one — the agent can hold several positions at once now. Each attempt
 still goes through risk_gates.check_gates(underlying, contract), which
-enforces, per Spap's explicit direction ("plusieurs symboles différents...
+enforces, per the operator's explicit direction ("plusieurs symboles différents...
 jamais tous les mêmes, œuf dans le même panier"):
   - never two open positions on the same underlying at once;
   - a hard cap on the number of concurrent positions (risk_gates.MAX_OPEN_POSITIONS);
@@ -181,7 +181,7 @@ def main() -> None:
     finally:
         # A logging failure must not (a) destroy the only trace of a run that
         # really placed an order, nor (b) displace a genuine error as the one
-        # that surfaces. Found 24/08, fourth "cherche encore" pass, following
+        # that surfaces. Found 24/08, on a fourth review pass, following
         # the same pattern as the other four fixed today.
         #
         # Measured, not assumed:
@@ -305,7 +305,7 @@ def _run(args, symbols, record: dict) -> None:
         print(f"\n-- {tradeable.symbol} ({direction_label}) --")
         trade_record: dict = {"symbol": tradeable.symbol, "direction": direction_label}
 
-        # Wrapped in try/except -- found 24/08, "cherche encore": this loop
+        # Wrapped in try/except -- found 24/08, on re-review: this loop
         # had NO per-symbol exception isolation, unlike evaluate_symbol()
         # above (see that function's docstring for the exact same rationale,
         # already written down there but never extended to this second loop
@@ -359,7 +359,7 @@ def _run(args, symbols, record: dict) -> None:
             # it hadn't been.
             #
             # These two accumulators move FIRST, before any call that can
-            # raise -- found 24/08, "cherche encore", by reproducing it:
+            # raise -- found 24/08, on re-review, by reproducing it:
             # record_order_submitted() writes state.json, and a write failure
             # there (the same crash-mid-write scenario _load_state's
             # corruption handling was written for) used to jump straight to
@@ -417,7 +417,7 @@ def _run(args, symbols, record: dict) -> None:
         # reached would be reading the wrong story).
         #
         # That handles every symbol sharing the SAME outcome -- but found
-        # 25/08, "cherche encore", re-reading this exact block: the ELSE
+        # 25/08, on re-review, re-reading this exact block: the ELSE
         # branch still hard-coded "risk_gate_blocked" whenever outcomes
         # DIFFER across symbols, regardless of whether risk_gate_blocked was
         # even among them. Reproduced: trades = [no_contract_found, error]

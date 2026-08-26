@@ -106,7 +106,7 @@ def _hv_series(returns: Sequence[float], window: int) -> List[float]:
     """Rolling realized vol at each point in time (index i = vol computed
     from returns[i-window:i]). Length = len(returns) - window.
 
-    🔒 ALIGNMENT INVARIANT -- verified numerically 24/08, "cherche encore",
+    🔒 ALIGNMENT INVARIANT -- verified numerically 24/08, on re-review, 
     and load-bearing. Do not "fix" the range below without re-checking both
     sides together.
 

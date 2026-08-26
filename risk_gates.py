@@ -10,12 +10,12 @@ inside it. The hackathon's required one-page write-up has to cover "risk
 gates" explicitly; describing a policy in prose without enforcing it in code
 would be exactly the kind of gap this whole project (hindsight_guard) exists
 to catch in other people's work. This mirrors the discipline already
-established and sealed in Spap's other trading project: a hard per-trade
+established and sealed in an earlier trading project: a hard per-trade
 risk cap and a drawdown lock, checked before every order, not just written
 down.
 
 Changed 24/08 from a strict single-position gate to several concurrent
-positions, at Spap's explicit direction: "plusieurs symboles différents...
+positions, at the operator's explicit direction: "plusieurs symboles différents...
 jamais tous les mêmes, œuf dans le même panier" (multiple different symbols,
 never all the same, don't put all eggs in one basket) -- see agent.py's
 DEFAULT_UNIVERSE, now spanning uncorrelated sectors (broad market,
@@ -38,7 +38,7 @@ per-position) against the recorded starting equity -- that check was already
 portfolio-level by construction, verified by rereading it rather than
 assumed correct just because it used to be.
 
-Added 24/08, second pass, after Spap asked directly "we improved the
+Added 24/08, second pass, after a direct question "we improved the
 strategy, but the agent is the real deliverable -- what improves the AGENT?"
 and pointed at researching competitors and past hackathons for the answer.
 Found in an Alpaca-published reference architecture (alpaca.markets/learn,
@@ -151,7 +151,7 @@ def _load_state() -> dict:
     check_gates() below refuses ALL new entries the moment it sees that
     sentinel, before ever touching starting_equity/locked.
 
-    Correction made 24/08, "cherche encore", after re-reading this
+    Correction made 24/08, on re-review, after re-reading this
     function's OWN reasoning and realizing it proved too much: the original
     version returned {} on corruption too, on the argument that "a process
     killed mid-write... is a real enough scenario that the whole agent
@@ -188,7 +188,7 @@ def _load_state() -> dict:
 
 def _save_state(state: dict) -> bool:
     """Refuses to write a state carrying the _corrupted sentinel -- found
-    24/08, "cherche encore", by reproducing it rather than by inspection.
+    24/08, on re-review, by reproducing it rather than by inspection.
 
     _load_state() promises, in its own docstring, that a corrupted
     state.json is "left untouched on disk until a human deliberately
@@ -224,7 +224,7 @@ def _save_state(state: dict) -> bool:
         )
         return False
 
-    # Atomic write -- found 24/08, "cherche encore", and demonstrated rather
+    # Atomic write -- found 24/08, on re-review, and demonstrated rather
     # than assumed: Path.write_text() opens in mode "w", which truncates the
     # file to 0 bytes BEFORE writing a single byte of the new content (probed
     # directly: 77 bytes -> 0 immediately on open, content only afterwards).
@@ -405,7 +405,7 @@ def already_traded_today(underlying: str) -> bool:
     against API lag WITHIN one run's loop over several symbols. They can't protect
     against agent.py crashing right after submit_paper_option_order()
     succeeds but before the position is visible via list_positions(), then
-    being re-run (by Spap, or a cron retry) within that same lag window --
+    being re-run (by the operator, or a cron retry) within that same lag window --
     a fresh process has no in-memory state, so it would re-evaluate the
     same symbol from scratch and could resubmit the identical order.
     Recording locally, synchronously, right after submission (see
@@ -413,7 +413,7 @@ def already_traded_today(underlying: str) -> bool:
 
     Added 24/08, second pass -- named "idempotency keys on every order...
     a retry after a timeout sends the order twice" in an external
-    architecture guide researched after Spap asked what would improve the
+    architecture guide researched after asking what would improve the
     AGENT, not the strategy."""
     state = _load_state()
     record = state.get("traded_today", {})
@@ -447,7 +447,7 @@ def is_halted() -> tuple:
     asymmetry the weekly loss lock already has (see check_gates' lock,
     which also only blocks entries).
 
-    Added 24/08, second pass, after Spap asked what would improve the
+    Added 24/08, second pass, after asking what would improve the
     AGENT (not the strategy) and external research
     on both a Alpaca-published reference architecture and a separate
     trading-agent guide independently named an untested/inaccessible kill
@@ -481,7 +481,7 @@ def _record_exit_outcome(is_win: bool, account_id: Optional[str] = None, equity:
     losing streak can be a real signal before it adds up to -3% of equity.
     Scope, stated honestly: this only sees losses the AGENT ITSELF closed
     via manage_exits() (take-profit/stop-loss). A position closed some
-    other way (manually by Spap, expiry, a broker-side liquidation) isn't
+    other way (manually by the operator, expiry, a broker-side liquidation) isn't
     seen here -- not full account-wide P&L tracking, just a check on the
     agent's own run of decisions, which is what MAX_CONSECUTIVE_LOSSES is
     actually meant to catch: "is my own signal currently not working."
@@ -495,7 +495,7 @@ def _record_exit_outcome(is_win: bool, account_id: Optional[str] = None, equity:
     human look" signal, not something the agent should quietly work
     through on its own.
 
-    account_id/equity added 25/08, "cherche encore": this function used to
+    account_id/equity added 25/08, on re-review: this function used to
     mutate state["consecutive_losses"] with NO idea which account's exit
     actually caused the mutation. check_gates() is the only place that
     compares state.json's saved account_id against the currently active
@@ -663,7 +663,7 @@ def manage_exits(dry_run: bool = False) -> List[ExitAction]:
     real outcome to count.
 
     Each position's close attempt is wrapped in its own try/except -- found
-    24/08, "cherche encore", the most important gap of the day: this loop
+    24/08, on re-review, the most important gap of the day: this loop
     can hold up to MAX_OPEN_POSITIONS positions since the multi-position
     redesign, but close_position() was called with NO per-position
     isolation, unlike every other per-item loop already fixed earlier today
@@ -712,7 +712,7 @@ def manage_exits(dry_run: bool = False) -> List[ExitAction]:
                     # state.json write hiccup, for instance) can never get
                     # mislabeled by the outer except as "left open, check
                     # manually" below. Found 24/08 re-reading my OWN fix
-                    # from moments earlier in this same "cherche encore"
+                    # from moments earlier in this same review pass
                     # pass: the position IS closed at this point -- only the
                     # streak count might be stale -- and reporting the
                     # opposite would be actively misleading, not just
@@ -796,7 +796,7 @@ def check_gates(
     in on every call after the first.
 
     Keyed by underlying (not a running total/count) since 24/08, second
-    fix, "cherche encore": the original version of this same-run-lag fix
+    fix, a review pass: the original version of this same-run-lag fix
     (added earlier the same day) took a single running float/int and always
     added it in full, on the assumption the live API is ALWAYS behind
     within one run. That's not guaranteed -- a paper order can fill and

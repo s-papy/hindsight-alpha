@@ -5,7 +5,7 @@
 
 POURQUOI IL EXISTE
 ===================
-Né le 25/08/2026, après que Spap a remarqué qu'aucun garde-fou ne tournait
+Né le 25/08/2026, après avoir remarqué qu'aucun garde-fou ne tournait
 sur ce projet — contrairement à d'autres projets internes, qui en ont un
 depuis longtemps. Ce script
 démarre PETIT, volontairement : chaque contrôle ci-dessous vient soit du
@@ -19,7 +19,7 @@ CE SCRIPT
 POUR LE FAIRE TAIRE. Si un contrôle est trop bruyant ou faux, on corrige
 le contrôle avec une vraie raison écrite ici — jamais en le supprimant
 pour effacer une alerte gênante. Si un contrôle bloque à tort, dis-le à
-Spap plutôt que de le désactiver toi-même.
+l'opérateur plutôt que de le désactiver toi-même.
 
 Standard library only — même philosophie que hindsight_guard.py.
 """
@@ -131,7 +131,7 @@ def controle_journal() -> None:
         # en local (Mac en CEST, où c'était déjà le 26) et BLOQUAIENT la CI
         # GitHub (runner en UTC, où il était encore le 25 à 22h51), sur le
         # même commit. Les dates de PLAN_SPRINT.md sont écrites dans le
-        # fuseau de Spap (Europe/Zurich, UTC+1/+2), donc une entrée peut
+        # fuseau de l'opérateur (Europe/Zurich, UTC+1/+2), donc une entrée peut
         # légitimement être "demain" pour un runner UTC. Un jour d'avance est
         # normal ; deux ne le sont pas, et restent bloqués.
         if d > aujourdhui + timedelta(days=1):
@@ -237,7 +237,7 @@ def controle_env_hackathon_scelle() -> None:
                 ".env.hackathon",
                 "🔴 A CHANGÉ DEPUIS SA PREMIÈRE LECTURE — fichier scellé jusqu'au "
                 "kickoff du 28/08. Si c'est toi qui l'as modifié volontairement "
-                "(ex. rotation de clé), dis-le à Spap ; sinon ne touche à rien "
+                "(ex. rotation de clé), signale-le à l'opérateur ; sinon ne touche à rien "
                 "de plus et préviens-le immédiatement.",
             )
 
@@ -375,7 +375,7 @@ def controle_chiffres_perimes() -> None:
 
 
 # ── CONTRÔLE 5 : SOURCE DE VÉRITÉ MÉCANIQUE, PAS UNE LISTE NOIRE ──────────
-# Demandé explicitement par Spap le 25/08, après la comparaison à doc-drift/
+# Demandé explicitement le 25/08, après la comparaison à doc-drift/
 # DriftGuard (détection de dérive documentaire, motif réel trouvé sur
 # GitHub) : une liste noire de chaînes déjà fausses (contrôle 4 ci-dessus)
 # ne rattrape que la RÉCIDIVE d'une erreur déjà vue une fois. Elle ne dirait
@@ -886,7 +886,7 @@ def controle_source_de_verite() -> None:
 
 
 # ── CONTRÔLE 6 : TOUTE DÉPENDANCE MODIFIÉE EST SIGNALÉE, JAMAIS AJOUTÉE À L'AVEUGLE ─
-# Né le 25/08/2026 d'un quasi-incident réel, pas d'une anticipation : Spap a
+# Né le 25/08/2026 d'un quasi-incident réel, pas d'une anticipation : on a
 # demandé d'installer un dépôt GitHub externe (affaan-m/ecc) qui prétendait
 # "212K+ étoiles" — chiffre invérifiable, jamais confirmé via l'API GitHub —
 # et qui modifie explicitement les hooks/rules/conventions MCP des agents de
@@ -980,7 +980,7 @@ def main() -> int:
     # peut encore être faux sur tout ce que ce script ne sait pas encore
     # chercher.
     #
-    # 🟢 CORRIGÉ le 26/08/2026, sur demande explicite de Spap : le trou XLK
+    # 🟢 CORRIGÉ le 26/08/2026, sur demande explicite : le trou XLK
     # (contrôle 5 excluait par construction les symboles en fuite de ses
     # plages mécaniques — trouvé le 25/08 en revue croisée, corrigé dans
     # README.md mais pas encore comblé mécaniquement) est désormais fermé

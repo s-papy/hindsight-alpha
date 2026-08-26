@@ -4,7 +4,7 @@ actually trades) vs momentum_strategy.py (TSMOM, written earlier as a
 demonstration of the same hindsight_guard leak-check pattern but never
 wired into agent.py or backtested against real data until now).
 
-Why this exists: Spap's own words, 24/08 — "ajouter au prochain brief
+Why this exists: the operator's own words, 24/08 — "ajouter au prochain brief
 terminal si tu veux vraiment la meilleure stratégie, pas juste celle qui
 raconte la meilleure histoire aux juges." The HV-rank strategy is the one
 in the pitch because it's options-native (a volatility-regime call, not
@@ -206,7 +206,7 @@ def main() -> None:
 
     results = []
     for symbol in symbols:
-        # try/except added 24/08, "cherche encore" -- same fix as backtest.py
+        # try/except added 24/08 on re-review -- same fix as backtest.py
         # and agent.py's live entry loop today: a single symbol's
         # DataQualityError or AlpacaCLIError from get_daily_bars() shouldn't
         # take down the whole comparison and lose every symbol already

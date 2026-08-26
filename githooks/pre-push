@@ -36,7 +36,7 @@ while read -r local_ref local_sha remote_ref remote_sha; do
         echo "  $remote_sha (distant) n'est pas un ancêtre de $local_sha (local)"
         echo "  → ceci nécessite --force ou --force-with-lease pour passer."
         echo "  Règle non négociable du projet (CLAUDE.md) : jamais de git push --force."
-        echo "  Si c'est vraiment volontaire et discuté avec Spap : git push --no-verify"
+        echo "  Si c'est vraiment volontaire et discuté avec the operator : git push --no-verify"
         refuse=1
     fi
 done

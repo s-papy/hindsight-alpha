@@ -1,6 +1,6 @@
 """Real backtest of the HV-rank strategy against real historical bars.
 
-Why this exists: the agent's own honest disclosure (README, PLAN_SPRINT) was
+Why this exists: the agent's own honest disclosure in the README was
 "we verified the mechanism works, not that the underlying thesis makes
 money" -- true, but unverified either way until now. This script actually
 answers "is this strategy historically profitable, and by how much" using
@@ -189,7 +189,7 @@ def main() -> None:
 
     results = []
     for symbol in symbols:
-        # try/except added 24/08, "cherche encore" -- same unguarded pattern
+        # try/except added 24/08 on re-review -- same unguarded pattern
         # just found and fixed in agent.py's live entry loop (see
         # engineering log, 16th pass): alpaca_cli.get_daily_bars() can raise
         # DataQualityError (stale/implausible bars) or AlpacaCLIError (a CLI
