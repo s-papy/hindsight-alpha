@@ -566,3 +566,97 @@ class TestPlafondsDeRisque(BaseExit):
         d = self._decide(ouvertes)
         self.assertFalse(self._autorise(d))
         self.assertIn("concurrent-position cap", str(getattr(d, "reason", "")))
+
+
+class TestInvariantDAlignement(unittest.TestCase):
+    """L'invariant que `_hv_series` déclare « load-bearing » — et que rien
+    n'empêchait de casser.
+
+    LE RISQUE, écrit par le fichier lui-même : « a future edit that makes
+    range(window, len(returns)+1) -- so hv[-1] finally uses the last return --
+    would silently break the correspondence on ONE side only, and the numbers
+    would still look plausible. »
+
+    C'est la définition d'un défaut qu'aucune relecture n'attrape : les
+    résultats restent crédibles, seul le backtest devient plus favorable que la
+    règle réellement tradée. Dans un projet nommé d'après la fuite par
+    anticipation, ce serait le pire endroit où en laisser une.
+
+    Le docstring dit avoir vérifié numériquement le 24/08. Re-vérifié le 26/08
+    — l'invariant tient — et transformé en test, parce qu'une vérification
+    ponctuelle protège le jour où elle est faite, pas les suivants.
+
+    LA MÉTHODE compte : on ne réaffirme pas la formule (un test qui recopie la
+    formule du code passe même quand les deux sont faux ensemble). On
+    PERTURBE une donnée d'entrée et on observe laquelle change le résultat.
+    """
+
+    FENETRE = 5
+
+    def _series(self):
+        from vol_strategy import Bar
+        import vol_strategy
+        bars = [Bar(close=100.0 * (1.01 ** i)) for i in range(40)]
+        return vol_strategy, vol_strategy.daily_returns(bars)
+
+    def test_hv_k_ne_voit_pas_le_rendement_du_jour_meme(self):
+        """hv[k] doit s'arrêter à rets[W+k-1]. S'il voyait rets[W+k], la
+        volatilité utilisée pour décider inclurait le mouvement qu'elle est
+        censée précéder."""
+        vs, rets = self._series()
+        W = self.FENETRE
+        hv = vs._hv_series(rets, W)
+
+        for k in (0, 1, len(hv) - 1):
+            with self.subTest(k=k):
+                dernier_attendu = W + k - 1
+
+                def hv_perturbe(indice):
+                    r = list(rets)
+                    r[indice] += 0.5
+                    return vs._hv_series(r, W)[k]
+
+                self.assertNotAlmostEqual(
+                    hv_perturbe(dernier_attendu), hv[k],
+                    msg="hv[%d] ignore rets[%d], qu'il devrait utiliser" % (k, dernier_attendu))
+                if dernier_attendu + 1 < len(rets):
+                    self.assertAlmostEqual(
+                        hv_perturbe(dernier_attendu + 1), hv[k],
+                        msg="hv[%d] utilise rets[%d] — il voit un jour de TROP, "
+                            "c'est-à-dire le futur" % (k, dernier_attendu + 1))
+
+    def test_le_decalage_decision_gain_est_le_meme_en_backtest_et_en_live(self):
+        """Le cœur de l'invariant : si les deux écarts diffèrent, le backtest
+        mesure une règle plus favorable que celle réellement tradée."""
+        vs, rets = self._series()
+        W = self.FENETRE
+        hv = vs._hv_series(rets, W)
+
+        # Backtest : décide sur hv[i], encaisse rets[W+i+1] (cf.
+        # _vol_strategy_returns, `next_day_ret_index = window + i + 1`).
+        i = 10
+        ecart_backtest = (W + i + 1) - (W + i - 1)
+
+        # Live : décide sur hv[-1], achète maintenant, capte le mouvement de
+        # DEMAIN — soit rets[len(rets)], pas encore observé.
+        k = len(hv) - 1
+        ecart_live = len(rets) - (W + k - 1)
+
+        self.assertEqual(
+            ecart_backtest, ecart_live,
+            "le backtest saute %d jour(s) entre décision et gain, le live %d : "
+            "les deux ne mesurent pas la même règle" % (ecart_backtest, ecart_live))
+        self.assertEqual(ecart_backtest, 2,
+                         "l'écart attendu est 2 (un jour entier ignoré entre les deux)")
+
+    def test_la_distribution_de_reference_exclut_l_observation_courante(self):
+        """Un percentile qui s'inclut lui-même est biaisé — et il le serait
+        différemment des deux côtés si un seul chemin le faisait."""
+        import inspect
+        import vol_strategy
+        backtest = inspect.getsource(vol_strategy._vol_strategy_returns)
+        live = inspect.getsource(vol_strategy.today_regime)
+        self.assertIn("hv[max(0, i - RANK_LOOKBACK_DAYS):i]", backtest,
+                      "le backtest n'exclut plus hv[i] de sa propre distribution")
+        self.assertIn(":-1]", live,
+                      "le chemin live n'exclut plus hv[-1] de sa propre distribution")
