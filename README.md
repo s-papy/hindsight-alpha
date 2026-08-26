@@ -435,6 +435,23 @@ dashboard now shows a health banner — age of last check, consecutive-failure
 count — so a gap like that is visible on the public page instead of only in a
 local log.
 
+**Keeping the machine awake is now a configuration, not a habit.** That
+incident happened because staying awake depended on someone being at the
+keyboard. `launchagents/com.hindsightalpha.market-hours-awake.plist` runs
+`caffeinate` from 15:20 to 22:05 local time on weekdays, covering 13:30–20:00
+UTC with ten minutes on either side. Verified: the agent starts, the assertion
+appears in `pmset -g assertions`, system sleep is blocked.
+
+It can only *keep* a machine awake — it cannot wake one already asleep. That
+half needs one administrator command, run once:
+
+```bash
+sudo pmset repeat wakeorpoweron MTWRF 15:15:00
+```
+
+Together they close the gap: the scheduled event wakes the machine at 15:15,
+the agent holds it awake through the close.
+
 **Remaining gap, stated plainly**: the dedicated hackathon account
 (`.env.hackathon`) has never been connected. Everything above ran on a
 development paper account, deliberately, under the hackathon's own rule allowing

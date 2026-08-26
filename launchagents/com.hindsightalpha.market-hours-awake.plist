@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Keeps this Mac awake through US market hours, on weekdays.
+
+  WHY THIS EXISTS
+  Alpaca does not support bracket/OCO orders on options - confirmed against the
+  real API. There is no server-side stop-loss. `monitor_exits.py`, polling every
+  15 minutes from this machine, is therefore the ONLY mechanism protecting an
+  open position.
+
+  That mechanism has already failed once for exactly this reason: the job failed
+  11 times in a row one afternoon, not from a permissions or config fault, but
+  because the Mac was asleep and launchd only fired it during brief maintenance
+  wake-ups - too short for Wi-Fi to reconnect before the network call timed out.
+  Each failure timestamp matched the system sleep log to the second.
+
+  Until now, staying awake depended on someone being at the keyboard. This makes
+  it a configuration instead.
+
+  WHAT IT DOES, AND WHAT IT CANNOT DO
+  `caffeinate -dimu` prevents idle, display and disk sleep for the duration. It
+  runs 15:20 to 22:05 local time (Europe/Zurich, CEST = UTC+2), which covers
+  13:30-20:00 UTC with ten minutes on either side.
+
+  It can only keep the machine awake - it CANNOT wake a machine that is already
+  asleep. Waking requires a scheduled power event, which needs administrator
+  rights:
+
+      sudo pmset repeat wakeorpoweron MTWRF 15:15:00
+
+  Run that once, and the two together close the gap: pmset wakes the machine at
+  15:15, this agent keeps it awake until 22:05.
+
+  StartCalendarInterval fires at 15:20 on each weekday (1=Monday .. 5=Friday).
+  If the machine is asleep at that moment, launchd runs the job at the next
+  wake instead - which is precisely why the pmset line above matters.
+
+  INSTALL   cp launchagents/com.hindsightalpha.market-hours-awake.plist ~/Library/LaunchAgents/
+            launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.hindsightalpha.market-hours-awake.plist
+  STOP      launchctl bootout gui/$(id -u)/com.hindsightalpha.market-hours-awake
+  STATUS    launchctl print gui/$(id -u)/com.hindsightalpha.market-hours-awake
+-->
+<plist version="1.0"><dict>
+    <key>Label</key><string>com.hindsightalpha.market-hours-awake</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/bin/caffeinate</string>
+        <string>-dimu</string>
+        <string>-t</string>
+        <string>24300</string>
+    </array>
+
+    <key>StartCalendarInterval</key>
+    <array>
+        <dict><key>Weekday</key><integer>1</integer><key>Hour</key><integer>15</integer><key>Minute</key><integer>20</integer></dict>
+        <dict><key>Weekday</key><integer>2</integer><key>Hour</key><integer>15</integer><key>Minute</key><integer>20</integer></dict>
+        <dict><key>Weekday</key><integer>3</integer><key>Hour</key><integer>15</integer><key>Minute</key><integer>20</integer></dict>
+        <dict><key>Weekday</key><integer>4</integer><key>Hour</key><integer>15</integer><key>Minute</key><integer>20</integer></dict>
+        <dict><key>Weekday</key><integer>5</integer><key>Hour</key><integer>15</integer><key>Minute</key><integer>20</integer></dict>
+    </array>
+
+    <key>StandardOutPath</key><string>/Users/s-pap/hindsight-alpha/market_hours_awake.log</string>
+    <key>StandardErrorPath</key><string>/Users/s-pap/hindsight-alpha/market_hours_awake.log</string>
+</dict></plist>

@@ -29,3 +29,6 @@ monitor_last_run.json
 BRIEF_*.md
 PLAN_SPRINT.md
 SOCIAL_POSTS_DRAFT.md
+
+# Journal de l agent « rester éveillé » — propre à la machine.
+market_hours_awake.log
