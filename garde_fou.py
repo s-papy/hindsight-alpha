@@ -792,6 +792,98 @@ def controle_source_de_verite() -> None:
                                           _fmt(attendu["concentration"])),
                     )
 
+        # 🔴 AJOUTÉ le 26/08/2026 — le dernier vrai trou de couverture connu
+        # du contrôle 5. Le correctif du 25/08 ci-dessus (_lignes_tableau_
+        # symboles) ne couvre que la forme TABLEAU markdown. Mais le bug
+        # d'ORIGINE qui l'a motivé était une phrase en PROSE, pas un tableau :
+        # README.md dit encore aujourd'hui « A concentration share above 100%
+        # (XLK's 136.7%) » — une citation individuelle d'un symbole EN FUITE,
+        # hors tableau. `plage_concentration`/`plage_succes` ne peuvent QUE
+        # comparer une PLAGE construite sur les symboles `propres` : XLK, en
+        # fuite, en est exclu par construction — la même exclusion que celle
+        # déjà documentée en tête de fichier. Cette phrase-là passerait donc
+        # encore inaperçue si son chiffre devenait faux.
+        #
+        # Portée délibérément étroite pour ne pas rouvrir les 3 bugs de
+        # proximité regex déjà trouvés en construisant le reste de ce
+        # contrôle : un SEUL pourcentage isolé (pas une plage — déjà couverte
+        # par RANGE_PCT plus haut), sa distance au nom du symbole ET à
+        # l'ancre win-rate/concentration la plus proche, jamais une supposition
+        # sur la position relative. Ignore toute ligne de tableau (déjà
+        # couverte par _lignes_tableau_symboles juste au-dessus — éviter un
+        # double signalement contradictoire sur la même donnée).
+        spans_plages = [(m.start(), m.end()) for m in RANGE_PCT.finditer(texte)]
+        UN_SEUL_POURCENT = re.compile(r"(?<![\d.,])(\d{1,3})[.,](\d)\s*%(?!\s*[–\-]\s*\d)")
+        candidats_seuls = [
+            m for m in UN_SEUL_POURCENT.finditer(texte)
+            if not any(a <= m.start() < b for a, b in spans_plages)
+        ]
+
+        def _ligne_est_tableau(pos: int) -> bool:
+            debut_ligne = texte.rfind("\n", 0, pos) + 1
+            fin_ligne = texte.find("\n", pos)
+            fin_ligne = fin_ligne if fin_ligne != -1 else len(texte)
+            return texte[debut_ligne:fin_ligne].strip().startswith("|")
+
+        for symbole, attendu in fuites.items():
+            for sm in re.finditer(r"\b%s\b" % re.escape(symbole), texte):
+                # le plus proche pourcentage isolé, tous côtés, distance bornée
+                # à 70 caractères (largeur déjà utilisée pour les ancres
+                # RANGE_PCT ci-dessus — même ordre de grandeur, même famille
+                # de contrôle, pas une nouvelle constante inventée au hasard).
+                meilleur, meilleure_distance = None, None
+                for pm in candidats_seuls:
+                    if _ligne_est_tableau(pm.start()):
+                        continue
+                    d = pm.start() - sm.end() if pm.start() >= sm.end() else sm.start() - pm.end()
+                    if d < 0 or d > 70:
+                        continue
+                    if meilleure_distance is None or d < meilleure_distance:
+                        meilleur, meilleure_distance = pm, d
+                if meilleur is None:
+                    continue
+
+                cite = float("%s.%s" % (meilleur.group(1), meilleur.group(2)))
+                avant2 = texte[max(0, meilleur.start() - 80):meilleur.start()]
+                apres2 = texte[meilleur.end():meilleur.end() + 40]
+
+                def _distance_min2(regex: re.Pattern) -> int | None:
+                    d = [len(avant2) - x.end() for x in regex.finditer(avant2)]
+                    d += [x.start() for x in regex.finditer(apres2)]
+                    return min(d) if d else None
+
+                d_succes2 = _distance_min2(ANCRE_SUCCES)
+                d_concentration2 = _distance_min2(ANCRE_CONCENTRATION)
+                if d_succes2 is None and d_concentration2 is None:
+                    continue  # aucune ancre proche — pas assez sûr pour bloquer
+
+                # CORRIGÉ : `group(0)` est la correspondance ENTIÈRE, signe %
+                # compris, alors que les deux gabarits ci-dessous ajoutent déjà
+                # « %% » — d'où un « 181.6%% » affiche en double. Le message
+                # jumeau du cas TABLEAU passe `group(1)`, le nombre seul. On
+                # s'aligne en retirant le signe plutôt qu'en recomposant, pour
+                # garder la notation exacte du document (virgule ou point).
+                if d_concentration2 is None or (d_succes2 is not None and d_succes2 < d_concentration2):
+                    if abs(cite - attendu["win_rate"]) > 0.05:
+                        bloque(
+                            rel,
+                            "WIN RATE « %s%% » cité près de %s (prose, hors tableau) ne "
+                            "correspond pas à sa fenêtre vettée (%dj) dans "
+                            "BACKTEST_RESULTS.md (devrait être %s%%)."
+                            % (meilleur.group(0).strip().rstrip("%").strip(), symbole, attendu["fenetre"],
+                               _fmt(attendu["win_rate"])),
+                        )
+                else:
+                    if attendu["concentration"] is not None and abs(cite - attendu["concentration"]) > 0.05:
+                        bloque(
+                            rel,
+                            "CONCENTRATION « %s%% » citée près de %s (prose, hors tableau) "
+                            "ne correspond pas à sa fenêtre vettée (%dj) dans "
+                            "BACKTEST_RESULTS.md (devrait être %s%%)."
+                            % (meilleur.group(0).strip().rstrip("%").strip(), symbole, attendu["fenetre"],
+                               _fmt(attendu["concentration"])),
+                        )
+
 
 # ── CONTRÔLE 6 : TOUTE DÉPENDANCE MODIFIÉE EST SIGNALÉE, JAMAIS AJOUTÉE À L'AVEUGLE ─
 # Né le 25/08/2026 d'un quasi-incident réel, pas d'une anticipation : Spap a
@@ -886,11 +978,20 @@ def main() -> int:
     # revue croisée multi-agents avant ce commit, corrigé dans la foulée),
     # tous nés d'erreurs déjà trouvées CETTE session. Un dossier approuvé
     # peut encore être faux sur tout ce que ce script ne sait pas encore
-    # chercher — XLK en est la preuve fraîche : contrôle 5 exclut par
-    # construction les symboles en fuite de ses plages mécaniques, donc un
-    # chiffre erroné sur XLK ne serait vu par AUCUN contrôle actuel (trouvé
-    # le 25/08 en revue croisée, corrigé dans README.md, pas encore comblé
-    # mécaniquement).
+    # chercher.
+    #
+    # 🟢 CORRIGÉ le 26/08/2026, sur demande explicite de Spap : le trou XLK
+    # (contrôle 5 excluait par construction les symboles en fuite de ses
+    # plages mécaniques — trouvé le 25/08 en revue croisée, corrigé dans
+    # README.md mais pas encore comblé mécaniquement) est désormais fermé
+    # pour les citations en PROSE (hors tableau) d'un symbole en fuite — la
+    # forme exacte du bug d'origine. Témoin : « XLK's 181.6% » (l'ancien
+    # chiffre faux) déclenche un vrai blocage 🔴 ; restauré à 136.7%, silence.
+    # Portée volontairement étroite (un seul pourcentage isolé, avec ancre
+    # win-rate/concentration à proximité) pour ne pas rouvrir les mêmes bugs
+    # de proximité regex déjà trouvés ailleurs dans ce contrôle — voir le
+    # commentaire juste au-dessus de la boucle `for symbole, attendu in
+    # fuites.items()` dans controle_source_de_verite(), et PLAN_SPRINT.md.
     print()
     print("  ⚠️  Même au vert : ce script attrape 6 formes d'erreur précises,")
     print("     pas le fond. Un dossier qu'il approuve peut encore être faux.")
