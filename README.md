@@ -383,11 +383,22 @@ git push
 # then on GitHub: Settings -> Pages -> Deploy from branch -> main -> /docs
 ```
 
-After that, running `python publish_dashboard.py --git-push` at the end of
-each day's `agent.py` run keeps the public page current. `--git-push` is
-opt-in on purpose — writing the snapshot is safe to automate, publishing to
-the public repo is a decision this project's own rules say should stay
-explicit each time, not a silent default.
+`launchagents/com.hindsightalpha.publish-dashboard.plist` runs
+`publish_dashboard.py --git-push` every 30 minutes through the session, plus
+once just after the close.
+
+**This is a deliberate change to a rule this project used to hold.** Publishing
+to the public repo was kept explicit each time, on the grounds that pushing is
+a decision rather than a step. But the page is the submission's Application
+URL, and the README calls it live — a rule that leaves it stale most of the
+time was protecting the wrong thing. The push is now automatic, and the rule is
+amended here rather than quietly ignored.
+
+What makes that safe to automate is narrow and worth stating: `git_publish()`
+scopes both its diff check and its commit to `docs/data.json` and
+`decision_log.jsonl` explicitly. An unrelated file staged in the working tree
+at that moment cannot be scooped into a commit whose message claims to be only
+a dashboard snapshot.
 
 **Verified in a real browser**, not just parsed offline: a local server and a
 Chrome session confirmed all three sections render, zero console errors, and
