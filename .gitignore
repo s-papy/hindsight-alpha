@@ -7,6 +7,10 @@ state.json
 HALT
 .DS_Store
 state.json.tmp
+# Fichier de verrou de state.json (flock), créé le 26/08 avec le correctif
+# de mise à jour perdue. Propre à la machine, jamais à publier — même
+# raison que state.json.tmp juste au-dessus.
+state.json.lock
 docs/data.json.tmp
 monitor_exits.log
 monitor_exits_dedup.json
