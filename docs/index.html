@@ -496,6 +496,19 @@ function outcomeBadge(d) {
       ? '<span class="badge badge-yellow">would close (dry-run)</span>'
       : '<span class="badge badge-green">position closed</span>';
   }
+  // AJOUTE 26/08 -- meme defaut de forme que la banniere de sante corrigee le
+  // meme jour: la page ne distinguait pas un ESSAI A BLANC rate d'une panne de
+  // production. Un `agent.py --dry-run` lance depuis un environnement sans
+  // acces reseau produit une entree `outcome: "error"` parfaitement legitime,
+  // qui s'affichait ici en ROUGE, identique a un vrai echec de l'agent -- et
+  // potentiellement comme decision la PLUS RECENTE vue par un lecteur.
+  //
+  // decision_log.jsonl portait pourtant l'information: `dry_run` est present
+  // sur 30 entrees sur 30. Elle n'etait simplement pas lue ici. Le cas
+  // exit_monitor juste au-dessus faisait deja cette distinction; on l'etend.
+  if (d.dry_run && d.outcome === 'error') {
+    return '<span class="badge badge-yellow">dry-run: error</span>';
+  }
   const map = {
     order_submitted: ['badge-green', 'traded'],
     no_edge: ['badge-muted', 'no edge'],
