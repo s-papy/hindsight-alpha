@@ -48,6 +48,8 @@ import os
 import shutil
 import sys
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
 
@@ -266,9 +268,6 @@ class TestPnLIllisible(BaseExit):
         self.assertEqual(len(actions), 1)
         self.assertIn("unreadable", str(actions[0]).lower() + str(getattr(actions[0], "kind", "")).lower())
 
-
-if __name__ == "__main__":
-    unittest.main(verbosity=2)
 
 
 class TestGardePaperUniquement(unittest.TestCase):
@@ -983,3 +982,128 @@ class TestVerrouDePerte(BaseExit):
         self.assertEqual(cles_de_date, [],
                          "une clé de date est apparue dans state.json : le "
                          "verrou est-il devenu réellement hebdomadaire ?")
+
+
+class TestEcrituresConcurrentes(unittest.TestCase):
+    """Deux processus écrivent state.json : agent.py (une fois par jour) et
+    monitor_exits.py (tous les quarts d'heure, via launchd). L'écriture est
+    atomique depuis le 24/08 — fichier temporaire + os.replace — donc un
+    lecteur ne voit jamais un fichier à moitié écrit.
+
+    L'atomicité empêche un fichier DÉCHIRÉ. Elle n'empêche pas une MISE À JOUR
+    PERDUE, qui est une panne différente, et la seule réellement atteignable
+    ici : chacun lit, modifie sa copie, écrit ; le second écrasement efface la
+    mise à jour du premier.
+
+    Mesuré le 26/08 avant correctif, en entrelaçant les deux écrivains publics
+    avec une lecture ralentie (la fenêtre existe déjà — la pause l'élargit, elle
+    ne l'invente pas) : consecutive_losses retombait à 0. Le disjoncteur de
+    pertes sous-comptait. Pas de plantage, pas de corruption, aucun message.
+
+    C'est la panne que la gestion de corruption avait été écrite pour empêcher
+    (« un plantage aurait dé-pausé en silence un agent censé s'être arrêté »),
+    sauf qu'aucun plantage n'est nécessaire : deux écritures normales suffisent.
+    """
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="hindsight-conc-"))
+        self._vrai_state_file = risk_gates.STATE_FILE
+        self._vrai_load = risk_gates._load_state
+        risk_gates.STATE_FILE = self.tmp / "state.json"
+        risk_gates.STATE_FILE.write_text(json.dumps({
+            "account_id": "compte-test", "starting_equity": 100000.0,
+            "locked": False, "consecutive_losses": 0,
+            "traded_today": {"date": risk_gates._today(), "symbols": []},
+        }), encoding="utf-8")
+
+    def tearDown(self):
+        risk_gates.STATE_FILE = self._vrai_state_file
+        risk_gates._load_state = self._vrai_load
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _ralentir_la_lecture(self, secondes=0.30):
+        vrai = self._vrai_load
+
+        def load_lent():
+            etat = vrai()
+            time.sleep(secondes)
+            return etat
+
+        risk_gates._load_state = load_lent
+
+    def etat(self):
+        return json.loads(risk_gates.STATE_FILE.read_text(encoding="utf-8"))
+
+    def test_deux_ecrivains_entrelaces_ne_se_perdent_pas(self):
+        """Le test qui mord : lancé contre le code d'avant le verrou, il rend
+        consecutive_losses=0 au lieu de 1."""
+        self._ralentir_la_lecture()
+        erreurs = []
+
+        def enregistre_ordre():
+            try:
+                risk_gates.record_order_submitted("SPY")
+            except Exception as err:            # pragma: no cover - diagnostic
+                erreurs.append(err)
+
+        def enregistre_perte():
+            try:
+                risk_gates._record_exit_outcome(is_win=False)
+            except Exception as err:            # pragma: no cover - diagnostic
+                erreurs.append(err)
+
+        fils = [threading.Thread(target=enregistre_ordre),
+                threading.Thread(target=enregistre_perte)]
+        for f in fils:
+            f.start()
+        for f in fils:
+            f.join(timeout=30)
+
+        # Les assertions d'ÉTAT d'abord, les exceptions ensuite : sur le code
+        # d'avant le verrou, les deux écrivains se disputent aussi le même
+        # fichier temporaire (`state.json.tmp`, nom fixe), et l'un voit
+        # disparaître celui de l'autre sous son os.replace(). Ce FileNotFoundError
+        # est un SECOND bug de concurrence, corrigé par le même verrou -- mais
+        # s'il est asserté en premier, il masque la panne que ce test annonce.
+        etat = self.etat()
+        self.assertEqual(etat["traded_today"]["symbols"], ["SPY"],
+                         "le garde anti-doublon a oublié SPY : l'écriture de "
+                         "l'autre processus a écrasé la sienne")
+        self.assertEqual(etat.get("consecutive_losses"), 1,
+                         "la perte n'est plus comptée : le disjoncteur "
+                         "sous-compte à cause d'une mise à jour perdue")
+        self.assertEqual(erreurs, [], "un écrivain a levé une exception")
+
+    def test_le_verrou_exclut_reellement(self):
+        """Sans ceci, remplacer le corps de _state_lock par un `yield` nu
+        passerait inaperçu — le test précédent redeviendrait rouge, celui-ci
+        dit POURQUOI."""
+        obtenu_par_le_second = []
+
+        def second():
+            try:
+                with risk_gates._state_lock(timeout_s=0.2):
+                    obtenu_par_le_second.append("obtenu")
+            except risk_gates.StateLockUnavailable:
+                obtenu_par_le_second.append("refusé")
+
+        with risk_gates._state_lock():
+            f = threading.Thread(target=second)
+            f.start()
+            f.join(timeout=30)
+
+        self.assertEqual(obtenu_par_le_second, ["refusé"],
+                         "un second détenteur a obtenu le verrou alors que le "
+                         "premier le tenait : le verrou ne verrouille rien")
+
+    def test_le_verrou_est_relache_meme_si_le_corps_leve(self):
+        """Un verrou qui survit à une exception fige l'agent pour de bon."""
+        with self.assertRaises(ZeroDivisionError):
+            with risk_gates._state_lock():
+                1 / 0
+        with risk_gates._state_lock(timeout_s=0.5):
+            pass  # doit être obtenable : si on arrive ici, il a bien été relâché
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

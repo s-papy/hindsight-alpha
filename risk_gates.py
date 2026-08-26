@@ -65,8 +65,11 @@ across multiple days. Not a secret, but run-specific — see .gitignore.
 
 from __future__ import annotations
 
+import contextlib
+import fcntl
 import json
 import os
+import time
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
@@ -296,6 +299,72 @@ def _save_state(state: dict) -> bool:
     return True
 
 
+class StateLockUnavailable(Exception):
+    """Raised when the exclusive lock on state.json cannot be taken in time.
+
+    Fail-closed on purpose: the caller wanted to update the bookkeeping that
+    the risk gates read, and could not. Continuing without the lock is exactly
+    the bug this class exists to prevent."""
+
+
+@contextlib.contextmanager
+def _state_lock(timeout_s: float = 10.0):
+    """Hold an exclusive lock for the whole read-modify-write of state.json.
+
+    AJOUTE le 26/08/2026. _save_state() is atomic -- it writes a temp file and
+    os.replace()s it, so a reader never sees a half-written file. Atomicity
+    prevents a TORN file. It does not prevent a LOST UPDATE, which is a
+    different failure and the one actually reachable here.
+
+    Reproduced, not assumed. Two processes, interleaved the way launchd can
+    produce them (agent.py daily, monitor_exits.py every 15 minutes -- the
+    overlap risk _save_state's own note already flagged):
+
+        A reads state           B reads state          (both see locked=False)
+        B sets locked=True, writes                     (weekly loss lock ON)
+        A appends SPY to traded_today, writes          (from its STALE copy)
+        -> final state: locked=False
+
+    Measured output of that script: "LE VERROU DE PERTE A DISPARU". The lock
+    that stops the agent for the rest of the week was silently cleared by a
+    routine write from the other process -- no crash, no corruption, no error.
+    The mirror case loses traded_today instead, disarming the duplicate-order
+    guard for that symbol.
+
+    This is the same failure the corruption handling was written to prevent
+    ("a crash would quietly un-pause an agent that was supposed to have
+    stopped"), except no crash is required -- two normal writes suffice.
+
+    flock() is per-open-file-description, so the lock is released by close()
+    even if the process is killed inside the critical section -- no stale lock
+    can wedge the agent. The wait is bounded because every critical section
+    guarded here is pure computation with no network I/O (checked: no
+    alpaca_cli call sits between any load/save pair), so 10 s is already
+    absurdly generous; blocking forever under launchd would be worse than
+    failing loudly.
+    """
+    lock_path = STATE_FILE.with_name(STATE_FILE.name + ".lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    fh = open(lock_path, "a+")
+    try:
+        limite = time.monotonic() + timeout_s
+        while True:
+            try:
+                fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError:
+                if time.monotonic() >= limite:
+                    raise StateLockUnavailable(
+                        f"another process has held the lock on {STATE_FILE} for more than "
+                        f"{timeout_s:g}s. Bookkeeping was NOT updated; refusing to write from a "
+                        f"possibly stale copy, which is how a loss lock gets silently cleared."
+                    )
+                time.sleep(0.05)
+        yield
+    finally:
+        fh.close()  # releases the flock
+
+
 def _record_starting_equity(equity: float, state: dict, account_id: Optional[str]) -> dict:
     """Sets the baseline the weekly lock measures drawdown against — once,
     the first time this account is seen.
@@ -451,14 +520,16 @@ def record_order_submitted(underlying: str) -> None:
     succeeds -- writes synchronously so the record survives even if the
     process crashes on the very next line. Resets the symbol list whenever
     the date rolls over, so this never accumulates across days."""
-    state = _load_state()
-    record = state.get("traded_today", {})
-    if record.get("date") != _today():
-        record = {"date": _today(), "symbols": []}
-    if underlying.upper() not in record["symbols"]:
-        record["symbols"].append(underlying.upper())
-    state["traded_today"] = record
-    if not _save_state(state):
+    with _state_lock():
+        state = _load_state()
+        record = state.get("traded_today", {})
+        if record.get("date") != _today():
+            record = {"date": _today(), "symbols": []}
+        if underlying.upper() not in record["symbols"]:
+            record["symbols"].append(underlying.upper())
+        state["traded_today"] = record
+        persiste = _save_state(state)
+    if not persiste:
         raise StateNotPersisted("state.json is corrupted; the duplicate-order guard was NOT armed for this order")
 
 
@@ -554,12 +625,14 @@ def _record_exit_outcome(is_win: bool, account_id: Optional[str] = None, equity:
     future ones might in a mocked/offline context) degrades to the old,
     account-blind behavior rather than raising -- narrower than before, not
     a new failure mode."""
-    state = _load_state()
-    if account_id is not None:
-        state = _record_starting_equity(equity or 0.0, state, account_id)
-    count = 0 if is_win else state.get("consecutive_losses", 0) + 1
-    state["consecutive_losses"] = count
-    if not _save_state(state):
+    with _state_lock():
+        state = _load_state()
+        if account_id is not None:
+            state = _record_starting_equity(equity or 0.0, state, account_id)
+        count = 0 if is_win else state.get("consecutive_losses", 0) + 1
+        state["consecutive_losses"] = count
+        persiste = _save_state(state)
+    if not persiste:
         raise StateNotPersisted(f"state.json is corrupted; the consecutive-loss count ({count}) was NOT persisted")
     return count
 
@@ -897,9 +970,17 @@ def check_gates(
             f"equity down {drawdown_pct:.1%} from the recorded starting equity "
             f"(${starting_equity:,.2f} -> ${equity:,.2f}), >= the {WEEKLY_LOSS_LOCK_PCT:.0%} weekly lock threshold"
         )
-        state["locked"] = True
-        state["lock_reason"] = reason
-        _save_state(state)
+        # Re-lu sous verrou plutot que d'ecrire le `state` charge ~50 lignes
+        # plus haut : entre les deux, l'autre processus a pu incrementer le
+        # compteur de pertes ou enregistrer un symbole. Ecrire la copie perimee
+        # effacerait sa mise a jour. Poser locked=True est monotone -- le
+        # rabattre sur l'etat frais est exactement la bonne fusion.
+        with _state_lock():
+            frais = _load_state()
+            if not frais.get("_corrupted"):
+                frais["locked"] = True
+                frais["lock_reason"] = reason
+                _save_state(frais)
         return RiskDecision(False, f"weekly loss lock triggered: {reason}")
 
     consecutive_losses = state.get("consecutive_losses", 0)
