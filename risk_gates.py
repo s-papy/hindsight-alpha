@@ -892,6 +892,35 @@ def check_gates(
     if underlying.upper() in already_on_this_underlying:
         return RiskDecision(False, f"already holding an open option position on {underlying}; not stacking a second one on the same underlying")
 
+    # CORRIGE le 26/08/2026. Ce controle ne consultait QUE l'API, alors que
+    # `already_open_this_run_underlyings` existe precisement pour couvrir la
+    # fenetre ou l'API n'a pas encore rattrape. Ce parametre n'alimentait que
+    # le compteur de positions simultanees, plus bas -- pas la regle
+    # anti-doublon, dont il porte pourtant le nom.
+    #
+    # TROU REPRODUIT, et il demande DEUX conditions:
+    #   1. le meme sous-jacent deux fois dans une execution. `agent.py` fait
+    #      `[s.strip().upper() for s in args.symbols.split(",")]` SANS
+    #      dedoublonner, donc `--symbols SPY,SPY` suffit.
+    #   2. l'echec de `record_order_submitted()` -- cas qu'agent.py prevoit
+    #      explicitement, signale par un AVERTISSEMENT, et apres lequel il
+    #      continue. Sans cet enregistrement, le garde `traded_today` de
+    #      state.json ne rattrape plus rien.
+    # Mesure: deux ordres sur SPY dans la meme execution, contre une regle
+    # que ce projet enonce comme non negociable.
+    #
+    # A noter, et c'est rassurant sur le reste: l'accumulateur d'exposition
+    # TOTALE fonctionnait pendant ce trou -- le second passage dimensionnait 2
+    # contrats au lieu de 3, il savait donc que 840 $ etaient deja engages.
+    # Seule la regle anti-doublon cedait.
+    run_open_upper = {u.upper() for u in (already_open_this_run_underlyings or set())}
+    if underlying.upper() in run_open_upper:
+        return RiskDecision(
+            False,
+            f"already submitted an order for {underlying} earlier in THIS run; not stacking a "
+            "second one on the same underlying (the live API may not show it yet)",
+        )
+
     # Only count a this-run underlying's contribution if the live API does
     # NOT already show it as open -- otherwise it's already counted via
     # open_positions below, and adding it again would double it. See this

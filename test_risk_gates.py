@@ -783,3 +783,116 @@ class TestFrontiereCLI(unittest.TestCase):
         # tearDown restaure -- pas de finally bricole ici.
         with self.assertRaises(alpaca_cli.AlpacaCLIError):
             risk_gates.manage_exits(dry_run=False)
+
+
+class TestDoublonDansUneMemeExecution(BaseExit):
+    """Deux entrées sur le même sous-jacent dans une seule exécution.
+
+    LE TROU, reproduit. Il demandait DEUX conditions, et les deux sont
+    atteignables :
+
+      1. le même symbole deux fois dans la liste. `agent.py` faisait
+         `[s.strip().upper() for s in args.symbols.split(",")]` sans
+         dédoublonner — `--symbols SPY,SPY` suffisait.
+      2. l'échec de `record_order_submitted()`, cas qu'`agent.py` prévoit
+         explicitement, signale par un avertissement, et après lequel il
+         CONTINUE. Sans cet enregistrement, le garde `traded_today` de
+         state.json ne rattrape plus rien.
+
+    Le contrôle anti-doublon de `check_gates` ne consultait alors que l'API —
+    laquelle, pendant la fenêtre de latence, ne voit pas encore la position
+    ouverte une seconde plus tôt. Résultat mesuré : deux ordres sur SPY, contre
+    une règle que ce projet énonce comme non négociable.
+
+    RASSURANT SUR LE RESTE : l'accumulateur d'exposition TOTALE fonctionnait
+    pendant ce trou — le second passage dimensionnait 2 contrats au lieu de 3,
+    il savait donc que 840 $ étaient déjà engagés. Seule la règle anti-doublon
+    cédait. Les deux tests ci-dessous épinglent cette distinction.
+    """
+
+    EQUITE = 100000.0
+
+    def setUp(self):
+        super().setUp()
+        alpaca_cli.get_account = lambda: {
+            "id": "compte-test", "equity": str(self.EQUITE),
+            "portfolio_value": str(self.EQUITE)}
+        alpaca_cli.get_option_ask_price = lambda s: 2.80
+        self.positions = []          # l'API n'a pas encore rattrapé
+
+    def test_le_meme_sous_jacent_deux_fois_dans_un_run_est_bloque(self):
+        """Sans jamais enregistrer dans state.json — le pire cas."""
+        engages, ouverts = {}, set()
+
+        premier = risk_gates.check_gates(
+            "SPY", "SPY260831C00500000",
+            already_committed_this_run_by_underlying=engages,
+            already_open_this_run_underlyings=ouverts)
+        self.assertTrue(getattr(premier, "allowed", False))
+        engages["SPY"] = premier.committed_dollars
+        ouverts.add("SPY")
+        # record_order_submitted() n'est PAS appelé : on simule son échec.
+
+        second = risk_gates.check_gates(
+            "SPY", "SPY260831C00500000",
+            already_committed_this_run_by_underlying=engages,
+            already_open_this_run_underlyings=ouverts)
+        self.assertFalse(getattr(second, "allowed", False),
+                         "deux ordres sur le même sous-jacent dans une seule exécution")
+        self.assertIn("THIS run", str(getattr(second, "reason", "")))
+
+    def test_l_accumulateur_d_exposition_totale_fonctionnait_deja(self):
+        """Contre-épreuve : ne pas attribuer au correctif un mérite qui n'est
+        pas le sien. Un AUTRE sous-jacent doit passer, mais dimensionné à la
+        baisse par ce qui a déjà été engagé ce run."""
+        second = risk_gates.check_gates(
+            "XLV", "XLV260831C00150000",
+            already_committed_this_run_by_underlying={"SPY": 2500.0},
+            already_open_this_run_underlyings={"SPY"})
+        self.assertTrue(getattr(second, "allowed", False),
+                        "un autre sous-jacent est bloqué à tort")
+        self.assertIn("1 contract", str(getattr(second, "reason", "")),
+                      "500 $ restants sous le plafond total : un seul contrat")
+
+
+class TestDeduplicationDesSymboles(unittest.TestCase):
+    """`--symbols SPY,SPY` ne doit pas évaluer SPY deux fois.
+
+    `dict.fromkeys` dédoublonne EN GARDANT L'ORDRE, contrairement à `set()` —
+    l'ordre compte ici, puisque le budget se consomme au fil de la boucle et
+    que le premier symbole servi a plus de place que le dernier.
+    """
+
+    @staticmethod
+    def _analyse(brut):
+        # même expression que agent.py
+        return list(dict.fromkeys(
+            s.strip().upper() for s in brut.split(",") if s.strip()))
+
+    def test_les_doublons_disparaissent(self):
+        self.assertEqual(self._analyse("SPY,SPY"), ["SPY"])
+        self.assertEqual(self._analyse("spy,SPY, SPY "), ["SPY"])
+
+    def test_l_ordre_est_preserve(self):
+        """set() casserait ça, et l'ordre décide de qui obtient le budget."""
+        self.assertEqual(self._analyse("SPY,GLD,SPY,XLK"), ["SPY", "GLD", "XLK"])
+        self.assertEqual(self._analyse("XLV,XLK,GLD,SPY"), ["XLV", "XLK", "GLD", "SPY"])
+
+    def test_agent_py_utilise_bien_cette_expression(self):
+        """Un test qui recopie la logique ne vaut que s'il est relié au code.
+
+        Le fichier est lu SUR LE DISQUE, pas via `inspect.getsource`.
+        `inspect` passe par `linecache`, qui met la source en cache dès le
+        premier import du module : le test mesurait alors l'instantané du
+        début de session, pas l'état courant. Vérifié par mutation — retirer
+        `dict.fromkeys` d'agent.py laissait ce test VERT.
+        """
+        import pathlib
+        source = (pathlib.Path(__file__).parent / "agent.py").read_text(encoding="utf-8")
+        # On cherche l'AFFECTATION complète, pas le nom seul. Première version :
+        # `assertIn("dict.fromkeys", source)` — qui passait encore après avoir
+        # retiré l'appel, parce que le COMMENTAIRE juste au-dessus explique
+        # pourquoi `dict.fromkeys` est utilisé. Un test satisfait par un
+        # commentaire ne teste rien. Trouvé par mutation.
+        self.assertIn("symbols = list(dict.fromkeys(", source,
+                      "agent.py ne dédoublonne plus la liste de symboles")

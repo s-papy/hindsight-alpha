@@ -169,7 +169,14 @@ def main() -> None:
         help="skip the market-open check (useful for offline/dry-run testing of the rest of the pipeline)",
     )
     args = parser.parse_args()
-    symbols = [s.strip().upper() for s in args.symbols.split(",") if s.strip()]
+    # dict.fromkeys dedoublonne EN GARDANT L'ORDRE, contrairement a set().
+    # Sans ca, `--symbols SPY,SPY` evalue SPY deux fois et tente deux entrees
+    # sur le meme sous-jacent -- voir le commentaire du controle anti-doublon
+    # dans risk_gates.check_gates(). Les deux correctifs sont poses ensemble
+    # a dessein: celui-ci empeche le cas d'arriver, l'autre le rattrape si un
+    # doublon atteint check_gates par un autre chemin.
+    symbols = list(dict.fromkeys(
+        s.strip().upper() for s in args.symbols.split(",") if s.strip()))
 
     record: dict = {"dry_run": args.dry_run, "symbols": symbols, "outcome": "unknown"}
     try:
