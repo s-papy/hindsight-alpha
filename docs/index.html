@@ -238,7 +238,7 @@ async function loadDashboard() {
     const data = await res.json();
     renderAccount(data.account);
     renderPositions(data.positions || []);
-    renderMonitorHealth(data.recent_decisions || [], data.monitor_status || null);
+    renderMonitorHealth(data.recent_decisions || [], data.monitor_status || null, data.generated_at || null);
     renderLeakStat(data.recent_decisions || []);
     renderDecisions(data.recent_decisions || []);
     document.getElementById('generated-at').textContent =
@@ -333,7 +333,7 @@ function isUsMarketHoursNow() {
   return minutesSinceMidnight >= (9 * 60 + 30) && minutesSinceMidnight < (16 * 60);
 }
 
-function renderMonitorHealth(decisions, monitorStatus) {
+function renderMonitorHealth(decisions, monitorStatus, generatedAt) {
   // Client-side health check for the exit-position monitor (monitor_exits.py,
   // scheduled every 15 min via launchd). Added 25/08 after discovering, by
   // accident (an unexpected diff on decision_log.jsonl caught by `git
@@ -389,6 +389,29 @@ function renderMonitorHealth(decisions, monitorStatus) {
       consecutiveFailures = Math.max(consecutiveFailures, 1);
     }
 
+    // AJOUTE 26/08 -- la banniere ne pouvait pas distinguer deux situations
+    // opposees, et affichait le meme message pour les deux:
+    //   A. le moniteur tourne bien, mais cette PAGE n'a pas ete republiee
+    //   B. le moniteur est reellement mort
+    // Dans les deux cas elle annoncait "Exit monitor: last check 1200 min --
+    // later than usual", c'est-a-dire qu'elle ACCUSAIT le moniteur.
+    //
+    // Ce n'est pas theorique: rien ne republie cette page automatiquement
+    // (publish_dashboard.py se lance a la main), donc le cas A est le cas
+    // NORMAL. Un lecteur y voyait un moniteur casse alors qu'il tournait
+    // parfaitement -- la banniere abimait la credibilite qu'elle existe pour
+    // etablir.
+    //
+    // On dispose pourtant de quoi trancher: si le moniteur etait a l'heure AU
+    // MOMENT de la publication, alors ce qui est vieux, c'est la page. On le
+    // dit, au lieu de laisser croire autre chose.
+    const snapshotMs = generatedAt ? new Date(generatedAt).getTime() : NaN;
+    const decalageALaPublication = isNaN(snapshotMs) ? null : (snapshotMs - lastRunTs);
+    const moniteurSainALaPublication =
+      decalageALaPublication !== null && decalageALaPublication <= STALE_MINUTES * 60000;
+    const pageAgeMs = isNaN(snapshotMs) ? null : (Date.now() - snapshotMs);
+    const pagePerimee = pageAgeMs !== null && pageAgeMs > STALE_MINUTES * 60000;
+
     let cls, text;
     if (consecutiveFailures >= 3) {
       cls = 'health-red';
@@ -396,6 +419,13 @@ function renderMonitorHealth(decisions, monitorStatus) {
     } else if (lastOutcome === 'error') {
       cls = 'health-red';
       text = `🔴 Exit monitor: last check (${ageText}) failed.`;
+    } else if (pagePerimee && moniteurSainALaPublication) {
+      // La page est vieille, le moniteur allait bien quand elle a ete ecrite.
+      // Accuser le moniteur ici serait faux.
+      cls = 'health-yellow';
+      text = `🟡 This page is a snapshot from ${fmtAge(pageAgeMs)} — it is not live. `
+           + `The exit monitor was running normally when it was written `
+           + `(last check ${fmtAge(snapshotMs - lastRunTs)} before the snapshot).`;
     } else if (ageMin !== null && ageMin > STALE_MINUTES && isUsMarketHoursNow()) {
       cls = 'health-yellow';
       text = `🟡 Exit monitor: last check ${ageText} — later than the usual 15-minute cadence during market hours.`;
