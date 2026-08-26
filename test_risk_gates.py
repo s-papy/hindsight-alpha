@@ -268,3 +268,76 @@ class TestPnLIllisible(BaseExit):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class TestGardePaperUniquement(unittest.TestCase):
+    """La garantie la plus forte du projet : paper trading uniquement.
+
+    Deux couches, et il faut les distinguer :
+
+    1. `cli_env()` RETIRE `ALPACA_LIVE_TRADE` de l'environnement passé au CLI.
+       C'est la protection réelle, et elle est absolue : le CLI ne peut pas
+       voir une variable absente, quelle que soit sa graphie.
+    2. `require_credentials()` refuse de démarrer sur une valeur non
+       explicitement fausse. C'est le diagnostic.
+
+    La couche 1 tenait déjà. La couche 2 avait des trous : la liste énumérait
+    les valeurs VRAIES (`true`, `1`, `yes`), donc `on`, `y`, `t`, `2` et
+    `enabled` passaient pour du paper. Pas un risque de trading réel — mais un
+    opérateur qui croyait activer le live était silencieusement ignoré.
+    Corrigé en énumérant les valeurs FAUSSES : tout le reste fait refuser.
+    """
+
+    def _demarre(self, valeur):
+        """True si `require_credentials()` laisse démarrer avec cette valeur."""
+        import subprocess
+        env = dict(os.environ)
+        if valeur is None:
+            env.pop("ALPACA_LIVE_TRADE", None)
+        else:
+            env["ALPACA_LIVE_TRADE"] = valeur
+        r = subprocess.run(
+            [sys.executable, "-c", "import config; config.require_credentials(); print('OK')"],
+            capture_output=True, text=True, env=env,
+            cwd=os.path.dirname(os.path.abspath(__file__)), timeout=60,
+        )
+        return "OK" in r.stdout
+
+    def test_les_valeurs_fausses_laissent_demarrer(self):
+        for v in (None, "", "false", "FALSE", "0", "no", "off", "n", "f", "  False  "):
+            with self.subTest(valeur=v):
+                self.assertTrue(self._demarre(v),
+                                "%r est une valeur fausse et devrait laisser démarrer" % v)
+
+    def test_toute_graphie_vraie_fait_refuser(self):
+        for v in ("true", "TRUE", " True ", "1", "yes", "YES", "on", "y", "t", "2"):
+            with self.subTest(valeur=v):
+                self.assertFalse(self._demarre(v),
+                                 "%r demande le live et l'agent démarre quand même" % v)
+
+    def test_une_valeur_ININTERPRETABLE_fait_refuser(self):
+        """Une valeur qu'on ne sait pas lire n'est pas une permission de supposer."""
+        for v in ("oui", "enabled", "maybe", "42x", "-"):
+            with self.subTest(valeur=v):
+                self.assertFalse(self._demarre(v),
+                                 "%r est ininterprétable et l'agent démarre quand même" % v)
+
+    def test_cli_env_retire_toujours_le_drapeau(self):
+        """La protection RÉELLE : le CLI ne voit jamais la variable.
+
+        Elle doit tenir même sur une graphie que la couche 1 ne reconnaîtrait
+        pas — c'est précisément ce qui faisait que le trou de diagnostic
+        n'était pas un trou de sécurité."""
+        import config
+        for v in ("true", "on", "y", "2", "enabled", "n'importe quoi"):
+            with self.subTest(valeur=v):
+                ancien = os.environ.get("ALPACA_LIVE_TRADE")
+                os.environ["ALPACA_LIVE_TRADE"] = v
+                try:
+                    self.assertNotIn("ALPACA_LIVE_TRADE", config.cli_env(),
+                                     "le drapeau atteint l'environnement du CLI")
+                finally:
+                    if ancien is None:
+                        os.environ.pop("ALPACA_LIVE_TRADE", None)
+                    else:
+                        os.environ["ALPACA_LIVE_TRADE"] = ancien

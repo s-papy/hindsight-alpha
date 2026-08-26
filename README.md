@@ -408,6 +408,12 @@ No credential ever reaches this repository. `.env` is gitignored and has never
 been committed — the guard rail re-checks that against the full git history on
 every run.
 
+Paper trading is enforced in two independent layers, and the distinction
+matters: `cli_env()` **removes** `ALPACA_LIVE_TRADE` from the environment
+handed to the CLI, so the CLI cannot see it whatever its spelling; and
+`require_credentials()` refuses to start on any value that isn't an explicitly
+recognised falsy one. Unset is the normal, silent case.
+
 ## Status
 
 Paper trading only, zero real funds at risk — enforced in `config.py`, which
