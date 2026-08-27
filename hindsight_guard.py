@@ -53,15 +53,50 @@ class LeakageReport:
     in_sample_clears_bar: bool
     threshold: float
     unscorable: List[Any] = field(default_factory=list)
+    # AJOUTES le 27/08/2026 : TOUS les candidats atteignant le maximum, pas
+    # seulement le premier rendu par max(). Voir check_selection_leakage().
+    full_winners: List[Any] = field(default_factory=list)
+    in_sample_winners: List[Any] = field(default_factory=list)
     agrees: bool = field(init=False)
 
     def __post_init__(self) -> None:
+        # Retrocompatibilite : un appelant qui construit un LeakageReport a la
+        # main (les tests de ce depot le font) peut ne pas fournir les
+        # ensembles. On les deduit alors du gagnant unique.
+        if not self.full_winners:
+            self.full_winners = [self.full_winner]
+        if not self.in_sample_winners:
+            self.in_sample_winners = [self.in_sample_winner]
+
         # `unscorable` domine tout le reste: si un candidat n'a pas pu etre
         # note, on ne peut pas dire lequel gagne, donc on ne dit pas qu'il n'y
         # a pas de fuite.
+        #
+        # CORRIGE le 27/08/2026. Le test etait `full_winner == in_sample_winner`,
+        # ou chaque gagnant venait de max(), qui rend le PREMIER element
+        # atteignant le maximum. Une EGALITE en tete faisait donc dependre le
+        # verdict de l'ordre de la liste. Mesure, memes scores exactement :
+        #
+        #     candidats ['A','B'] -> gagnant plein 'A', agrees=True
+        #     candidats ['B','A'] -> gagnant plein 'B', agrees=False
+        #
+        # Meme question, meme score_fn, verdict inverse -- et les DEUX sens
+        # sont atteignables, donc une egalite pouvait fabriquer un certificat
+        # « pas de fuite ». Pour une bibliotheque qui existe pour refuser les
+        # certificats de complaisance, c'est le sens grave.
+        #
+        # La regle est desormais l'INCLUSION : la selection n'est sans fuite
+        # que si TOUT candidat susceptible d'etre retenu sur la fenetre pleine
+        # gagne aussi en in-sample. Si la fenetre pleine est indifferente entre
+        # A et B, l'appelant peut retenir B -- et si B perd en in-sample, ce
+        # choix-la depend bien de donnees non connaissables.
+        #
+        # Sans egalite, la regle se reduit exactement a l'ancienne egalite de
+        # gagnants : ce n'est pas un durcissement du cas courant.
         self.agrees = (
             not self.unscorable
-            and self.full_winner == self.in_sample_winner
+            and bool(self.full_winners)
+            and all(g in self.in_sample_winners for g in self.full_winners)
             and self.in_sample_clears_bar
         )
 
@@ -92,7 +127,32 @@ class LeakageReport:
                     f"  in-sample winner:        {self.in_sample_winner!r}  "
                     f"(score {self.in_sample_scores[self.in_sample_winner]:.4f})"
                 )
-                lines.append("  -> the two windows disagree about which candidate is best.")
+                # AJOUTE le 27/08/2026, juste apres le correctif d'ordre. Le
+                # verdict etait redevenu juste, mais son explication se
+                # contredisait -- mesure sur une egalite :
+                #
+                #   full-window winner:      'A'  (score 1.0000)
+                #   in-sample winner:        'A'  (score 1.0000)
+                #   -> the two windows disagree about which candidate is best.
+                #
+                # Le meme candidat nomme deux fois, suivi d'une phrase qui
+                # affirme un desaccord. Un juge qui lit ca conclut que l'outil
+                # est casse. La vraie cause du refus est ailleurs : la fenetre
+                # pleine ne DEPARTAGE pas les candidats, et l'un des ex aequo
+                # perd en in-sample.
+                perdants = [c for c in self.full_winners
+                            if c not in self.in_sample_winners]
+                if len(self.full_winners) > 1:
+                    lines.append(
+                        "  -> the full window TIES between "
+                        + ", ".join(repr(c) for c in self.full_winners)
+                        + ", so which one gets picked is arbitrary; "
+                        + ", ".join(repr(c) for c in perdants)
+                        + " does not win in-sample. A selection that depends on "
+                        "breaking that tie is not leak-free."
+                    )
+                else:
+                    lines.append("  -> the two windows disagree about which candidate is best.")
             else:
                 best_is = max(self.in_sample_scores, key=self.in_sample_scores.get)
                 lines.append(
@@ -143,8 +203,53 @@ def check_selection_leakage(
             "more is what makes this check meaningful."
         )
 
-    full_scores = {c: score_fn(c, "full") for c in candidates}
-    in_sample_scores = {c: score_fn(c, "in_sample") for c in candidates}
+    # AJOUTE le 27/08/2026. Les scores vivent dans un dictionnaire indexe par
+    # candidat : un doublon s'ecrase en silence. Mesure avant correctif --
+    # 3 candidats declares, 2 notes, agrees=True. Un balayage de N parametres
+    # qui en teste discretement M est exactement la panne silencieuse que ce
+    # module existe pour empecher, ici dans son propre code.
+    vus, doublons = set(), []
+    for c in candidates:
+        if c in vus and c not in doublons:
+            doublons.append(c)
+        vus.add(c)
+    if doublons:
+        raise ValueError(
+            "check_selection_leakage() got duplicate candidates: "
+            + ", ".join(repr(c) for c in doublons)
+            + ". Scores are keyed by candidate, so a duplicate would silently "
+            "collapse and the sweep would test fewer candidates than it "
+            "reports. De-duplicate before calling."
+        )
+
+    def _noter(c: Any, fenetre: str) -> float:
+        """Note un candidat en refusant tout ce qui n'est pas un nombre.
+
+        AJOUTE le 27/08/2026. Une score_fn qui rend None sur echec est
+        l'erreur d'appelant la plus naturelle qui soit. Avant ce garde,
+        math.isfinite(None) levait « TypeError: must be real number, not
+        NoneType » -- un message qui ne nomme NI le candidat NI la fenetre.
+        Pour une bibliotheque dont la these est « un candidat qu'on n'a pas
+        pu noter n'est pas un candidat qui a perdu », echouer sans dire
+        lequel est la mauvaise moitie du travail.
+
+        On leve plutot que de traiter en `unscorable` : None n'est pas un
+        signal defini par cette interface, c'est un bug d'appelant, et le
+        maquiller en « je n'ai pas pu noter » le rendrait invisible. Un
+        appelant qui veut dire « pas notable » rend NaN, ce que ce module
+        traite deja."""
+        v = score_fn(c, fenetre)
+        if isinstance(v, bool) or not isinstance(v, (int, float)):
+            raise TypeError(
+                "score_fn(%r, %r) returned %r (%s); it must return a float. "
+                "To signal 'this candidate could not be scored', return "
+                "float('nan') -- that is handled explicitly and blocks "
+                "certification." % (c, fenetre, v, type(v).__name__)
+            )
+        return float(v)
+
+    full_scores = {c: _noter(c, "full") for c in candidates}
+    in_sample_scores = {c: _noter(c, "in_sample") for c in candidates}
 
     # AJOUTE le 26/08/2026. `max()` compare avec `>`, et toute comparaison avec
     # NaN rend False. Consequence mesuree, et elle depend de l'ORDRE:
@@ -179,9 +284,33 @@ def check_selection_leakage(
         if not math.isfinite(full_scores[c]) or not math.isfinite(in_sample_scores[c])
     ]
 
-    full_winner = max(full_scores, key=full_scores.get)
-    in_sample_winner = max(in_sample_scores, key=in_sample_scores.get)
-    in_sample_clears_bar = in_sample_scores[in_sample_winner] > threshold
+    def _gagnants(scores: Dict[Any, float]) -> List[Any]:
+        """TOUS les candidats atteignant le maximum, dans l'ordre d'origine.
+
+        Restreint aux valeurs FINIES : max() compare avec `>` et toute
+        comparaison avec NaN rend False, ce qui rendait meme le gagnant
+        dependant de l'ordre. `unscorable` bloque deja la certification dans
+        ce cas, mais le representant affiche dans le resume ne doit pas etre
+        arbitraire pour autant."""
+        finis = {c: v for c, v in scores.items() if math.isfinite(v)}
+        if not finis:
+            return []
+        sommet = max(finis.values())
+        return [c for c in candidates if c in finis and finis[c] == sommet]
+
+    full_winners = _gagnants(full_scores)
+    in_sample_winners = _gagnants(in_sample_scores)
+
+    # Representants, conserves pour la retrocompatibilite du rapport et du
+    # resume. Le VERDICT ne s'appuie plus dessus (voir __post_init__) ; ils ne
+    # servent qu'a nommer un exemple lisible. Repli sur max() brut quand aucun
+    # score n'est fini -- ce cas est deja bloque par `unscorable`, mais le
+    # rapport doit rester constructible.
+    full_winner = full_winners[0] if full_winners else max(full_scores, key=full_scores.get)
+    in_sample_winner = (in_sample_winners[0] if in_sample_winners
+                        else max(in_sample_scores, key=in_sample_scores.get))
+    in_sample_clears_bar = bool(in_sample_winners) and \
+        in_sample_scores[in_sample_winners[0]] > threshold
 
     report = LeakageReport(
         candidates=list(candidates),
@@ -192,6 +321,8 @@ def check_selection_leakage(
         in_sample_clears_bar=in_sample_clears_bar,
         threshold=threshold,
         unscorable=unscorable,
+        full_winners=full_winners,
+        in_sample_winners=in_sample_winners,
     )
 
     if raise_on_leak and not report.agrees:

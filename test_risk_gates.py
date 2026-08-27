@@ -572,6 +572,137 @@ class TestHindsightGuard(unittest.TestCase):
         self.assertIn("CANNOT CONCLUDE", rapport.summary())
 
 
+
+    # ------------------------------------------------------------------
+    # Ajoutés le 27/08. Trois défauts du module PHARE, trouvés en le
+    # sondant aux bords plutôt qu'en relisant sa logique centrale.
+    # ------------------------------------------------------------------
+
+    def test_le_verdict_ne_depend_pas_de_l_ordre_des_candidats(self):
+        """LE défaut sérieux. `max()` rend le PREMIER élément atteignant le
+        maximum, donc une égalité en tête faisait dépendre le gagnant de
+        l'ordre de la liste. Mesuré, mêmes scores exactement :
+
+            candidats ['A','B'] -> gagnant plein 'A', agrees=True
+            candidats ['B','A'] -> gagnant plein 'B', agrees=False
+
+        Même question, même fonction de score, verdict inversé. Et les deux
+        sens sont atteignables : une égalité peut fabriquer un certificat
+        « pas de fuite » aussi bien qu'une fausse alerte. Pour une
+        bibliothèque qui existe pour refuser les certificats de complaisance,
+        le premier sens est le grave.
+
+        Non démontré atteignable sur les vraies barres de ce dépôt — deux
+        Sharpe flottants qui tombent exactement égaux est improbable. Mais ce
+        module est vendoré, MIT, publié à part et présenté comme la
+        contribution du projet : un appelant dont le score est entier,
+        arrondi, ou calculé sur des fenêtres dégénérées y arrive sans
+        effort."""
+        from hindsight_guard import check_selection_leakage
+        def score(c, w):
+            plein = {"A": 1.0, "B": 1.0}          # égalité en tête
+            dedans = {"A": 1.0, "B": 0.5}
+            return plein[c] if w == "full" else dedans[c]
+        verdicts = {tuple(o): check_selection_leakage(list(o), score).agrees
+                    for o in (("A", "B"), ("B", "A"))}
+        self.assertEqual(len(set(verdicts.values())), 1,
+                         "le verdict dépend de l'ordre de la liste : %s" % verdicts)
+
+    def test_une_egalite_en_tete_ne_certifie_pas_l_absence_de_fuite(self):
+        """Le sens dangereux, nommé à part. Si la fenêtre pleine est
+        indifférente entre A et B, l'appelant peut retenir B — qui perd en
+        in-sample. Ce choix-là dépend bien de données non connaissables, donc
+        ce n'est pas certifiable, quel que soit l'ordre."""
+        from hindsight_guard import check_selection_leakage
+        def score(c, w):
+            plein = {"A": 1.0, "B": 1.0}
+            dedans = {"A": 1.0, "B": 0.5}
+            return plein[c] if w == "full" else dedans[c]
+        for ordre in (["A", "B"], ["B", "A"]):
+            r = check_selection_leakage(ordre, score)
+            self.assertFalse(r.agrees,
+                             "égalité en tête certifiée sans fuite (ordre %s)" % ordre)
+
+    def test_une_egalite_qui_ne_change_rien_reste_certifiable(self):
+        """Pendant obligatoire : refuser TOUTE égalité rendrait le garde
+        inutilisable. Si A gagne la fenêtre pleine seul et fait partie des
+        gagnants in-sample, il n'y a pas de fuite — même si B l'y égale."""
+        from hindsight_guard import check_selection_leakage
+        def score(c, w):
+            plein = {"A": 1.0, "B": 0.5}
+            dedans = {"A": 1.0, "B": 1.0}
+            return plein[c] if w == "full" else dedans[c]
+        for ordre in (["A", "B"], ["B", "A"]):
+            r = check_selection_leakage(ordre, score)
+            self.assertTrue(r.agrees,
+                            "une égalité sans conséquence est refusée (ordre %s)" % ordre)
+
+    def test_le_resume_explique_l_egalite_au_lieu_de_se_contredire(self):
+        """Le verdict corrigé ne suffit pas si son explication est
+        incompréhensible. Mesuré juste après le correctif :
+
+            LEAK DETECTED: ...
+              full-window winner:      'A'  (score 1.0000)
+              in-sample winner:        'A'  (score 1.0000)
+              -> the two windows disagree about which candidate is best.
+
+        Le même candidat nommé deux fois, et une phrase qui affirme un
+        désaccord. Un juge qui lit ça conclut que l'outil est cassé — et il
+        aurait raison de le penser. La vraie raison du refus est ailleurs :
+        la fenêtre pleine ne départage pas A et B, et B perd en in-sample."""
+        from hindsight_guard import check_selection_leakage
+        def score(c, w):
+            return {"A": 1.0, "B": 1.0}[c] if w == "full" else {"A": 1.0, "B": 0.5}[c]
+        texte = check_selection_leakage(["A", "B"], score).summary()
+        self.assertNotIn("the two windows disagree", texte,
+                         "le résumé affirme un désaccord entre deux gagnants "
+                         "identiques :\n%s" % texte)
+        self.assertIn("'B'", texte,
+                      "le candidat qui rend la sélection non certifiable n'est "
+                      "même pas nommé :\n%s" % texte)
+        self.assertIn("tie", texte.lower(),
+                      "l'égalité, seule cause du refus, n'est pas dite :\n%s" % texte)
+
+    def test_un_vrai_desaccord_est_toujours_decrit_comme_tel(self):
+        """Pendant obligatoire : sans égalité, la phrase d'origine est juste
+        et doit rester."""
+        from hindsight_guard import check_selection_leakage
+        def score(c, w):
+            return {"A": 1.0, "B": 0.5}[c] if w == "full" else {"A": 0.2, "B": 0.9}[c]
+        texte = check_selection_leakage(["A", "B"], score).summary()
+        self.assertIn("the two windows disagree", texte)
+
+    def test_un_score_non_numerique_nomme_le_candidat_et_la_fenetre(self):
+        """`score_fn` qui rend None sur échec est l'erreur d'appelant la plus
+        naturelle qui soit. Mesuré : `math.isfinite(None)` levait
+        « TypeError: must be real number, not NoneType » — un message qui ne
+        nomme NI le candidat NI la fenêtre.
+
+        Pour une bibliothèque dont toute la thèse est « un candidat qu'on n'a
+        pas pu noter n'est pas un candidat qui a perdu », échouer sans dire
+        lequel est la mauvaise moitié du travail."""
+        from hindsight_guard import check_selection_leakage
+        def score(c, w):
+            return None if c == 30 else 1.0
+        with self.assertRaises(TypeError) as e:
+            check_selection_leakage([10, 30, 90], score)
+        message = str(e.exception)
+        self.assertIn("30", message, "le candidat fautif n'est pas nommé : %s" % message)
+        self.assertIn("full", message, "la fenêtre n'est pas nommée : %s" % message)
+
+    def test_des_candidats_en_double_ne_disparaissent_pas_en_silence(self):
+        """Mesuré : 3 candidats déclarés, 2 notés, agrees=True. Les scores
+        vivent dans un dictionnaire indexé par candidat, donc un doublon
+        s'écrase. Un balayage de N paramètres qui en teste discrètement M
+        est exactement la panne silencieuse que ce module existe pour
+        empêcher — ici dans son propre code."""
+        from hindsight_guard import check_selection_leakage
+        with self.assertRaises(ValueError) as e:
+            check_selection_leakage(
+                [10, 10, 90], lambda c, w: 1.0 if c == 10 else 0.5)
+        self.assertIn("10", str(e.exception))
+
+
 class HarnaisPlafonds:
     """Le décor commun aux tests de dimensionnement : un compte à équité
     fixe, un prix d'option stable, et de quoi fabriquer des positions
