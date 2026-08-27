@@ -9,6 +9,8 @@ Run: python test_connection.py
 
 from __future__ import annotations
 
+import sys
+
 import alpaca_cli
 import config
 
@@ -34,21 +36,56 @@ def main() -> None:
     # correctly-configured run. Compare against account_number instead (see
     # engineering log, 24/08 pass -- the same id/account_number confusion was
     # just found and fixed in publish_dashboard.py's dashboard display).
+    # REECRIT le 27/08/2026, la veille du kickoff. Ce script est l'outil qu'on
+    # lance pour CONFIRMER une bascule de compte, et il repondait mal aux deux
+    # seules questions qui comptent ce jour-la. Mesure :
+    #
+    #   compte declare = compte reel  -> avertit=non   « All good »=OUI  (juste)
+    #   MAUVAIS compte                -> avertit=OUI   « All good »=OUI  (faux)
+    #   identifiant non declare       -> avertit=non   « All good »=OUI  (faux)
+    #
+    # Le deuxieme cas affichait l'avertissement PUIS « All good -- you can now
+    # run: python agent.py ». Un operateur presse lit la derniere ligne.
+    #
+    # Le troisieme est pire : sans identifiant de compte declare, la
+    # verification entiere etait SAUTEE et le script annoncait quand meme que
+    # tout allait bien. C'est le motif poursuivi partout ailleurs dans ce
+    # depot : un controle qui ne peut pas conclure et qui parle comme s'il
+    # avait conclu.
     actual_account_number = account.get("account_number")
-    if config.ACCOUNT_ID and actual_account_number and actual_account_number != config.ACCOUNT_ID:
-        print(
-            f"\nWARNING: ALPACA_ACCOUNT_ID in .env ({config.ACCOUNT_ID}) does not match "
-            f"the account these keys authenticate as ({actual_account_number}). Double-check "
-            "you're pointed at the right account before the real hackathon run."
-        )
-    elif config.ACCOUNT_ID and not actual_account_number:
-        print(
-            "\nNOTE: could not read account_number from this account to verify against "
-            f"ALPACA_ACCOUNT_ID ({config.ACCOUNT_ID}) -- CLI may name this field differently. "
-            f"Full account id was: {account.get('id')}. Not a hard failure, just unverified."
-        )
+    if not config.ACCOUNT_ID:
+        verdict, detail = "NON VERIFIE", (
+            "no declared account identifier, so nothing was compared. The "
+            "connection works, but WHICH account these keys open is unchecked.")
+    elif not actual_account_number:
+        verdict, detail = "NON VERIFIE", (
+            "the account response carried no account_number, so the declared "
+            "identifier (%s) could not be compared against anything. The CLI "
+            "may name this field differently." % config.ACCOUNT_ID)
+    elif actual_account_number != config.ACCOUNT_ID:
+        verdict, detail = "MAUVAIS COMPTE", (
+            "the declared identifier is %s, but these keys authenticate as %s."
+            % (config.ACCOUNT_ID, actual_account_number))
+    else:
+        verdict, detail = "OK", ""
 
-    print("\nAll good — you can now run: python agent.py --dry-run")
+    if verdict == "MAUVAIS COMPTE":
+        print("\nSTOP: %s" % detail)
+        print("Do NOT run agent.py: it would trade the wrong account. If you "
+              "just switched accounts, the switch did NOT take effect -- see "
+              "the precedence warning config.py prints when a stale value is "
+              "still exported in the shell.")
+        sys.exit(1)
+
+    if verdict == "NON VERIFIE":
+        print("\nCONNECTED, BUT THE ACCOUNT IDENTITY IS NOT VERIFIED: %s" % detail)
+        print("Nothing is wrong that this script can see -- but it did not "
+              "check the one thing it exists to check. Do not read this as "
+              "confirmation that you are on the right account.")
+        return
+
+    print("\nAll good - account %s confirmed. You can now run: "
+          "python agent.py --dry-run" % actual_account_number)
 
 
 if __name__ == "__main__":

@@ -3028,6 +3028,74 @@ class TestEntreesAttendues(unittest.TestCase):
 
 
 
+
+class TestScriptDeConnexion(unittest.TestCase):
+    """Ajouté le 27/08, la veille du kickoff. test_connection.py est l'outil
+    qu'on lance pour CONFIRMER une bascule de compte — donc demain, après
+    avoir pointé le dépôt sur le compte dédié.
+
+    Il répondait mal aux deux seules questions qui comptent ce jour-là :
+
+        compte déclaré = compte réel  -> avertit=non   « All good »=OUI (juste)
+        MAUVAIS compte                -> avertit=OUI   « All good »=OUI (faux)
+        identifiant non déclaré       -> avertit=non   « All good »=OUI (faux)
+
+    Le deuxième cas affichait l'avertissement PUIS « All good — you can now
+    run: python agent.py ». Un opérateur pressé lit la dernière ligne.
+
+    Le troisième est pire : sans identifiant déclaré, la vérification entière
+    était SAUTÉE et le script annonçait quand même que tout allait bien. Le
+    motif poursuivi partout ailleurs dans ce dépôt — un contrôle qui ne peut
+    pas conclure et qui parle comme s'il avait conclu."""
+
+    def _lancer(self, declare, reel):
+        import test_connection, alpaca_cli, config
+        from unittest import mock
+        compte = {"id": "uuid-interne", "status": "ACTIVE"}
+        if reel:
+            compte["account_number"] = reel
+        code = 0
+        with mock.patch.object(config, "require_credentials", lambda: None), \
+             mock.patch.object(config, "ACCOUNT_ID", declare), \
+             mock.patch.object(alpaca_cli, "get_account", lambda: compte):
+            with contextlib.redirect_stdout(io.StringIO()) as sortie:
+                try:
+                    test_connection.main()
+                except SystemExit as e:
+                    code = e.code
+        return code, sortie.getvalue()
+
+    def test_un_mauvais_compte_arrete_net(self):
+        code, texte = self._lancer("PA-ATTENDU-000", "PA-REEL-111")
+        self.assertEqual(code, 1,
+                         "un mauvais compte sort en 0 : un script appelé dans "
+                         "une chaîne le prendrait pour un succès")
+        self.assertNotIn("All good", texte,
+                         "le script dit « All good » après avoir constaté que "
+                         "le compte est le mauvais :\n%s" % texte)
+        self.assertIn("Do NOT run agent.py", texte,
+                      "il ne dit pas quoi NE PAS faire")
+
+    def test_une_verification_impossible_ne_se_dit_pas_reussie(self):
+        for declare, reel, cas in ((None, "PA-REEL-111", "aucun identifiant déclaré"),
+                                   ("PA-ATTENDU-000", None, "account_number illisible")):
+            with self.subTest(cas=cas):
+                code, texte = self._lancer(declare, reel)
+                self.assertNotIn("All good", texte,
+                                 "%s : le script conclut « All good » sans "
+                                 "avoir vérifié quoi que ce soit" % cas)
+                self.assertIn("NOT VERIFIED", texte.upper(),
+                              "%s : l'absence de vérification n'est pas dite" % cas)
+
+    def test_le_bon_compte_est_confirme_ET_nomme(self):
+        """Témoin. Et le compte est NOMMÉ : « All good » sans dire lequel
+        n'aide pas à confirmer une bascule."""
+        code, texte = self._lancer("PA-ATTENDU-000", "PA-ATTENDU-000")
+        self.assertEqual(code, 0)
+        self.assertIn("All good", texte)
+        self.assertIn("PA-ATTENDU-000", texte,
+                      "le compte confirmé n'est pas nommé : %s" % texte)
+
 class TestComparabiliteDesDeuxStrategies(unittest.TestCase):
     """STRATEGY_COMPARISON.md, un livrable, affirme mot pour mot :
 
