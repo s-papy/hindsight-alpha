@@ -507,6 +507,38 @@ def positions_au_cout_illisible(open_positions: List[dict]) -> List[str]:
     return illisibles
 
 
+def positions_au_sous_jacent_illisible(open_positions: List[dict]) -> List[str]:
+    """Les positions ouvertes dont on n'arrive pas a lire le SOUS-JACENT.
+
+    AJOUTE le 27/08/2026, comme pendant durable d'un correctif de motif dans
+    alpaca_cli.py. Le motif OCC n'acceptait que la forme compacte
+    (« SPY260831P00764000 ») et pas la forme STANDARD a 21 caracteres, dont la
+    racine est completee par des espaces (« SPY   260831P00764000 »).
+
+    Consequence mesuree de bout en bout, MEME position, deux ecritures :
+        OCC compact  -> refuse : « already holding an open position on SPY »
+        OCC standard -> AUTORISE un 2e SPY, dimensionne 3 contrats
+
+    C'est la signature exacte du trou deja documente dans check_gates
+    (« TROU REPRODUIT »): l'exposition TOTALE restait juste, seule la regle
+    anti-doublon cedait. Mais cette route-la ne demandait QU'UNE condition.
+
+    Elargir le motif ferme la porte trouvee. Ceci ferme les autres : la regle
+    anti-doublon compare `underlying` a l'ensemble des sous-jacents ouverts ;
+    un None s'y glisse sans bruit, et « SPY » n'est pas dans {None}. Si l'on
+    ne sait pas sur quoi porte une position ouverte, on ne PEUT PAS verifier
+    la regle -- donc on n'ouvre pas.
+
+    Meme raisonnement que positions_au_cout_illisible() juste au-dessus, et
+    que list_positions() dans alpaca_cli : « je n'ai pas compris » n'est pas
+    « il n'y a rien ». Les SORTIES ne passent pas par ici et restent
+    intactes -- manage_exits() lit toutes les positions, pas la liste filtree,
+    ce qui a ete verifie en meme temps."""
+    return [str(pos.get("symbol", "<symbole inconnu>"))
+            for pos in open_positions
+            if alpaca_cli.option_underlying(pos) is None]
+
+
 def _total_committed(open_positions: List[dict]) -> float:
     """Sum of cost_basis across every open option position -- what's already
     at risk before sizing a new trade. Positions whose cost_basis can't be
@@ -1209,6 +1241,20 @@ def check_gates(
             "Counting them as $0 would let the exposure caps pass on data that "
             "is missing, not small. Exits are unaffected. Fix or close the "
             "position(s), or re-run once the API returns a complete payload.")
+
+    # Voir positions_au_sous_jacent_illisible() pour la mesure. Place AVANT la
+    # regle anti-doublon, car c'est elle qui devient invérifiable : un None se
+    # glisse sans bruit dans l'ensemble ci-dessous, et « SPY » n'est pas dans
+    # {None}.
+    sans_sous_jacent = positions_au_sous_jacent_illisible(open_positions)
+    if sans_sous_jacent:
+        return RiskDecision(
+            False,
+            "impossible de lire le sous-jacent de "
+            + ", ".join(sans_sous_jacent)
+            + " : la regle « jamais deux positions sur le meme sous-jacent » "
+              "ne peut pas etre verifiee, donc aucune nouvelle entree. Les "
+              "sorties restent gerees normalement.")
 
     already_on_this_underlying = {
         alpaca_cli.option_underlying(pos) for pos in open_positions

@@ -742,6 +742,91 @@ class HarnaisPlafonds:
         return bool(getattr(d, "allowed", getattr(d, "ok", False)))
 
 
+
+class TestSymboleOCCNonReconnu(HarnaisPlafonds, BaseExit):
+    """Ajouté le 27/08. La règle « jamais deux positions sur le même
+    sous-jacent » — énoncée dans le deck, le write-up et le script vidéo —
+    cédait sur une forme de symbole parfaitement standard.
+
+    OCC définit un symbole de 21 caractères dont la racine est COMPLÉTÉE PAR
+    DES ESPACES : « SPY   260831P00764000 ». Alpaca renvoie généralement la
+    forme compacte, mais rien ne le garantit, et alpaca_cli.py documente
+    lui-même son incertitude sur les champs du CLI (« not yet verified
+    whether the CLI's `position list` output includes it too »).
+
+    Mesuré de bout en bout, MÊME position, deux écritures :
+
+        OCC compact  -> refuse : « already holding an open option position »
+        OCC standard -> AUTORISE un 2e SPY, dimensionne 3 contrats
+
+    C'est la signature exacte du trou déjà documenté dans check_gates
+    (« TROU REPRODUIT », ligne ~1219) : l'exposition totale reste juste, seule
+    la règle anti-doublon cède. Mais cette route-ci ne demande QU'UNE
+    condition, là où l'autre en demandait deux.
+
+    Deux correctifs distincts, et le second compte plus que le premier :
+    reconnaître la forme standard ferme la porte connue ; REFUSER quand le
+    sous-jacent d'une position ouverte est illisible ferme toutes les
+    autres — même logique que positions_au_cout_illisible()."""
+
+    OCC_COMPACT = "SPY260831P00764000"
+    OCC_STANDARD = "SPY   260831P00764000"      # 21 car., racine complétée
+
+    def test_la_forme_standard_est_reconnue_comme_une_option(self):
+        for sym in (self.OCC_COMPACT, self.OCC_STANDARD,
+                    self.OCC_COMPACT.lower()):
+            with self.subTest(symbole=repr(sym)):
+                self.assertTrue(
+                    alpaca_cli.is_option_position({"symbol": sym}),
+                    "%r n'est pas reconnu comme une option : la position "
+                    "disparaît de toutes les vérifications d'entrée" % sym)
+
+    def test_le_sous_jacent_est_lisible_dans_les_deux_formes(self):
+        for sym in (self.OCC_COMPACT, self.OCC_STANDARD,
+                    self.OCC_COMPACT.lower()):
+            with self.subTest(symbole=repr(sym)):
+                self.assertEqual(
+                    alpaca_cli.option_underlying({"symbol": sym}), "SPY",
+                    "sous-jacent illisible pour %r" % sym)
+
+    def test_pas_de_second_spy_quelle_que_soit_l_ecriture(self):
+        """Le test qui compte : la conséquence, pas la cause."""
+        for sym in (self.OCC_COMPACT, self.OCC_STANDARD):
+            with self.subTest(symbole=repr(sym)):
+                d = self._decide([self._ouverte(sym, 840.0)],
+                                 sous_jacent="SPY",
+                                 option="SPY260905P00760000")
+                self.assertFalse(
+                    self._autorise(d),
+                    "une 2e position SPY est autorisée alors qu'une est "
+                    "ouverte, écrite %r : %s" % (sym, d.reason))
+
+    def test_un_sous_jacent_illisible_ferme_la_porte(self):
+        """Le correctif durable. Reconnaître la forme standard ne ferme que
+        la porte qu'on a trouvée. Si le sous-jacent d'une position OUVERTE
+        reste illisible — un format qu'on n'a pas prévu — on ne peut pas
+        vérifier la règle anti-doublon, donc on ne trade pas. « Je n'ai pas
+        compris » n'est pas « il n'y a rien » : c'est exactement l'argument
+        que porte déjà list_positions()."""
+        mystere = {"symbol": "CONTRAT-INCONNU-42", "asset_class": "us_option",
+                   "cost_basis": "840.00", "qty": "1"}
+        d = self._decide([mystere], sous_jacent="SPY",
+                         option="SPY260905P00760000")
+        self.assertFalse(
+            self._autorise(d),
+            "une position ouverte dont le sous-jacent est ILLISIBLE est "
+            "ignorée, et le trade passe : %s" % d.reason)
+        self.assertIn("CONTRAT-INCONNU-42", d.reason or "",
+                      "le refus ne nomme pas la position fautive : %s" % d.reason)
+
+    def test_un_sous_jacent_different_reste_autorise(self):
+        """Pendant obligatoire : si toute position ouverte bloquait tout, le
+        projet ne pourrait plus tenir ses 4 positions simultanées annoncées."""
+        d = self._decide([self._ouverte(self.OCC_STANDARD, 840.0)],
+                         sous_jacent="XLV", option="XLV260831C00150000")
+        self.assertTrue(self._autorise(d),
+                        "un sous-jacent différent est refusé à tort : %s" % d.reason)
+
 class TestPlafondsDeRisque(HarnaisPlafonds, BaseExit):
     """Le dimensionnement : combien d'argent l'agent expose réellement.
 
@@ -1392,7 +1477,7 @@ class TestCoutIllisible(HarnaisPlafonds, BaseExit):
 
     def test_un_cout_illisible_refuse_l_entree_nouvelle(self):
         """Mord : avant correctif, ces trois positions donnaient AUTORISE."""
-        d = self._decide([self._illisible(s) for s in ("AAA", "BBB", "CCC")])
+        d = self._decide([self._illisible(s) for s in ("AAA260831C00100000", "BBB260831C00100000", "CCC260831C00100000")])
         self.assertFalse(self._autorise(d),
                          "une entrée a été autorisée alors que l'exposition "
                          "totale était illisible")
@@ -1400,17 +1485,17 @@ class TestCoutIllisible(HarnaisPlafonds, BaseExit):
 
     def test_une_seule_position_illisible_suffit(self):
         """Le budget est une SOMME : un seul terme manquant la fausse."""
-        positions = [self._ouverte("AAA", 900.0), self._ouverte("BBB", 900.0),
-                     self._illisible("CCC")]
+        positions = [self._ouverte("AAA260831C00100000", 900.0), self._ouverte("BBB260831C00100000", 900.0),
+                     self._illisible("CCC260831C00100000")]
         d = self._decide(positions)
         self.assertFalse(self._autorise(d))
-        self.assertIn("CCC", d.reason,
+        self.assertIn("CCC260831C00100000", d.reason,
                       "le refus ne nomme pas la position fautive")
 
     def test_le_refus_n_est_pas_aveugle(self):
         """Contrôle : sans ce test, refuser TOUJOURS passerait le test du
         dessus. Des montants lisibles doivent continuer à passer."""
-        d = self._decide([self._ouverte(s, 900.0) for s in ("AAA", "BBB")])
+        d = self._decide([self._ouverte(s, 900.0) for s in ("AAA260831C00100000", "BBB260831C00100000")])
         self.assertTrue(self._autorise(d),
                         "des montants parfaitement lisibles sont refusés")
 
@@ -1420,7 +1505,7 @@ class TestCoutIllisible(HarnaisPlafonds, BaseExit):
         cost_basis est illisible — la sortie se décide sur unrealized_plpc, pas
         sur le montant engagé. Si ce test tombe, le correctif a transformé une
         entrée refusée en position qu'on ne peut plus fermer."""
-        perdante = self._illisible("AAA")
+        perdante = self._illisible("AAA260831C00100000")
         perdante["unrealized_plpc"] = "-0.55"
         self.positions = [perdante]
         actions = risk_gates.manage_exits(dry_run=False)

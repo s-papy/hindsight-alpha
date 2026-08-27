@@ -254,8 +254,24 @@ def list_positions() -> List[dict]:
 # truncates before reaching spot (the failure verified on 24/08).
 STRIKE_BAND_PCT = 0.05
 
-_OCC_PATTERN = re.compile(r"^[A-Z]+\d{6}[CP]\d{8}$")
-_OCC_ROOT_PATTERN = re.compile(r"^([A-Z]+)\d{6}[CP]\d{8}$")
+# CORRIGE le 27/08/2026. Ces motifs n'acceptaient que la forme COMPACTE.
+# Or la specification OCC definit un symbole de 21 caracteres dont la racine
+# est COMPLETEE PAR DES ESPACES a six caracteres : « SPY   260831P00764000 ».
+# Alpaca rend generalement la forme compacte, mais rien ne le garantit -- et
+# ce fichier documente lui-meme son incertitude sur les champs rendus par le
+# CLI, quelques lignes plus haut.
+#
+# Consequence mesuree de bout en bout, MEME position, deux ecritures :
+#     OCC compact  -> check_gates refuse : « already holding ... on SPY »
+#     OCC standard -> check_gates AUTORISE un 2e SPY, 3 contrats
+# C'est-a-dire la regle « jamais deux positions sur le meme sous-jacent »,
+# annoncee dans le deck, le write-up et le script video.
+#
+# On normalise aussi la casse : un symbole en minuscules echouait des deux
+# cotes, et le mettre en majuscules ne peut creer aucun faux positif -- une
+# chaine qui a la FORME d'un symbole OCC en est un.
+_OCC_PATTERN = re.compile(r"^[A-Z]+ *\d{6}[CP]\d{8}$")
+_OCC_ROOT_PATTERN = re.compile(r"^([A-Z]+) *\d{6}[CP]\d{8}$")
 
 
 def is_option_position(pos: dict) -> bool:
@@ -263,7 +279,7 @@ def is_option_position(pos: dict) -> bool:
     options); falls back to an OCC-style symbol shape (root + 6-digit date +
     C/P + 8-digit strike) in case asset_class is named differently by the CLI."""
     asset_class = str(pos.get("asset_class", "")).lower()
-    symbol = str(pos.get("symbol", ""))
+    symbol = str(pos.get("symbol", "")).upper()
     return "option" in asset_class or bool(_OCC_PATTERN.match(symbol))
 
 
@@ -291,7 +307,7 @@ def option_underlying(pos: dict) -> Optional[str]:
     underlying = pos.get("underlying_symbol")
     if underlying:
         return str(underlying).upper()
-    match = _OCC_ROOT_PATTERN.match(str(pos.get("symbol", "")))
+    match = _OCC_ROOT_PATTERN.match(str(pos.get("symbol", "")).upper())
     return match.group(1) if match else None
 
 
