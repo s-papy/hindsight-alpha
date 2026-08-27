@@ -3025,6 +3025,71 @@ class TestPlistsLivres(unittest.TestCase):
                     "spécification. Utiliser un tiret cadratin (—). "
                     "Occurrence(s) : %s" % (chemin.name, fautifs))
 
+    def test_deux_travaux_ne_se_disputent_pas_l_etat_a_la_meme_minute(self):
+        """Ajouté le 27/08, une heure après avoir créé la collision moi-même.
+
+        `monitor-exits` se déclenche aux minutes 0, 15, 30, 45, 52 et 58.
+        J'avais planifié `agent-daily` à 21:30 — exactement sur un tic du
+        moniteur, donc démarrage à la MÊME seconde.
+
+        Pourquoi ça compte : les deux touchent state.json (agent.py appelle
+        lui aussi manage_exits() à son étape 0.5). Le verrou d'état n'attend
+        que 10 secondes, alors qu'un seul appel CLI peut en prendre 30. Une
+        passe lente du moniteur suffirait à faire échouer l'agent en
+        StateLockUnavailable — donc à lui faire REFUSER DE TRADER ce jour-là,
+        en silence, sur une semaine qui ne compte que cinq jours de bourse.
+
+        LA PREMIÈRE VERSION DE CE TEST CRIAIT SUR DU NORMAL. Elle interdisait
+        toute minute partagée, et signalait donc les 14 collisions quotidiennes
+        entre `monitor-exits` et `publish-dashboard` — qui sont sans effet :
+        publish_dashboard.py n'importe même pas risk_gates et n'a AUCUNE
+        référence à l'état de risque. Un contrôle qui crie sur du normal
+        s'apprend à ignorer, l'argument tenu toute la journée ailleurs.
+
+        Le test ne regarde donc que les travaux qui touchent VRAIMENT l'état,
+        et il le DÉRIVE de leur source plutôt que d'une liste écrite à la
+        main : un script qui se met à toucher state.json demain entre dans le
+        périmètre tout seul."""
+        import plistlib, re
+        from collections import defaultdict
+
+        def touche_l_etat(chemin_py):
+            f = self.RACINE / os.path.basename(chemin_py)
+            if not f.exists():
+                return False
+            src = f.read_text(encoding="utf-8")
+            return bool(re.search(r"\bimport risk_gates\b|\bfrom risk_gates\b", src))
+
+        occupees = defaultdict(set)
+        concernes = []
+        for chemin in self._plists():
+            with chemin.open("rb") as fh:
+                d = plistlib.load(fh)
+            sci = d.get("StartCalendarInterval")
+            py = [a for a in d.get("ProgramArguments", []) if a.endswith(".py")]
+            if not sci or not py or not touche_l_etat(py[0]):
+                continue
+            label = d["Label"].split(".")[-1]
+            concernes.append(label)
+            for e in (sci if isinstance(sci, list) else [sci]):
+                occupees[(e.get("Hour"), e.get("Minute"))].add(label)
+
+        # Contrôle d'instrument : si plus rien n'est « concerné », ce test
+        # passe au vert en ne comparant rien.
+        self.assertGreaterEqual(
+            len(concernes), 2,
+            "moins de deux travaux touchant l'état de risque ont été trouvés "
+            "(%s) : ce test ne compare plus rien" % concernes)
+
+        conflits = ["%02d:%02d -> %s" % (h or 0, m or 0, ", ".join(sorted(l)))
+                    for (h, m), l in sorted(occupees.items(), key=lambda x: str(x[0]))
+                    if len(l) > 1]
+        self.assertEqual(
+            conflits, [],
+            "deux travaux qui touchent state.json démarrent à la même "
+            "minute : %s — le verrou n'attend que 10 s, un appel CLI peut en "
+            "prendre 30, et le perdant échoue fermé" % "; ".join(conflits))
+
     def test_chaque_plist_declare_ce_dont_launchd_a_besoin(self):
         """Un plist parfaitement bien formé mais sans Label ne se charge pas,
         et l'erreur n'apparaît que dans les logs système — jamais là où

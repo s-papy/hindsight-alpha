@@ -357,7 +357,12 @@ python agent.py                # if vetted, places a real (paper) options order
   credential touched. The entry decision is now automatic; stopping it is
   still one file away.
 
-  The schedule is 21:30 local (15:30 ET), thirty minutes before the US close.
+  The schedule is 21:37 local (15:37 ET), twenty-three minutes before the US
+  close. The odd minute is deliberate: `monitor-exits` fires at :00, :15,
+  :30, :45, :52 and :58, and `agent.py` calls `manage_exits()` too — sharing
+  a minute means both processes contend for `state.json`, whose lock waits
+  only 10 seconds while a single CLI call can take 30. :37 is the middle of
+  the largest free gap.
   That hour is not arbitrary: this strategy's signal is a volatility rank
   computed on DAILY CLOSES, and `get_daily_bars()` does not exclude today —
   mid-session, the most recent bar is today's PARTIAL one. The later the run,

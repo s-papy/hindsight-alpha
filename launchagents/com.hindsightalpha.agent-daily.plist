@@ -20,8 +20,9 @@
   semaine.
 
   L'HEURE, ET POURQUOI CELLE-LA
-  21:30 heure locale (Europe/Zurich), soit 15:30 ET, trente minutes avant la
-  cloture du marche americain. Deux raisons, et la premiere pese le plus :
+  21:37 heure locale (Europe/Zurich), soit 15:37 ET, vingt-trois minutes
+  avant la cloture du marche americain. Deux raisons, et la premiere pese
+  le plus :
 
   1. Le signal de cette strategie est un rang de volatilite calcule sur des
      CLOTURES QUOTIDIENNES. get_daily_bars() ne borne pas sa requete a hier :
@@ -30,7 +31,18 @@
      rang de volatilite du jour est fausse. A 21:30 elle est presque formee.
   2. La liquidite des options est meilleure qu'a l'ouverture.
 
-  Le revers, assume : une position ouverte a 21:30 n'a que ~30 minutes de
+  POURQUOI :37 ET PAS :30, :15 OU :45. monitor-exits se declenche aux
+  minutes 0, 15, 30, 45, 52 et 58. Planifier l'agent sur l'une d'elles le
+  fait demarrer A LA MEME SECONDE que le moniteur, et les deux touchent
+  state.json : agent.py appelle lui aussi manage_exits() a son etape 0.5.
+  Le verrou d'etat n'attend que 10 secondes, alors qu'un seul appel CLI
+  peut en prendre 30. Une passe lente du moniteur suffirait donc a faire
+  echouer l'agent en StateLockUnavailable, c'est a dire a lui faire
+  REFUSER DE TRADER ce jour la, en silence, sur une semaine qui ne compte
+  que cinq jours de bourse. :37 est le milieu du plus grand intervalle
+  libre de l'heure (7 minutes apres :30, 8 avant :45).
+
+  Le revers, assume : une position ouverte a 21:37 n'a que ~23 minutes de
   surveillance de sortie avant la cloture. C'est acceptable ici parce que les
   contrats retenus font 7 a 21 jours d'echeance — ils ne sont pas censes etre
   fermes le jour meme — et que monitor-exits reprend des l'ouverture suivante.
@@ -63,11 +75,11 @@
 	</dict>
 	<key>StartCalendarInterval</key>
 	<array>
-		<dict><key>Weekday</key><integer>1</integer><key>Hour</key><integer>21</integer><key>Minute</key><integer>30</integer></dict>
-		<dict><key>Weekday</key><integer>2</integer><key>Hour</key><integer>21</integer><key>Minute</key><integer>30</integer></dict>
-		<dict><key>Weekday</key><integer>3</integer><key>Hour</key><integer>21</integer><key>Minute</key><integer>30</integer></dict>
-		<dict><key>Weekday</key><integer>4</integer><key>Hour</key><integer>21</integer><key>Minute</key><integer>30</integer></dict>
-		<dict><key>Weekday</key><integer>5</integer><key>Hour</key><integer>21</integer><key>Minute</key><integer>30</integer></dict>
+		<dict><key>Weekday</key><integer>1</integer><key>Hour</key><integer>21</integer><key>Minute</key><integer>37</integer></dict>
+		<dict><key>Weekday</key><integer>2</integer><key>Hour</key><integer>21</integer><key>Minute</key><integer>37</integer></dict>
+		<dict><key>Weekday</key><integer>3</integer><key>Hour</key><integer>21</integer><key>Minute</key><integer>37</integer></dict>
+		<dict><key>Weekday</key><integer>4</integer><key>Hour</key><integer>21</integer><key>Minute</key><integer>37</integer></dict>
+		<dict><key>Weekday</key><integer>5</integer><key>Hour</key><integer>21</integer><key>Minute</key><integer>37</integer></dict>
 	</array>
 	<key>StandardOutPath</key>
 	<string>/Users/s-pap/hindsight-alpha/agent.log</string>
