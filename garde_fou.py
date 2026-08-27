@@ -1515,7 +1515,21 @@ def controle_readme_decrit_les_agents() -> None:
                        encoding="utf-8", errors="replace").read()
         pos = texte.find(nom)
         if pos == -1:
-            continue  # le README ne nomme pas cet agent : rien a croiser
+            # ELARGI le 27/08 : c'etait un `continue` muet. Trouve en lisant
+            # l'inventaire du README, qui annoncait « the two macOS scheduling
+            # definitions » alors qu'il y en a TROIS -- l'agent de publication
+            # manquait de cette liste, meme s'il etait decrit ailleurs.
+            #
+            # Un agent planifie que le README ne nomme NULLE PART est un
+            # comportement automatique que personne n'a documente. Meme regle
+            # que dans l'autre sens, quelques lignes plus bas.
+            alerte(
+                "README.md",
+                "ne nomme nulle part %s. Cet agent tourne pourtant tout seul sur "
+                "la machine : un comportement automatique non documente est un "
+                "comportement que personne n'a decide." % nom,
+            )
+            continue
 
         # Les options en `--xxx` reellement passees par le plist. Une ligne
         # commentee (a l'interieur d'un <!-- --> XML) n'en est pas une : on ne
@@ -1529,10 +1543,28 @@ def controle_readme_decrit_les_agents() -> None:
             if m:
                 actives.add(m.group(1))
 
-        # Ce que le README attribue a CET agent : les options citees dans les
-        # 300 caracteres qui suivent son nom.
-        voisinage = texte[pos:pos + 300]
-        citees = set(re.findall(r"(--[\w-]+)", voisinage))
+        # Ce que le README attribue a CET agent : les options citees pres de
+        # N'IMPORTE LAQUELLE de ses mentions.
+        #
+        # RESSERRE le 27/08, aussitot apres avoir complete l'inventaire du
+        # README : ce bloc ne regardait que la PREMIERE occurrence du nom. En
+        # ajoutant le plist de publication a la liste d'inventaire, sa premiere
+        # mention est devenue cette liste -- qui ne cite aucune option -- alors
+        # que la description complete, avec --git-push, est 70 lignes plus bas.
+        # Le controle a donc signale un desaccord inexistant, cree par ma
+        # propre edition.
+        #
+        # Un README a le droit de nommer un agent a plusieurs endroits : c'est
+        # meme le signe qu'il est bien documente. On considere une option comme
+        # documentee si elle apparait pres de N'IMPORTE quelle mention.
+        citees = set()
+        depart = 0
+        while True:
+            i = texte.find(nom, depart)
+            if i == -1:
+                break
+            citees.update(re.findall(r"(--[\w-]+)", texte[i:i + 300]))
+            depart = i + 1
 
         promises_absentes = sorted(citees - actives)
         actives_non_dites = sorted(actives - citees)

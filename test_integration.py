@@ -1066,6 +1066,26 @@ class TestReadmeEtPlistsSAccordent(unittest.TestCase):
         self.assertTrue(alertes)
         self.assertIn("--git-push", alertes[0])
 
+    def test_une_option_documentee_AILLEURS_dans_le_readme_compte(self):
+        """Ce contrôle ne regardait que la PREMIÈRE mention du plist.
+
+        Trouvé le 27/08, aussitôt après avoir complété l'inventaire du README :
+        en y ajoutant le plist de publication, sa première mention est devenue
+        cette liste — qui ne cite aucune option — alors que la description
+        complète, avec --git-push, est 70 lignes plus bas. Le contrôle a signalé
+        un désaccord inexistant, créé par ma propre édition.
+
+        Un README a le droit de nommer un agent à plusieurs endroits : c'est
+        même le signe qu'il est bien documenté."""
+        readme = ("Inventaire : `com.hindsightalpha.publish-dashboard.plist`, "
+                  "l'agent de publication.\n"
+                  + "blabla sans rapport\n" * 40
+                  + "`com.hindsightalpha.publish-dashboard.plist` runs "
+                    "`publish_dashboard.py --git-push` every 30 minutes.\n")
+        self.assertEqual(self._alertes(readme, options=("--git-push",)), [],
+                         "une option documentée ailleurs dans le README est "
+                         "signalée comme absente")
+
     def test_quand_les_deux_s_accordent_rien_ne_se_declenche(self):
         """Contrôle : sans lui, alerter TOUJOURS passerait les deux tests
         ci-dessus."""
@@ -1097,12 +1117,36 @@ class TestReadmeEtPlistsSAccordent(unittest.TestCase):
         self.assertTrue(alertes, "une option seulement citée en commentaire est "
                                  "comptée comme active : le désaccord disparaît")
 
-    def test_un_agent_que_le_readme_ne_nomme_pas_est_ignore(self):
-        """Tous les plists n'ont pas vocation à être décrits."""
-        self.assertEqual(
-            self._alertes("Ce README ne parle d'aucun agent.\n",
-                          options=("--git-push",)),
-            [])
+    def test_un_agent_que_le_readme_ne_nomme_pas_est_signale(self):
+        """CE TEST DISAIT L'INVERSE : il admettait qu'un plist non nommé soit
+        ignoré en silence.
+
+        Trouvé le 27/08 en lisant l'inventaire du README, qui annonçait « the
+        two macOS scheduling definitions » alors qu'il y en a TROIS — et en
+        mesurant : le plist du moniteur n'était nommé NULLE PART dans le
+        README, contrairement aux deux autres.
+
+        Un agent planifié que la documentation ne nomme pas est un comportement
+        automatique que personne n'a décidé. Même règle que dans l'autre sens."""
+        alertes = self._alertes("Ce README ne parle d'aucun agent.\n",
+                                options=("--git-push",))
+        self.assertTrue(alertes, "un plist non documenté passe en silence")
+        self.assertIn("ne nomme nulle part", alertes[0])
+
+    def test_le_README_reel_nomme_les_trois_agents(self):
+        """Sur le vrai dépôt : les trois plists doivent être nommés. Le
+        moniteur ne l'était pas — le README le désignait par le nom de son
+        SCRIPT, jamais par celui de son plist."""
+        import garde_fou
+        avant = len(garde_fou.alertes)
+        try:
+            garde_fou.controle_readme_decrit_les_agents()
+            manquants = [a for a in garde_fou.alertes[avant:]
+                         if "ne nomme nulle part" in a[1]]
+        finally:
+            del garde_fou.alertes[avant:]
+        self.assertEqual(manquants, [],
+                         "un agent planifié n'est nommé nulle part dans le README")
 
 
 GIT = shutil.which("git")
