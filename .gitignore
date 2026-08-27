@@ -36,3 +36,19 @@ SOCIAL_POSTS_DRAFT.md
 
 # Journal de l agent « rester éveillé » — propre à la machine.
 market_hours_awake.log
+
+# AJOUTE le 27/08/2026. Sortie standard declaree par le plist
+# publish-dashboard. Elle N'ETAIT PAS ignoree, et le fichier s'est retrouve
+# SUIVI -- committe par un `git add -A` puis pousse, deux fois.
+#
+# Ce que ces fichiers recoivent : tout ce que le travail programme imprime, y
+# compris les messages d'exception. Or alpaca_cli.run() leve, quand la sortie
+# du CLI n'est pas du JSON, avec « first 500 chars of output: {stdout[:500]} »
+# -- la sortie BRUTE d'un sous-processus dont l'environnement contient les
+# identifiants. C'est le chemin de fuite que ce depot documente lui-meme et que
+# caviarder() ferme pour decision_log.jsonl. Ces logs-la ne sont pas caviardes.
+#
+# Un test derive desormais cette liste des PLISTS eux-memes, pour qu'un agent
+# ajoute demain ne puisse plus passer entre les mailles.
+publish_dashboard.log
+agent.log

@@ -2452,6 +2452,137 @@ class TestVerdictPublieDansLesRapports(unittest.TestCase):
 
 
 
+
+
+class TestCaviardageDuRepli(unittest.TestCase):
+    """Ajouté le 27/08. log_run() caviarde la ligne sérialisée AVANT de
+    l'écrire — c'est la protection qui existe parce qu'alpaca_cli.run() lève,
+    quand la sortie du CLI n'est pas du JSON, avec « first 500 chars of
+    output » : la sortie brute d'un sous-processus dont l'environnement
+    contient les identifiants.
+
+    Mais log_run_or_dump(), le REPLI qui s'exécute quand l'écriture échoue,
+    imprimait l'enregistrement BRUT sur la sortie standard. Le chemin normal
+    était protégé, le chemin d'urgence non — et le chemin d'urgence est
+    précisément celui qu'on emprunte quand quelque chose va déjà mal.
+
+    Sous launchd, cette sortie standard est le fichier de log du plist. Deux
+    des quatre n'étaient pas gitignorés au moment de la découverte, dont un
+    déjà suivi et poussé."""
+
+    def _dump(self, secret, valeur_dans_le_record):
+        import decision_log
+        from unittest import mock
+        vieux = os.environ.get("ALPACA_API_KEY")
+        os.environ["ALPACA_API_KEY"] = secret
+        try:
+            with mock.patch.object(decision_log, "log_run",
+                                   side_effect=OSError("disque plein")):
+                with contextlib.redirect_stdout(io.StringIO()) as sortie:
+                    ok = decision_log.log_run_or_dump(
+                        {"outcome": "error", "error": valeur_dans_le_record})
+            self.assertFalse(ok, "prérequis : l'écriture a bien échoué")
+            return sortie.getvalue()
+        finally:
+            if vieux is None:
+                os.environ.pop("ALPACA_API_KEY", None)
+            else:
+                os.environ["ALPACA_API_KEY"] = vieux
+
+    def test_le_repli_ne_deverse_pas_un_identifiant_en_clair(self):
+        secret = "S3CR" + "ET-DE-TEST-0123456789"
+        texte = self._dump(secret, "AlpacaCLIError: first 500 chars of output: "
+                                   "ALPACA_API_KEY=%s" % secret)
+        self.assertNotIn(secret, texte,
+                         "le repli imprime l'identifiant EN CLAIR sur la "
+                         "sortie standard, qui est le fichier de log du plist")
+        self.assertIn("CAVIARDE", texte,
+                      "rien n'indique qu'une valeur a été retirée")
+
+    def test_le_repli_reste_lisible_et_complet(self):
+        """Pendant obligatoire : caviarder ne doit pas manger l'enregistrement.
+        Le repli existe pour que la trace SURVIVE."""
+        # Sans accent : json.dumps echappe les non-ASCII en \\u00e9, et mon
+        # temoin echouait pour une raison d'encodage, pas de comportement.
+        texte = self._dump("S3CR" + "ET-DE-TEST-0123456789", "panne reseau")
+        self.assertIn("panne reseau", texte,
+                      "le contenu utile a disparu du repli")
+        self.assertIn("outcome", texte)
+
+class TestSortiesDesAgentsIgnorees(unittest.TestCase):
+    """Ajouté le 27/08. Chaque plist déclare un StandardOutPath et un
+    StandardErrorPath : c'est là qu'atterrit TOUT ce que le travail programmé
+    imprime, y compris les messages d'exception.
+
+    Or alpaca_cli.run() lève, quand la sortie du CLI n'est pas du JSON, avec
+    « first 500 chars of output: {stdout[:500]} » — la sortie BRUTE, depuis un
+    sous-processus dont l'environnement contient les identifiants. C'est le
+    chemin de fuite que ce dépôt documente lui-même et que caviarder() ferme
+    pour decision_log.jsonl. Ces fichiers-là ne sont pas caviardés.
+
+    Mesuré : deux des quatre sorties déclarées étaient gitignorées,
+    publish_dashboard.log ne l'était pas — et il était DÉJÀ SUIVI, committé
+    par mes propres `git add -A` dans deux commits déjà poussés. Contenu
+    vérifié bénin (sortie de garde_fou, zéro identifiant), mais le fichier
+    grossit à chaque exécution du job.
+
+    Ce test dérive l'exigence des PLISTS plutôt que d'une liste écrite à la
+    main : un agent ajouté demain, avec un nouveau chemin de log, ne peut plus
+    passer entre les mailles."""
+
+    RACINE = Path(__file__).resolve().parent
+
+    def _sorties_declarees(self):
+        import plistlib
+        chemins = set()
+        dossier = self.RACINE / "launchagents"
+        for f in sorted(dossier.glob("*.plist")) if dossier.is_dir() else []:
+            with f.open("rb") as fh:
+                d = plistlib.load(fh)
+            for cle in ("StandardOutPath", "StandardErrorPath"):
+                if d.get(cle):
+                    chemins.add(d[cle])
+        return chemins
+
+    def test_l_extraction_voit_bien_des_sorties(self):
+        """Contrôle d'instrument."""
+        self.assertTrue(self._sorties_declarees(),
+                        "aucun StandardOutPath trouvé : ce test ne vérifie rien")
+
+    def test_chaque_sortie_d_agent_est_gitignoree(self):
+        import subprocess
+        fautifs = []
+        for chemin in sorted(self._sorties_declarees()):
+            nom = os.path.basename(chemin)
+            r = subprocess.run(["git", "-C", str(self.RACINE), "check-ignore",
+                                "-q", nom], timeout=30)
+            if r.returncode != 0:
+                fautifs.append(nom)
+        self.assertEqual(
+            fautifs, [],
+            "sortie(s) de travail programmé non gitignorée(s) : %s — tout ce "
+            "que le job imprime y atterrit, y compris les messages "
+            "d'exception, et ces fichiers ne sont PAS caviardés"
+            % ", ".join(fautifs))
+
+    def test_aucune_sortie_d_agent_n_est_suivie_par_git(self):
+        """Gitignoré ne suffit pas : un fichier déjà SUIVI le reste malgré
+        .gitignore, et continue d'être committé. C'est exactement ce qui
+        s'était passé."""
+        import subprocess
+        suivis = []
+        for chemin in sorted(self._sorties_declarees()):
+            nom = os.path.basename(chemin)
+            r = subprocess.run(["git", "-C", str(self.RACINE), "ls-files",
+                                "--error-unmatch", nom],
+                               capture_output=True, timeout=30)
+            if r.returncode == 0:
+                suivis.append(nom)
+        self.assertEqual(suivis, [],
+                         "sortie(s) de travail programmé SUIVIES par git : %s "
+                         "— `git rm --cached` (le fichier reste sur le disque)"
+                         % ", ".join(suivis))
+
 class TestAppelsDeSousProcessusBornes(unittest.TestCase):
     """Ajouté le 27/08, juste après le chargement des LaunchAgents — donc sur
     du code qui tourne DÉSORMAIS sans personne devant.

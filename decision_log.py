@@ -126,7 +126,18 @@ def log_run_or_dump(record: Dict[str, Any], context: str = "") -> bool:
             + "Dumping the record here so it is not lost:",
             flush=True,
         )
-        print(json.dumps(record, indent=2, default=str), flush=True)
+        # CORRIGE le 27/08/2026. Cette ligne imprimait l'enregistrement BRUT.
+        # log_run() caviarde la ligne serialisee avant de l'ecrire ; ce
+        # repli-ci, non. Le chemin normal etait protege, le chemin d'URGENCE
+        # non -- et c'est celui qu'on emprunte quand quelque chose va deja mal.
+        #
+        # Sous launchd, cette sortie standard EST le fichier de log declare par
+        # le plist. Deux des quatre n'etaient pas gitignores au moment de la
+        # decouverte, dont un deja suivi et pousse.
+        #
+        # Meme famille que le reste de la journee : la protection est posee sur
+        # l'action principale, et la trace de secours passe a cote.
+        print(caviarder(json.dumps(record, indent=2, default=str)), flush=True)
         return False
 
 
