@@ -2176,6 +2176,95 @@ class TestStatutDeLOrdre(unittest.TestCase):
         le matin même."""
         self.assertEqual(self._soumettre({"id": "o-4"}), "o-4")
 
+
+class TestQualiteDesBarresFaceAuNaN(unittest.TestCase):
+    """La porte de qualité des données existe pour refuser un flux
+    inexploitable — et elle était aveugle à la seule valeur qui défait
+    chacune de ses comparaisons.
+
+    Mesuré sur 700 barres, avant correctif :
+
+        saut de prix x9        -> refusé   (juste)
+        UNE barre à « nan »    -> ACCEPTÉ
+        TOUTES à « nan »       -> ACCEPTÉ
+
+    `abs(nan - prev) / prev > MAX_DAILY_JUMP_PCT` est False, et un NaN
+    comptait comme une clôture exploitable.
+
+    L'agent ne tradait pas pour autant — les Sharpe deviennent NaN, donc
+    hindsight_guard refuse en « CANNOT CONCLUDE ». Mais le DIAGNOSTIC était
+    faux : l'opérateur lit « fenêtres 10/20/30/60/90 non notables » et cherche
+    du côté de la stratégie, alors que le flux de prix est vide de sens.
+    C'est exactement l'argument que le commentaire de cette fonction tient
+    déjà pour le flux TRONQUÉ — « ici on peut dire la chose ».
+
+    Et les deux moitiés divergeaient : la porte tolérait des lignes
+    inexploitables, puis le constructeur de barres levait un ValueError nu sur
+    la première valeur non convertible — tuant le symbole entier pour une
+    seule mauvaise ligne."""
+
+    @staticmethod
+    def _lignes(fabrique, n=700):
+        from datetime import datetime, timedelta, timezone
+        m = datetime.now(timezone.utc)
+        return [{"t": (m - timedelta(days=n - i)).isoformat(), "c": fabrique(i)}
+                for i in range(n)]
+
+    def _porte(self, fabrique):
+        alpaca_cli._check_bar_quality("SPY", self._lignes(fabrique),
+                                      minimum_usable=600)
+
+    def test_un_flux_entierement_non_fini_est_refuse(self):
+        for fab, cas in ((lambda i: "nan", "toutes les clôtures à « nan »"),
+                         (lambda i: float("nan"), "toutes à NaN flottant"),
+                         (lambda i: "inf", "toutes à « inf »"),
+                         (lambda i: "x", "toutes non numériques")):
+            with self.subTest(cas=cas):
+                with self.assertRaises(alpaca_cli.DataQualityError,
+                                       msg="%s : flux ACCEPTÉ — le diagnostic "
+                                           "partira sur la stratégie au lieu "
+                                           "des données" % cas):
+                    self._porte(fab)
+
+    def test_une_seule_mauvaise_barre_ne_tue_pas_la_journee(self):
+        """Témoin, et il compte autant : refuser un symbole entier pour une
+        ligne abîmée sur 700 coûterait une journée de bourse sur cinq."""
+        for fab, cas in ((lambda i: "nan" if i == 350 else 100.0 + i * 0.01, "une à nan"),
+                         (lambda i: "x" if i == 350 else 100.0 + i * 0.01, "une non numérique")):
+            with self.subTest(cas=cas):
+                self._porte(fab)   # ne doit pas lever
+
+    def test_le_constructeur_applique_la_meme_definition(self):
+        """Les deux moitiés doivent s'accorder sur le mot « exploitable ».
+        Une barre non finie ne doit ni faire lever, ni entrer dans la série."""
+        import math
+        from unittest import mock
+        # DEUX formes d'inexploitable, et elles prennent des chemins
+        # différents dans le constructeur : « nan » se CONVERTIT (donc passe
+        # par le filtre de finitude) tandis que « x » lève (donc passe par le
+        # `except`). Ma première version n'utilisait que « nan », et une
+        # mutation remettant `raise` dans le `except` restait verte.
+        for mauvaise, cas in (("nan", "valeurs convertibles mais non finies"),
+                              ("x", "valeurs non convertibles")):
+            with self.subTest(cas=cas):
+                lignes = self._lignes(
+                    lambda i: mauvaise if i in (100, 350) else 100.0 + i * 0.01)
+                with mock.patch.object(alpaca_cli, "run",
+                                       lambda a: {"bars": {"SPY": lignes}}):
+                    barres = alpaca_cli.get_daily_bars("SPY", lookback_days=600)
+                self.assertEqual(len(barres), 698,
+                                 "%s : les deux barres devraient être écartées, "
+                                 "pas 700 ni une exception" % cas)
+                self.assertTrue(all(math.isfinite(b.close) for b in barres),
+                                "%s : une clôture non finie est entrée dans la "
+                                "série de prix" % cas)
+
+    def test_les_controles_existants_ne_regressent_pas(self):
+        """Témoins : la porte doit toujours attraper ce qu'elle attrapait."""
+        with self.assertRaises(alpaca_cli.DataQualityError):
+            self._porte(lambda i: 100.0 if i < 350 else 900.0)      # saut x9
+        self._porte(lambda i: 100.0 + i * 0.01)                      # sain
+
 class TestReponseDesContratsIllisible(unittest.TestCase):
     """Dernier lecteur de frontière non durci, trouvé par un balayage AST des
     24 lectures avec valeur par défaut sur une réponse externe.

@@ -471,8 +471,38 @@ def _check_bar_quality(symbol: str, rows: List[dict], minimum_usable: Optional[i
         except ValueError:
             print(f"  WARNING: {symbol}: could not parse bar timestamp {last_ts_raw!r}, skipping staleness check")
 
-    closes = [row.get("c", row.get("close")) for row in rows]
-    closes = [float(c) for c in closes if c is not None]
+    # AJOUTE le 27/08/2026 : « exploitable » exige desormais un nombre FINI.
+    #
+    # Mesure avant correctif, sur 700 barres :
+    #     saut de prix x9        -> refuse   (juste)
+    #     UNE barre a « nan »    -> ACCEPTE
+    #     TOUTES a « nan »       -> ACCEPTE
+    #
+    # Cette porte existe pour refuser des donnees inexploitables, et elle
+    # laissait passer un flux ou RIEN n'est un nombre. Le NaN defait chacune
+    # de ses comparaisons : `abs(nan - prev) / prev > MAX_DAILY_JUMP_PCT` est
+    # False, et un NaN comptait comme une cloture exploitable.
+    #
+    # L'agent ne tradait pas pour autant -- les Sharpe deviennent NaN, donc
+    # hindsight_guard refuse en « CANNOT CONCLUDE ». Mais le DIAGNOSTIC etait
+    # faux : l'operateur lit « fenetres 10/20/30/60/90 non notables » et
+    # cherche du cote de la strategie, alors que le flux de prix est vide de
+    # sens. C'est exactement l'argument que le commentaire ci-dessous tient
+    # deja pour le flux TRONQUE -- « ici on peut dire la chose ».
+    #
+    # Une valeur non convertible faisait en plus lever un ValueError nu depuis
+    # cette ligne meme, sans nommer le symbole. Elle rejoint les clotures
+    # inexploitables, ce que la suite de cette fonction sait deja compter.
+    closes = []
+    for c in (row.get("c", row.get("close")) for row in rows):
+        if c is None:
+            continue
+        try:
+            valeur = float(c)
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(valeur):
+            closes.append(valeur)
 
     # AJOUTE le 27/08/2026. Les deux controles ci-dessus attrapent un feed GELE
     # (barre la plus recente trop vieille) et un feed CORROMPU (saut de prix
@@ -557,11 +587,27 @@ def get_daily_bars(symbol: str, lookback_days: int = MIN_TRADING_DAYS_FOR_SWEEP)
     data = run(["data", "bars", "--symbol", symbol, "--start", start, "--timeframe", "1Day"])
     rows = _extract_bars(data, expected_symbol=symbol)
     _check_bar_quality(symbol, rows, minimum_usable=lookback_days)
+    # Le constructeur applique la MEME definition d'« exploitable » que la
+    # porte de qualite juste au-dessus : un nombre FINI. Avant le 27/08 les
+    # deux divergeaient -- la porte tolerait des lignes inexploitables et
+    # comptait celles qui restaient, puis cette boucle-ci levait un ValueError
+    # nu sur la premiere valeur non convertible, tuant le symbole entier pour
+    # une seule mauvaise ligne. Et un NaN, lui, entrait tel quel dans la serie
+    # de prix.
+    #
+    # Deux definitions du meme mot a dix lignes d'ecart : la porte decidait
+    # qu'on avait assez de donnees, le constructeur refusait de les fabriquer.
     bars = []
     for row in rows:
         close = row.get("c", row.get("close"))
-        if close is not None:
-            bars.append(Bar(close=float(close)))
+        if close is None:
+            continue
+        try:
+            valeur = float(close)
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(valeur):
+            bars.append(Bar(close=valeur))
     return bars
 
 
