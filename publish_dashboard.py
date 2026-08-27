@@ -147,9 +147,29 @@ def write_snapshot() -> Path:
     return DATA_FILE
 
 
+# AJOUTE le 27/08/2026, le jour ou les LaunchAgents ont ete charges -- donc
+# sur du code qui tourne desormais SANS PERSONNE DEVANT, toutes les 30 minutes.
+#
+# Sous launchd il n'y a AUCUN terminal. Si git decide de demander quoi que ce
+# soit -- identifiants expires, trousseau verrouille, empreinte d'hote changee --
+# il attend une reponse qui ne viendra jamais. GIT_TERMINAL_PROMPT=0 le fait
+# ECHOUER au lieu d'attendre, et GIT_ASKPASS pointe vers un programme qui rend
+# toujours faux pour fermer le second chemin (celui des helpers graphiques).
+#
+# Mieux vaut un echec net dans le log qu'un processus fige : launchd ne demarre
+# pas une seconde instance tant que la premiere tourne, donc une seule attente
+# infinie arrete la publication POUR DE BON.
+_ENV_GIT = dict(os.environ, GIT_TERMINAL_PROMPT="0", GIT_ASKPASS="/usr/bin/false")
+
+# Les operations locales sont rapides ; seul le reseau merite d'attendre.
+_DELAI_LOCAL = 30
+_DELAI_RESEAU = 120
+
+
 def git_publish() -> None:
     paths = ["docs/data.json", "decision_log.jsonl"]
-    subprocess.run(["git", "add", *paths], check=True)
+    subprocess.run(["git", "add", *paths], check=True,
+                   timeout=_DELAI_LOCAL, env=_ENV_GIT)
     # Both calls below are scoped to `paths` on purpose -- found 24/08,
     # a review pass. `git diff --cached --quiet` with NO pathspec checks
     # the whole index, not just the two files just staged above: if anything
@@ -170,15 +190,31 @@ def git_publish() -> None:
     # the same state, and `git commit -m ... -- <pathspec>` committed only
     # the intended files while leaving the unrelated staged file untouched
     # and still staged for whoever put it there.
-    result = subprocess.run(["git", "diff", "--cached", "--quiet", "--", *paths])
+    result = subprocess.run(["git", "diff", "--cached", "--quiet", "--", *paths],
+                            timeout=_DELAI_LOCAL, env=_ENV_GIT)
     if result.returncode == 0:
         print("Nothing changed since last publish — skipping commit.")
         return
     subprocess.run(
         ["git", "commit", "-m", f"dashboard: snapshot {datetime.now(timezone.utc).isoformat()}", "--", *paths],
-        check=True,
+        check=True, timeout=_DELAI_LOCAL, env=_ENV_GIT,
     )
-    subprocess.run(["git", "push"], check=True)
+
+    # Le push, et le seul appel qui parle au reseau. Sa panne se raconte comme
+    # celle de l'ordre qui expire dans agent.py, corrigee le matin meme : un
+    # delai depasse ne veut pas dire « ca a echoue », il veut dire « ON NE SAIT
+    # PAS ». Le commit local est deja fait ; le push a pu atteindre GitHub sans
+    # rendre la main. Le dire, plutot que de laisser croire a un echec net.
+    try:
+        subprocess.run(["git", "push"], check=True,
+                       timeout=_DELAI_RESEAU, env=_ENV_GIT)
+    except subprocess.TimeoutExpired:
+        print("  WARNING: `git push` did not answer within %ds. The commit is "
+              "already made LOCALLY, and the push MAY OR MAY NOT have reached "
+              "GitHub -- this is UNKNOWN, not a failure. Run `git push` by hand "
+              "and check the repo before assuming the dashboard is stale."
+              % _DELAI_RESEAU, flush=True)
+        return
 
 
 def main() -> None:

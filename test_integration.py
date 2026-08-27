@@ -2451,6 +2451,110 @@ class TestVerdictPublieDansLesRapports(unittest.TestCase):
             garde_fou.alertes.clear()
 
 
+
+class TestAppelsDeSousProcessusBornes(unittest.TestCase):
+    """Ajouté le 27/08, juste après le chargement des LaunchAgents — donc sur
+    du code qui tourne DÉSORMAIS sans personne devant.
+
+    Balayage AST des 17 appels `subprocess.run` du dépôt : 13 portaient un
+    `timeout=`, et les 4 qui n'en avaient pas étaient tous dans
+    publish_dashboard.py — le seul travail programmé toutes les 30 minutes qui
+    touche le réseau.
+
+    Sous launchd il n'y a AUCUN terminal. Si git décide de demander quoi que
+    ce soit — identifiants expirés, trousseau verrouillé, empreinte d'hôte
+    changée — il attend une réponse qui ne viendra jamais. Et launchd ne
+    démarre pas une seconde instance tant que la première tourne : la
+    publication s'arrêterait définitivement, sur un processus figé.
+
+    La bannière de la page dirait bien « snapshot from X ago » (corrigé le
+    26/08), donc le SILENCE serait visible. Sa cause, non."""
+
+    RACINE = Path(__file__).resolve().parent
+
+    def _appels(self):
+        import ast
+        trouves = []
+        for f in sorted(self.RACINE.glob("*.py")):
+            if f.name.startswith("test_"):
+                continue
+            for n in ast.walk(ast.parse(f.read_text(encoding="utf-8"), f.name)):
+                if (isinstance(n, ast.Call)
+                        and getattr(n.func, "attr", None) == "run"
+                        and isinstance(getattr(n.func, "value", None), ast.Name)
+                        and n.func.value.id == "subprocess"):
+                    trouves.append((f.name, n.lineno,
+                                    any(k.arg == "timeout" for k in n.keywords)))
+        return trouves
+
+    def test_l_extraction_voit_bien_des_appels(self):
+        """Contrôle d'instrument : si le balayage ne trouve plus rien, le test
+        principal passe au vert en ne vérifiant RIEN."""
+        appels = self._appels()
+        self.assertGreater(len(appels), 10,
+                           "le balayage AST ne voit plus les appels "
+                           "subprocess.run : ce test est devenu creux")
+
+    def test_chaque_appel_de_sous_processus_est_borne_dans_le_temps(self):
+        sans = ["%s:%d" % (f, l) for f, l, ok in self._appels() if not ok]
+        self.assertEqual(
+            sans, [],
+            "appel(s) subprocess.run sans `timeout=` : %s — sous launchd il "
+            "n'y a pas de terminal, donc toute attente est infinie et le "
+            "travail programmé ne repart jamais" % ", ".join(sans))
+
+    def test_git_ne_peut_pas_demander_quoi_que_ce_soit_a_la_publication(self):
+        """Le complément indispensable du délai maximal : mieux vaut échouer
+        tout de suite que d'attendre 60 secondes une réponse impossible.
+        GIT_TERMINAL_PROMPT=0 fait échouer git au lieu de demander."""
+        import publish_dashboard
+        source = (self.RACINE / "publish_dashboard.py").read_text(encoding="utf-8")
+        self.assertIn("GIT_TERMINAL_PROMPT", source,
+                      "git peut encore demander des identifiants depuis un "
+                      "contexte qui n'a pas de terminal")
+        self.assertTrue(hasattr(publish_dashboard, "_ENV_GIT"),
+                        "l'environnement git durci n'est pas nommé, donc pas "
+                        "vérifiable")
+        self.assertEqual(publish_dashboard._ENV_GIT.get("GIT_TERMINAL_PROMPT"), "0")
+
+    def test_un_push_qui_expire_est_annonce_comme_INCERTAIN(self):
+        """Même raisonnement que l'ordre qui expire dans agent.py, corrigé le
+        27/08 au matin : un délai dépassé ne veut pas dire « ça a échoué », il
+        veut dire « on ne sait pas ». Un push peut avoir atteint GitHub et
+        n'avoir pas rendu la main."""
+        import publish_dashboard, subprocess
+        from unittest import mock
+        appels = []
+
+        def faux_run(cmd, **kw):
+            appels.append(cmd)
+            if cmd[:2] == ["git", "push"]:
+                raise subprocess.TimeoutExpired(cmd, kw.get("timeout", 0))
+            if cmd[:2] == ["git", "diff"]:
+                return subprocess.CompletedProcess(cmd, 1)
+            return subprocess.CompletedProcess(cmd, 0)
+
+        with mock.patch.object(publish_dashboard.subprocess, "run", faux_run):
+            with contextlib.redirect_stdout(io.StringIO()) as sortie:
+                publish_dashboard.git_publish()
+        texte = sortie.getvalue()
+        self.assertIn("UNKNOWN", texte.upper(),
+                      "un push expiré est passé sous silence : %r" % texte)
+        self.assertIn("git push", texte,
+                      "le message ne dit pas quoi vérifier à la main")
+        # Resserré après qu'une mutation soit restée verte : remplacer
+        # « MAY OR MAY NOT have reached » par « definitely did not reach »
+        # laissait le test passer, puisque le mot UNKNOWN restait présent.
+        # Un message qui dit à la fois « inconnu » et « ça a échoué » est
+        # contradictoire, et c'est la moitié FAUSSE qui pousserait à
+        # relancer un push déjà parti.
+        self.assertIn("MAY OR MAY NOT", texte.upper(),
+                      "l'incertitude n'est pas affirmée telle quelle : %r" % texte)
+        for affirmation in ("did not reach", "failed to reach", "was not pushed"):
+            self.assertNotIn(affirmation, texte.lower(),
+                             "le message affirme un échec qu'on ne peut pas "
+                             "constater : %r" % texte)
+
 class TestMotifsDIdentifiants(unittest.TestCase):
     """Ajouté le 27/08 sur décision de l'opérateur. Le contrôle par VALEUR
     EXACTE est inerte partout où les clés ne sont pas présentes — donc en CI
