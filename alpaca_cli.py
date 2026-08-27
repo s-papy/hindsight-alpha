@@ -39,7 +39,7 @@ import json
 import re
 import shutil
 import subprocess
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, List, Optional
 
 import config
@@ -457,7 +457,8 @@ def get_daily_bars(symbol: str, lookback_days: int = MIN_TRADING_DAYS_FOR_SWEEP)
     so every caller (vol_strategy, momentum_strategy, backtest.py,
     compare_strategies.py) gets the same protection for free instead of
     each needing to remember to check."""
-    start = (datetime.utcnow() - timedelta(days=int(lookback_days * 1.6) + 10)).strftime("%Y-%m-%d")
+    start = (datetime.now(timezone.utc)
+             - timedelta(days=int(lookback_days * 1.6) + 10)).strftime("%Y-%m-%d")
     data = run(["data", "bars", "--symbol", symbol, "--start", start, "--timeframe", "1Day"])
     rows = _extract_bars(data)
     _check_bar_quality(symbol, rows, minimum_usable=lookback_days)
@@ -495,7 +496,7 @@ def find_near_the_money_contract(
     if spot is None:
         spot = get_last_price(underlying)
     contract_type = "call" if direction > 0 else "put"
-    today = datetime.utcnow().date()
+    today = datetime.now(timezone.utc).date()
     gte = (today + timedelta(days=min_days_out)).isoformat()
     lte = (today + timedelta(days=max_days_out)).isoformat()
 

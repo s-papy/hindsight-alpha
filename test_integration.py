@@ -575,7 +575,7 @@ class TestSourcesDeVerite(unittest.TestCase):
             self.assertEqual(relu[sym]["trade_days"], w["trade_days"])
 
     def test_un_sharpe_negatif_ne_fait_pas_disparaitre_le_symbole(self):
-        """Le motif était `([\d.]+)`, incapable de matcher un signe moins. Un
+        r"""Le motif était `([\d.]+)`, incapable de matcher un signe moins. Un
         Sharpe in-sample négatif n'est pas une anomalie ici : c'est l'histoire
         d'origine du projet."""
         r = self._parse_comparaison(
@@ -1631,6 +1631,100 @@ class TestRenvoisResolvent(unittest.TestCase):
             del garde_fou.alertes[avant:]
         self.assertEqual(morts, [], "le dépôt cite des fichiers qu'il ne "
                                     "contient pas : %s" % morts)
+
+
+class TestCompatibiliteFuture(unittest.TestCase):
+    """Le workflow CI demande `python-version: "3.x"` — la DERNIÈRE version
+    disponible. Toute cette suite n'a jamais tourné que sur le Python 3.9 de la
+    machine de développement, et aucun autre interpréteur n'y est installé.
+
+    La vérification s'est donc faite en cherchant les constructions dont le
+    comportement diffère entre versions, pas en exécutant. Ces tests figent ce
+    qui a été trouvé, pour que la dérive ne se reproduise pas en silence.
+    """
+
+    RACINE = Path(__file__).resolve().parent
+
+    def _modules(self):
+        return sorted(self.RACINE.glob("*.py"))
+
+    def test_aucune_sequence_d_echappement_invalide(self):
+        """`"\\d"` dans une chaîne non brute est un DeprecationWarning depuis
+        3.6, un SyntaxWarning depuis 3.12, et c'est destiné à devenir une
+        ERREUR DE SYNTAXE.
+
+        Trouvé le 27/08 en lançant la suite avec -W error::DeprecationWarning :
+        une docstring de ce fichier même contenait `([\\d.]+)` et faisait
+        échouer l'import. Sur 3.9 ce n'était qu'un avertissement invisible ; sur
+        une version future, le module ne se charge plus du tout."""
+        import warnings
+        fautifs = []
+        for chemin in self._modules():
+            with warnings.catch_warnings(record=True) as attrapes:
+                warnings.simplefilter("always")
+                try:
+                    compile(chemin.read_text(encoding="utf-8"), str(chemin), "exec")
+                except SyntaxError as err:
+                    fautifs.append("%s:%s %s" % (chemin.name, err.lineno, err.msg))
+                    continue
+                for a in attrapes:
+                    if "escape sequence" in str(a.message):
+                        fautifs.append("%s:%s %s"
+                                       % (chemin.name, a.lineno, a.message))
+        self.assertEqual(fautifs, [],
+                         "séquence(s) d'échappement invalide(s) : %s — "
+                         "avertissement aujourd'hui, erreur de syntaxe demain"
+                         % "; ".join(fautifs))
+
+    def _appels_et_imports(self):
+        """Les appels et imports REELS de chaque module, via l'arbre syntaxique.
+
+        Ecrit en AST apres que la premiere version, qui cherchait des chaines
+        de caracteres, se soit trouvee ELLE-MEME : la liste des noms interdits
+        contient les noms interdits, et les docstrings qui expliquent le
+        correctif citent l'appel corrige. Deux tests rouges sur un depot sain.
+
+        Un nom cite dans une docstring n'est pas un appel. L'AST le sait, le
+        `in` d'une chaine non."""
+        import ast
+        attributs, imports = [], []
+        for chemin in self._modules():
+            arbre = ast.parse(chemin.read_text(encoding="utf-8"), str(chemin))
+            for n in ast.walk(arbre):
+                if isinstance(n, ast.Attribute):
+                    attributs.append((chemin.name, n.lineno, n.attr))
+                elif isinstance(n, ast.Import):
+                    for a in n.names:
+                        imports.append((chemin.name, n.lineno, a.name.split(".")[0]))
+                elif isinstance(n, ast.ImportFrom) and n.module:
+                    imports.append((chemin.name, n.lineno, n.module.split(".")[0]))
+        return attributs, imports
+
+    def test_aucun_appel_datetime_utcnow(self):
+        """datetime.utcnow() est DEPRECIE depuis 3.12 et sera SUPPRIME. Le jour
+        ou il disparait, l'agent ne demarre plus -- pas un avertissement, une
+        panne.
+
+        Les trois usages n'extrayaient qu'une DATE UTC, sans arithmetique sur
+        les fuseaux : le remplacement par datetime.now(timezone.utc) est
+        mecaniquement equivalent, verifie cote a cote."""
+        attributs, _ = self._appels_et_imports()
+        fautifs = ["%s:%d" % (f, l) for f, l, a in attributs if a == "utcnow"]
+        self.assertEqual(fautifs, [],
+                         "datetime.utcnow() encore appele : %s"
+                         % ", ".join(fautifs))
+
+    def test_aucune_autre_depreciation_connue(self):
+        """Les retraits annonces de 3.12/3.13 qui casseraient ce depot."""
+        ATTRIBUTS = {"utcfromtimestamp", "getdefaultlocale"}
+        MODULES = {"distutils", "pkg_resources", "imp"}
+        attributs, imports = self._appels_et_imports()
+        fautifs = ["%s:%d %s" % (f, l, a) for f, l, a in attributs
+                   if a in ATTRIBUTS]
+        fautifs += ["%s:%d import %s" % (f, l, m) for f, l, m in imports
+                    if m in MODULES]
+        self.assertEqual(fautifs, [], "usage(s) deprecie(s) : %s"
+                         % ", ".join(fautifs))
 
 
 if __name__ == "__main__":

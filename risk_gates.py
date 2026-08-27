@@ -71,7 +71,7 @@ import json
 import os
 import time
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -566,7 +566,22 @@ def _extract_unrealized_plpc(position: dict) -> Optional[float]:
 
 
 def _today() -> str:
-    return datetime.utcnow().date().isoformat()
+    # CORRIGE le 27/08/2026. datetime.utcnow() est DEPRECIE depuis Python 3.12
+    # et sera SUPPRIME. Le workflow CI demande `python-version: "3.x"`, donc la
+    # derniere version disponible : le jour ou utcnow() disparait, l'agent ne
+    # demarre plus -- pas un avertissement, une panne.
+    #
+    # Trouve en constatant que TOUTE la suite n'a jamais tourne que sur le
+    # Python 3.9 de cette machine, alors que la CI en utilise une autre. Aucun
+    # autre interpreteur n'etant installe ici, la verification s'est faite en
+    # cherchant les constructions dont le comportement differe, pas en
+    # executant.
+    #
+    # Le remplacement est mecaniquement equivalent : les trois usages
+    # n'extraient qu'une DATE UTC, sans arithmetique sur les fuseaux. utcnow()
+    # rendait un datetime naif, now(timezone.utc) en rend un conscient -- mais
+    # .date() et strftime("%Y-%m-%d") donnent le meme resultat dans les deux cas.
+    return datetime.now(timezone.utc).date().isoformat()
 
 
 def already_traded_today(underlying: str) -> bool:
