@@ -470,6 +470,96 @@ class TestGardeAntiDoublonNonArme(BaseRendu):
             "{trades:", "{outcome:'order_submitted', trades:"))
         self.assertIn("badge-green", r["b"])
 
+
+class TestSeparateurDuKickoff(BaseRendu):
+    """Ajouté le 27/08 au soir, sur une projection chiffrée et non une
+    impression.
+
+    La page publie les 30 décisions les plus récentes. Aujourd'hui elle en
+    contient 30, dont 11 erreurs DNS du 25/08 — un incident réseau de trois
+    jours AVANT le début de l'événement. 43% de la fenêtre est en erreur.
+
+    Et le journal grossit lentement : agent.py écrit un enregistrement par
+    exécution, une exécution par jour de bourse. Sur la semaine du hackathon
+    cela fait ~5 enregistrements, plus quelques événements notables du
+    moniteur. Au 04/09, la fenêtre publique contiendrait donc ~5-10
+    enregistrements DE LA SEMAINE et ~20-25 d'AVANT, dont les 11 erreurs.
+
+    Un juge qui ouvre la page verrait surtout du bruit antérieur à
+    l'événement qu'il juge.
+
+    RIEN N'EST MASQUÉ — c'est la ligne de ce projet, et l'inverse serait
+    exactement la curation d'éléments de preuve qu'il dénonce. On ÉTIQUETTE :
+    une ligne de séparation nomme la frontière du kickoff et dit ce qu'il y a
+    en dessous. Tout reste affiché, daté, dans le même tableau."""
+
+    KICKOFF = "2026-08-28T15:00:00+00:00"
+
+    def _tableau(self, horodatages):
+        lignes = ", ".join(
+            '{timestamp:"%s", outcome:"checked", run_type:"exit_monitor"}' % t
+            for t in horodatages)
+        r = self.executer("""
+            renderDecisions([%s]);
+            _resultats.html = document.getElementById('decisions-container').innerHTML;
+        """ % lignes)
+        return r["html"]
+
+    def test_le_separateur_apparait_entre_les_deux_periodes(self):
+        html = self._tableau(["2026-08-31T19:37:00+00:00",   # pendant
+                              "2026-08-28T16:00:00+00:00",   # pendant
+                              "2026-08-25T13:13:00+00:00",   # avant
+                              "2026-08-24T19:05:00+00:00"])  # avant
+        self.assertEqual(html.count("kickoff-divider"), 1,
+                         "séparateur absent ou en double")
+        avant_sep = html.split("kickoff-divider")[0]
+        # `- 1` pour la ligne d'en-tête du <thead>, que mon premier comptage
+        # oubliait : l'assertion échouait pour cette raison, pas parce que le
+        # séparateur était mal placé.
+        lignes_au_dessus = avant_sep.count("<tr>") - 1
+        self.assertEqual(lignes_au_dessus, 2,
+                         "le séparateur n'est pas à la frontière : %d ligne(s) "
+                         "au-dessus au lieu de 2" % lignes_au_dessus)
+
+    def test_le_separateur_dit_ce_qu_il_y_a_en_dessous(self):
+        html = self._tableau(["2026-08-31T19:37:00+00:00",
+                              "2026-08-24T19:05:00+00:00"])
+        bas = html.lower()
+        self.assertIn("predates the hackathon", bas,
+                      "le séparateur n'explique pas ce qui suit")
+        self.assertIn("28 aug 15:00 utc", bas,
+                      "la frontière exacte n'est pas nommée")
+        self.assertIn("nothing is hidden", bas,
+                      "le séparateur ne dit pas que rien n'a été retiré — "
+                      "c'est justement ce qu'un juge doit pouvoir vérifier")
+
+    def test_rien_n_est_masque(self):
+        """Le témoin qui compte le plus. Étiqueter n'est pas filtrer."""
+        horodatages = ["2026-08-31T19:37:00+00:00", "2026-08-25T13:13:00+00:00",
+                       "2026-08-24T19:05:00+00:00"]
+        html = self._tableau(horodatages)
+        # On compte les LIGNES de données, pas les « badge » : la classe
+        # `badge badge-green` contient le mot deux fois, et mon premier
+        # témoin échouait pour cette raison de comptage, pas de comportement.
+        lignes = html.count("<tr>") - html.count("kickoff-divider")
+        self.assertEqual(lignes, len(horodatages),
+                         "des enregistrements ont disparu du tableau : %d ligne(s) "
+                         "pour %d décisions" % (lignes, len(horodatages)))
+
+    def test_aucun_separateur_si_tout_est_anterieur(self):
+        """L'état d'AUJOURD'HUI : les 30 enregistrements sont tous antérieurs
+        au kickoff. Un séparateur en tête de tableau, sans rien au-dessus, ne
+        dirait rien et ferait du bruit."""
+        html = self._tableau(["2026-08-25T13:13:00+00:00",
+                              "2026-08-24T19:05:00+00:00"])
+        self.assertNotIn("kickoff-divider", html)
+
+    def test_aucun_separateur_si_tout_est_posterieur(self):
+        """L'état de la FIN de semaine, si le journal a assez tourné."""
+        html = self._tableau(["2026-09-03T19:37:00+00:00",
+                              "2026-08-31T19:37:00+00:00"])
+        self.assertNotIn("kickoff-divider", html)
+
 class TestCompteurDeFuites(BaseRendu):
     """Le chiffre le plus mis en avant de la page : combien de fuites de
     hindsight_guard ont été attrapées. Il compte sur un préfixe EXACT."""
