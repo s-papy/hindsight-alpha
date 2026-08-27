@@ -395,11 +395,17 @@ def _record_starting_equity(equity: float, state: dict, account_id: Optional[str
     exists to prevent for starting_equity/locked, just not yet extended to
     fields added after it was written."""
     if state.get("account_id") != account_id or "starting_equity" not in state:
-        if state.get("account_id") not in (None, account_id):
+        # Cette branche couvre DEUX situations differentes, et elles ne meritent
+        # pas le meme traitement :
+        #   - une vraie BASCULE de compte (un autre account_id etait enregistre) ;
+        #   - un simple premier passage (starting_equity pas encore pose).
+        bascule_de_compte = state.get("account_id") not in (None, account_id)
+        if bascule_de_compte:
             print(
                 f"NOTE: state.json was for account {state.get('account_id')!r}, "
                 f"now running as {account_id!r} -- re-baselining starting_equity, clearing any lock, "
-                f"today's traded-symbols record, and the consecutive-loss counter."
+                f"today's traded-symbols record, the consecutive-loss counter, and the "
+                f"already-counted-exits memory."
             )
         state["account_id"] = account_id
         state["starting_equity"] = equity
@@ -407,6 +413,41 @@ def _record_starting_equity(equity: float, state: dict, account_id: Optional[str
         state["lock_reason"] = None
         state["traded_today"] = {"date": _today(), "symbols": []}
         state["consecutive_losses"] = 0
+        # AJOUTE le 27/08/2026, le jour meme ou exits_counted a ete introduit --
+        # et exactement la faute que le docstring ci-dessus decrit deja pour
+        # traded_today et consecutive_losses : un champ ajoute apres coup, oublie
+        # dans la liste de remise a zero. Trouve en relisant cette fonction juste
+        # apres avoir ajoute le champ.
+        #
+        # L'effet est etroit (la memoire se purge d'elle-meme contre les
+        # positions ouvertes, donc des symboles d'un autre compte disparaissent
+        # au premier passage) mais reel : si le nouveau compte detient le MEME
+        # contrat OCC, sa premiere vraie perte serait prise pour un doublon et
+        # ne serait pas comptee.
+        #
+        # test_l_etat_apres_bascule_de_compte_est_epingle verrouille desormais
+        # la liste ENTIERE : le prochain champ ajoute fera tomber ce test au lieu
+        # d'etre oublie une troisieme fois.
+        #
+        # MAIS uniquement sur une VRAIE bascule de compte -- et cette nuance a
+        # ete trouvee par la suite de tests, pas par relecture. Premiere version
+        # de ce correctif : effacement sur les deux chemins. Trois tests sont
+        # tombes aussitot.
+        #
+        # La raison : manage_exits() ecrit exits_counted (via
+        # _premiere_fois_qu_on_compte_cette_sortie) IMMEDIATEMENT avant
+        # d'appeler _record_exit_outcome(), qui atterrit ici. Sur un etat ou
+        # starting_equity n'est pas encore pose -- le cas normal d'une machine
+        # ou seul monitor_exits.py a tourne, puisqu'il n'appelle jamais
+        # check_gates -- l'effacement detruisait ce qui venait d'etre inscrit
+        # dans la MEME iteration. La position bloquee etait donc recomptee au
+        # passage suivant : le defaut corrige quelques minutes plus tot
+        # revenait par la porte de service.
+        #
+        # traded_today et consecutive_losses n'ont pas ce probleme : rien ne les
+        # ecrit dans cette fenetre-la.
+        if bascule_de_compte:
+            state["exits_counted"] = {}
         _save_state(state)
     return state
 

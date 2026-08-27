@@ -1446,5 +1446,113 @@ class TestChoixDuContrat(unittest.TestCase):
         self.assertIsNone(self._choisir([]))
 
 
+class TestBasculeDeCompte(BaseExit):
+    """Passer de `.env` du compte de dev au compte dédié du hackathon est une
+    étape PRÉVUE. state.json est un fichier unique sans conscience du compte :
+    sans remise à zéro, la comptabilité de l'ancien compte s'appliquerait au
+    nouveau.
+
+    _record_starting_equity() gère ce cas depuis le 24/08, et son propre
+    docstring raconte comment deux champs ajoutés plus tard (traded_today,
+    consecutive_losses) avaient été oubliés dans la liste. Le 27/08,
+    exits_counted a été ajouté et oublié à son tour — la fonction avait prédit
+    sa propre rechute. Aucun test ne couvrait cette bascule.
+    """
+
+    ANCIEN = "compte-de-dev"
+    NOUVEAU = "compte-hackathon"
+
+    def _etat_sale(self):
+        """Un état plausible de fin de semaine sur l'ANCIEN compte."""
+        return {
+            "account_id": self.ANCIEN,
+            "starting_equity": 50000.0,
+            "locked": True,
+            "lock_reason": "verrou de perte hebdomadaire",
+            "traded_today": {"date": risk_gates._today(), "symbols": ["SPY", "QQQ"]},
+            "consecutive_losses": 3,
+            "exits_counted": {"SPY260831C00500000": "loss"},
+        }
+
+    def test_la_bascule_efface_toute_la_comptabilite_de_l_ancien_compte(self):
+        etat = risk_gates._record_starting_equity(
+            120000.0, self._etat_sale(), self.NOUVEAU)
+        self.assertEqual(etat["account_id"], self.NOUVEAU)
+        self.assertEqual(etat["starting_equity"], 120000.0)
+        self.assertFalse(etat["locked"],
+                         "un verrou de l'ancien compte survit sur le nouveau")
+        self.assertEqual(etat["consecutive_losses"], 0,
+                         "une série de pertes de l'ancien compte pourrait faire "
+                         "sauter le disjoncteur sur un compte qui n'a jamais tradé")
+        self.assertEqual(etat["traded_today"]["symbols"], [],
+                         "un symbole tradé sur l'ancien compte paraît déjà "
+                         "tradé sur le nouveau")
+        self.assertEqual(etat["exits_counted"], {},
+                         "une sortie comptée sur l'ancien compte pourrait faire "
+                         "prendre une vraie perte du nouveau pour un doublon")
+
+    def test_l_etat_apres_bascule_de_compte_est_epingle(self):
+        """LE GARDE MÉCANIQUE. Deux champs ont déjà été oubliés dans la liste
+        de remise à zéro, à deux dates différentes, chacun ajouté après coup.
+        Un test par champ ne suffit pas : il faut que le PROCHAIN champ ajouté
+        fasse tomber quelque chose.
+
+        Ce test épingle l'état ENTIER. Ajouter un champ à state.json sans
+        décider ce qu'il devient à la bascule fera tomber ce test — ce qui
+        force la décision au lieu de la laisser passer une troisième fois."""
+        etat = risk_gates._record_starting_equity(
+            120000.0, self._etat_sale(), self.NOUVEAU)
+        self.assertEqual(
+            etat,
+            {
+                "account_id": self.NOUVEAU,
+                "starting_equity": 120000.0,
+                "locked": False,
+                "lock_reason": None,
+                "traded_today": {"date": risk_gates._today(), "symbols": []},
+                "consecutive_losses": 0,
+                "exits_counted": {},
+            },
+            "l'état après bascule ne correspond plus à ce qui est épinglé : un "
+            "champ a été ajouté à state.json sans décider ce qu'il devient "
+            "quand on change de compte")
+
+    def test_un_premier_passage_ne_detruit_pas_la_memoire_des_sorties(self):
+        """La nuance que la SUITE a trouvée, pas la relecture.
+
+        manage_exits() écrit exits_counted juste avant d'appeler
+        _record_exit_outcome(), qui atterrit dans _record_starting_equity(). Sur
+        un état où starting_equity n'est pas encore posé — le cas normal d'une
+        machine où seul monitor_exits.py a tourné, puisqu'il n'appelle jamais
+        check_gates — effacer ici détruit ce qui vient d'être inscrit dans la
+        MÊME itération, et la position bloquée est recomptée au passage suivant.
+
+        Une remise à zéro n'a de sens que sur une VRAIE bascule de compte."""
+        etat = {"exits_counted": {"SPY260831C00500000": "loss"}}   # pas de starting_equity
+        rendu = risk_gates._record_starting_equity(100000.0, etat, "compte-neuf")
+        self.assertEqual(rendu["starting_equity"], 100000.0,
+                         "prérequis : la référence doit bien être posée")
+        self.assertEqual(rendu["exits_counted"], {"SPY260831C00500000": "loss"},
+                         "la mémoire des sorties déjà comptées a été détruite "
+                         "par un simple premier passage : la position bloquée "
+                         "sera recomptée au cycle suivant")
+
+    def test_le_meme_compte_ne_declenche_aucune_remise_a_zero(self):
+        """Contrôle : sans lui, tout remettre à zéro à CHAQUE appel passerait
+        les deux tests ci-dessus — et effacerait le verrou de perte à chaque
+        exécution."""
+        etat = self._etat_sale()
+        etat["account_id"] = self.NOUVEAU
+        rendu = risk_gates._record_starting_equity(999999.0, etat, self.NOUVEAU)
+        self.assertTrue(rendu["locked"],
+                        "le verrou de perte est effacé alors que le compte n'a "
+                        "pas changé")
+        self.assertEqual(rendu["starting_equity"], 50000.0,
+                         "la référence est ré-établie alors que le compte n'a "
+                         "pas changé : le drawdown repartirait de zéro à chaque "
+                         "exécution et le verrou ne se déclencherait jamais")
+        self.assertEqual(rendu["consecutive_losses"], 3)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
