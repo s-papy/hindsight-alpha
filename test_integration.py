@@ -680,7 +680,14 @@ class TestSourcesDeVerite(unittest.TestCase):
             verdict = r["hindsight_guard_verdict"]
             w = r["windows"][verdict["full_winner"]]
             self.assertIn(sym, relu)
-            self.assertEqual(relu[sym]["leaked"], not verdict["agrees"])
+            # CORRIGE le 27/08 : cette ligne encodait la confusion que le
+            # correctif du meme jour a levee. « pas agrees » couvre TROIS cas,
+            # dont un — NO EDGE — qui n'est pas une fuite. L'aller-retour doit
+            # porter sur le VERDICT, pas sur un booleen qui les aplatit.
+            self.assertEqual(relu[sym]["verdict"],
+                             verdict["verdict"].split(" (")[0].split(" —")[0])
+            self.assertEqual(relu[sym]["leaked"],
+                             verdict["verdict"].startswith("LEAK DETECTED"))
             self.assertEqual(relu[sym]["win_rate"], w["win_rate_on_trade_days_pct"])
             self.assertEqual(relu[sym]["concentration"], w["top5_share_pct"])
             self.assertEqual(relu[sym]["trade_days"], w["trade_days"])
@@ -2255,6 +2262,134 @@ class TestVocabulairePartageAvecLaPage(unittest.TestCase):
             % ", ".join(manquants))
 
 
+
+
+class TestVerdictPublieDansLesRapports(unittest.TestCase):
+    """Ajouté le 27/08, suite directe de la distinction « pas d'edge » /
+    « fuite ». backtest.py et compare_strategies.py écrivent un verdict
+    BINAIRE — « agrees (no leak) » ou « LEAK DETECTED ». Le troisième cas n'a
+    pas d'écriture, donc un symbole où RIEN ne franchit le seuil sur aucune
+    des deux fenêtres serait publié comme une fuite.
+
+    Vérifié sur les rapports actuels, et ils sont justes : la seule fuite
+    revendiquée est XLK, gagnant plein 90 j contre in-sample 10 j, Sharpe
+    in-sample positif (0.789). Vrai désaccord de gagnants, pas un « pas
+    d'edge ». Rien n'est surévalué aujourd'hui.
+
+    Mais ces rapports sont RÉGÉNÉRÉS pendant la semaine du hackathon, sur des
+    données que personne n'a encore vues. Un symbole qui bascule dans le
+    troisième cas annoncerait une fuite qui n'en est pas — dans un dossier
+    dont tout l'argument est de ne pas exagérer ses prises."""
+
+    RACINE = Path(__file__).resolve().parent
+
+    def _rapport(self, plein, in_sample):
+        from hindsight_guard import LeakageReport
+        gp = max(plein, key=plein.get)
+        gi = max(in_sample, key=in_sample.get)
+        return LeakageReport(
+            candidates=sorted(plein), full_scores=plein,
+            in_sample_scores=in_sample, full_winner=gp, in_sample_winner=gi,
+            in_sample_clears_bar=in_sample[gi] > 0.0, threshold=0.0)
+
+    def test_un_symbole_sans_edge_n_est_pas_publie_comme_une_fuite(self):
+        import backtest
+        r = self._rapport({10: -1.0, 90: -0.4}, {10: -1.2, 90: -0.5})
+        self.assertFalse(r.agrees, "prérequis : refusé")
+        texte = backtest.etiquette_de_verdict(r)
+        self.assertNotIn("LEAK", texte.upper(),
+                         "un symbole sans edge est publié comme une fuite : %r"
+                         % texte)
+        self.assertIn("no edge", texte.lower())
+
+    def test_une_vraie_fuite_reste_publiee_comme_telle(self):
+        """Témoin : c'est le cas de XLK aujourd'hui, et il ne doit pas
+        s'adoucir."""
+        import backtest
+        r = self._rapport({10: 0.5, 90: 1.2}, {10: 0.8, 90: 0.3})
+        self.assertFalse(r.agrees)
+        self.assertIn("LEAK DETECTED", backtest.etiquette_de_verdict(r))
+
+    def test_une_selection_saine_reste_publiee_comme_saine(self):
+        import backtest
+        r = self._rapport({10: 1.2, 90: 0.5}, {10: 1.1, 90: 0.4})
+        self.assertTrue(r.agrees)
+        self.assertIn("agrees", backtest.etiquette_de_verdict(r))
+
+    def test_un_symbole_sans_edge_n_est_range_ni_propre_ni_fuite(self):
+        """Ajouté après qu'une mutation soit restée verte : redéfinir
+        « propres » comme « pas une fuite » ne cassait aucun test, parce
+        qu'aucun symbole NO EDGE n'existe dans le rapport réel. Un test qui
+        ne peut pas rencontrer le cas ne le garde pas.
+
+        Ce qui est en jeu : « propres » sert à recouper les chiffres des
+        symboles que l'agent TRADE. Un symbole sans edge n'en est pas un.
+        L'y ranger, c'est vérifier ses plages et ses nombres de trades comme
+        s'il était retenu — et surtout, le faire disparaître du seul groupe
+        où quelqu'un le remarquerait."""
+        import garde_fou
+        garde_fou.alertes.clear()
+        vraie = garde_fou.RACINE
+        dossier = tempfile.mkdtemp(prefix="hindsight-noedge-")
+        try:
+            Path(dossier, "BACKTEST_RESULTS.md").write_text(
+                "## ZZZ (test)\n\n"
+                "| window (days) | trade days | freq | cum. proxy payoff | "
+                "win rate on trades | avg | maxdd |\n"
+                "| 10 | 50/400 | 12.5% | 0.01 | 44.0% | 0.0001 | -0.01 |\n\n"
+                "**hindsight_guard verdict for this symbol:** NO EDGE (nothing "
+                "clears the threshold on either window) — full-window winner: "
+                "10 days, in-sample winner: 10 days.\n", encoding="utf-8")
+            garde_fou.RACINE = dossier
+            lu = garde_fou._parse_backtest_results()
+            self.assertIsNotNone(lu, "le rapport n'est pas relu du tout")
+            self.assertIn("ZZZ", lu, "le symbole est perdu par le parseur")
+            self.assertEqual(lu["ZZZ"]["verdict"], "NO EDGE")
+            self.assertFalse(lu["ZZZ"]["leaked"],
+                             "« pas d'edge » est compté comme une fuite")
+
+            garde_fou.alertes.clear()
+            garde_fou.controle_source_de_verite()
+            dits = " ".join(m for _, m in garde_fou.alertes)
+            self.assertIn("ZZZ", dits,
+                          "un symbole ni propre ni fuite tombe entre les deux "
+                          "groupes sans que rien ne le dise : %s" % dits)
+        finally:
+            garde_fou.RACINE = vraie
+            shutil.rmtree(dossier, ignore_errors=True)
+            garde_fou.alertes.clear()
+
+    def test_le_parseur_du_garde_fou_ne_saute_plus_un_verdict_illisible(self):
+        """Le vrai correctif de cette série. Le parseur faisait
+        `if not verdict: continue` — un saut MUET. Si le libellé du rapport
+        change (ce qui vient d'arriver), le symbole disparaît de TOUS les
+        recoupements de livrables sans un mot, et le garde-fou reste vert.
+
+        C'est le motif que cette journée a poursuivi partout ailleurs, ici
+        dans le parseur qui garde les chiffres publiés."""
+        import garde_fou
+        garde_fou.alertes.clear()
+        try:
+            # Le parseur lit le fichier lui-même : on lui fabrique une racine.
+            vraie = garde_fou.RACINE
+            dossier = tempfile.mkdtemp(prefix="hindsight-verdict-")
+            Path(dossier, "BACKTEST_RESULTS.md").write_text(
+                "## SPY (test)\n\n"
+                "**hindsight_guard verdict for this symbol:** VERDICT INCONNU "
+                "— full-window winner: 10 days.\n", encoding="utf-8")
+            garde_fou.RACINE = dossier
+            try:
+                garde_fou._parse_backtest_results()
+            finally:
+                garde_fou.RACINE = vraie
+                shutil.rmtree(dossier, ignore_errors=True)
+            dits = " ".join(m for _, m in garde_fou.alertes)
+            self.assertTrue(garde_fou.alertes,
+                            "un verdict illisible est sauté en silence : le "
+                            "symbole sort de tous les recoupements sans trace")
+            self.assertIn("SPY", dits)
+        finally:
+            garde_fou.alertes.clear()
 
 class TestEntreesAttendues(unittest.TestCase):
     """Ajouté le 27/08, après un balayage systématique : j'ai retiré une à une

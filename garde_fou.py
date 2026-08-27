@@ -559,7 +559,12 @@ def _parse_backtest_results() -> dict | None:
         bloc = texte[debut:fin]
 
         verdict = re.search(
-            r"hindsight_guard verdict.*?:\*\*\s*(agrees|LEAK DETECTED).*?"
+            # ELARGI le 27/08 : le rapport ecrit desormais TROIS verdicts et
+            # non deux -- « NO EDGE » a ete separe de « LEAK DETECTED », parce
+            # qu'un symbole ou rien ne franchit le seuil sur aucune des deux
+            # fenetres n'a pas fui, il n'a simplement pas d'edge.
+            r"hindsight_guard verdict.*?:\*\*\s*"
+            r"(agrees|LEAK DETECTED|NO EDGE|CANNOT CONCLUDE).*?"
             r"full-window winner:\s*(\d+)\s*days"
             # AJOUTE le 27/08 : la fenetre IN-SAMPLE, jusque-la ignoree du
             # parseur alors que DEUX livrables la citent nommement.
@@ -567,6 +572,26 @@ def _parse_backtest_results() -> dict | None:
             bloc,
         )
         if not verdict:
+            # CORRIGE le 27/08 : c'etait un `continue` NU. Une section de
+            # symbole trouvee mais dont le verdict ne se lit pas sortait de
+            # TOUS les recoupements de livrables -- plages de concentration,
+            # nombres de trades, fenetres citees, statut de fuite -- sans une
+            # ligne. Le garde-fou restait vert en ayant cesse de verifier ce
+            # symbole.
+            #
+            # Le cas vient de se produire : elargir le rapport a trois
+            # verdicts a casse ce motif. Il a ete rattrape parce qu'un test le
+            # cherchait, pas parce que le script l'a dit.
+            #
+            # « Je n'ai pas compris » n'est pas « il n'y a rien » -- le meme
+            # argument que list_positions() tient dans alpaca_cli.py.
+            alerte("BACKTEST_RESULTS.md",
+                   "section %s trouvee, mais son verdict hindsight_guard est "
+                   "ILLISIBLE pour ce parseur. Ce symbole sort de TOUS les "
+                   "recoupements de livrables (plages, nombres de trades, "
+                   "fenetres citees, statut de fuite) : ni confirme, ni "
+                   "infirme. Verifier le libelle du verdict dans le rapport."
+                   % symbole)
             continue
         leaked = verdict.group(1) == "LEAK DETECTED"
         fenetre = int(verdict.group(2))
@@ -588,6 +613,12 @@ def _parse_backtest_results() -> dict | None:
 
         resultat[symbole] = {
             "leaked": leaked,
+            # Le verdict COMPLET, ajoute le 27/08 : `leaked` est desormais
+            # strictement « LEAK DETECTED », et il existe deux autres facons
+            # de ne pas etre « agrees ». Collapser les trois en un booleen
+            # est exactement la confusion corrigee dans hindsight_guard le
+            # meme jour.
+            "verdict": verdict.group(1),
             "fenetre": fenetre,
             "fenetre_in_sample": fenetre_in_sample,
             "trade_days": trade_days,
@@ -832,8 +863,24 @@ def controle_source_de_verite() -> None:
         alerte("BACKTEST_RESULTS.md", "introuvable ou illisible — contrôle 5 sans effet.")
         return
 
-    propres = {s: d for s, d in backtest.items() if not d["leaked"]}
+    # CORRIGE le 27/08. « propres » etait defini comme « pas une fuite », donc
+    # un symbole NO EDGE ou CANNOT CONCLUDE y serait tombe et aurait ete
+    # recoupe comme un symbole que l'agent trade. Il n'y a que « agrees » qui
+    # veuille dire ca.
+    propres = {s: d for s, d in backtest.items()
+               if d.get("verdict", "agrees") == "agrees"}
     fuites = {s: d for s, d in backtest.items() if d["leaked"]}
+
+    # Et le troisieme groupe, qui n'existait pas : ni propre, ni fuite. Le
+    # nommer plutot que de le laisser tomber entre les deux -- c'est le motif
+    # que cette journee a poursuivi partout ailleurs.
+    for symbole, d in sorted(backtest.items()):
+        if symbole not in propres and symbole not in fuites:
+            alerte("BACKTEST_RESULTS.md",
+                   "%s porte le verdict « %s » : ni « agrees » ni « LEAK "
+                   "DETECTED ». Il est donc exclu des DEUX groupes de "
+                   "recoupement -- ses chiffres ne sont ni confirmes ni "
+                   "infirmes ici." % (symbole, d.get("verdict", "?")))
     if not propres:
         alerte("BACKTEST_RESULTS.md", "aucun symbole propre trouvé — contrôle 5 sans effet.")
         return

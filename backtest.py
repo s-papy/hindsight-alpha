@@ -84,6 +84,33 @@ def buy_and_hold_return(bars: List[Bar]) -> float:
     return (bars[-1].close - bars[0].close) / bars[0].close
 
 
+def etiquette_de_verdict(report) -> str:
+    """Le verdict d'un symbole, en TROIS etats et non deux.
+
+    AJOUTE le 27/08/2026. Cette ligne s'ecrivait
+    `'agrees (no leak)' if agrees else 'LEAK DETECTED'` -- un binaire. Or
+    `agrees` est faux dans TROIS cas, et le troisieme n'a rien d'une fuite :
+    quand aucun candidat ne franchit le seuil NI en in-sample NI sur la
+    fenetre pleine, il n'y a pas de fuite, il n'y a pas d'edge.
+
+    Verifie sur les rapports actuels, et ils sont justes : la seule fuite
+    revendiquee est XLK, gagnant plein 90 j contre in-sample 10 j, Sharpe
+    in-sample POSITIF (0.789). Vrai desaccord de gagnants. Rien n'est
+    surevalue aujourd'hui.
+
+    Mais ces rapports sont REGENERES pendant la semaine du hackathon, sur des
+    donnees que personne n'a encore vues. Un symbole qui bascule dans le
+    troisieme cas annoncerait une fuite qui n'en est pas -- dans un dossier
+    dont tout l'argument est de ne pas exagerer ses prises."""
+    if report.agrees:
+        return "agrees (no leak)"
+    if getattr(report, "unscorable", None):
+        return "CANNOT CONCLUDE (a candidate could not be scored)"
+    if not report.in_sample_clears_bar and not report._plein_franchit_le_seuil():
+        return "NO EDGE (nothing clears the threshold on either window)"
+    return "LEAK DETECTED"
+
+
 def backtest_symbol(symbol: str, bars: List[Bar]) -> dict:
     result: dict = {"symbol": symbol, "bars_used": len(bars), "windows": {}}
 
@@ -121,6 +148,10 @@ def backtest_symbol(symbol: str, bars: List[Bar]) -> dict:
     report = hindsight_guard.check_selection_leakage(CANDIDATE_HV_WINDOWS, score_fn, threshold=0.0)
     result["hindsight_guard_verdict"] = {
         "agrees": report.agrees,
+        # Le verdict LISIBLE, calcule une fois ici plutot que reconstruit a
+        # l'ecriture : c'est cette chaine que garde_fou relit, et deux
+        # constructions independantes finissent par diverger.
+        "verdict": etiquette_de_verdict(report),
         "full_winner": report.full_winner,
         "in_sample_winner": report.in_sample_winner,
         "summary": report.summary(),
@@ -176,7 +207,7 @@ def format_report(results: List[dict]) -> str:
                 "would bite hardest on exactly what remains after those days are removed."
             )
         lines.append("")
-        lines.append(f"**hindsight_guard verdict for this symbol:** {'agrees (no leak)' if r['hindsight_guard_verdict']['agrees'] else 'LEAK DETECTED'} — full-window winner: {r['hindsight_guard_verdict']['full_winner']} days, in-sample winner: {r['hindsight_guard_verdict']['in_sample_winner']} days.")
+        lines.append(f"**hindsight_guard verdict for this symbol:** {r['hindsight_guard_verdict']['verdict']} — full-window winner: {r['hindsight_guard_verdict']['full_winner']} days, in-sample winner: {r['hindsight_guard_verdict']['in_sample_winner']} days.")
         lines.append("")
     return "\n".join(lines)
 
