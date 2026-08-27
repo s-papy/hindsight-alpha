@@ -15,6 +15,7 @@ import io
 import contextlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -378,6 +379,82 @@ class TestAgentsPlanifies(unittest.TestCase):
                 self.assertTrue(
                     "<key>WorkingDirectory</key>" in contenu,
                     "%s lance un script du dépôt sans fixer WorkingDirectory" % f.name)
+
+
+class TestGardeFouMordVraiment(unittest.TestCase):
+    """garde_fou.py est lancé par le hook de commit ET par la CI. CLAUDE.md le
+    présente comme LE mécanisme qui garantit le paper-trading. Ce test vérifie
+    qu'il attrape vraiment ce qu'il annonce, en cassant le dossier pour de bon.
+
+    Trouvé le 27/08 : son contrôle « garde live-trading » cherchait deux
+    CHAÎNES dans config.py — « ALPACA_LIVE_TRADE » quelque part, et
+    « sys.exit( » quelque part. Mesuré par mutation :
+
+      - bloc `if not PAPER: sys.exit(...)` entièrement supprimé -> code 0
+      - `env.pop("ALPACA_LIVE_TRADE", None)` supprimé de cli_env() -> code 0
+
+    La seconde est la protection RÉELLE (le CLI ne peut pas voir une variable
+    absente). Le contrôle n'attrapait ni l'une ni l'autre. Un contrôle qui
+    n'attrape pas ce qu'il annonce est pire qu'un contrôle absent : il rassure.
+
+    C'est la discipline appliquée partout ailleurs dans ce dépôt — un contrôle
+    qui reste vert quand on retire la protection ne prouve rien — appliquée au
+    contrôle lui-même.
+    """
+
+    RACINE = Path(__file__).resolve().parent
+    MSG_REFUS = "ne refuse PAS de"
+    MSG_FUITE = "laisse ALPACA_LIVE_TRADE atteindre le CLI"
+
+    def _dossier(self):
+        d = Path(tempfile.mkdtemp(prefix="hindsight-gardefou-"))
+        for nom in ("config.py", "garde_fou.py"):
+            shutil.copy(self.RACINE / nom, d / nom)
+        return d
+
+    def _verdict(self, dossier):
+        proc = subprocess.run(
+            [sys.executable, "garde_fou.py"], cwd=str(dossier),
+            capture_output=True, text=True, timeout=120)
+        return proc.stdout + proc.stderr
+
+    def _muter(self, dossier, motif, remplacement, etiquette):
+        """Applique la mutation ET vérifie qu'elle a bien atterri — une
+        mutation qui n'a pas pris rend un « le contrôle mord » gratuit."""
+        chemin = dossier / "config.py"
+        avant = chemin.read_text(encoding="utf-8")
+        apres = re.sub(motif, remplacement, avant, flags=re.M)
+        self.assertNotEqual(
+            avant, apres,
+            "la mutation %r n'a rien changé : config.py a changé de forme et ce "
+            "test ne vérifie plus rien." % etiquette)
+        chemin.write_text(apres, encoding="utf-8")
+
+    def test_un_dossier_sain_ne_declenche_pas_ce_controle(self):
+        """Contrôle : sans lui, un contrôle qui crie TOUJOURS passerait les
+        deux tests ci-dessous."""
+        sortie = self._verdict(self._dossier())
+        self.assertNotIn(self.MSG_REFUS, sortie)
+        self.assertNotIn(self.MSG_FUITE, sortie)
+        self.assertNotIn("n'a PAS pu être vérifié", sortie,
+                         "la sonde de comportement n'a pas pu tourner : le "
+                         "contrôle retombe sur ses vérifications textuelles")
+
+    def test_supprimer_le_refus_de_demarrer_est_attrape(self):
+        d = self._dossier()
+        self._muter(d, r"^    if not PAPER:\n(?:        .*\n|\n)*?(?=\n{0,2}(?:def |\Z))",
+                    "\n", "retrait du refus paper/live")
+        self.assertIn(self.MSG_REFUS, self._verdict(d),
+                      "le refus de démarrer a été supprimé et garde_fou.py n'a "
+                      "rien dit")
+
+    def test_supprimer_la_protection_reelle_est_attrape(self):
+        d = self._dossier()
+        self._muter(d, r'^\s*env\.pop\("ALPACA_LIVE_TRADE".*\)\n', "",
+                    "retrait du env.pop dans cli_env")
+        self.assertIn(self.MSG_FUITE, self._verdict(d),
+                      "cli_env() laisse passer ALPACA_LIVE_TRADE au CLI et "
+                      "garde_fou.py n'a rien dit")
 
 
 if __name__ == "__main__":

@@ -267,6 +267,79 @@ def controle_garde_live_trading() -> None:
             "le refus pourrait n'être plus qu'un avertissement.",
         )
 
+    # ══ RENFORCÉ le 27/08/2026 — ce contrôle ne mordait PAS ═══════════════════
+    #
+    # Les deux vérifications ci-dessus cherchent des CHAÎNES DE CARACTÈRES :
+    # « ALPACA_LIVE_TRADE » quelque part dans le fichier, et « sys.exit( »
+    # quelque part dans le fichier. Mesuré ce jour-là, par mutation d'une copie
+    # du dépôt :
+    #
+    #   - bloc `if not PAPER: sys.exit(...)` entièrement supprimé
+    #       -> garde_fou.py : code de sortie 0, « rien de bloquant »
+    #          (le sys.exit( du contrôle d'identifiants suffisait)
+    #   - `env.pop("ALPACA_LIVE_TRADE", None)` supprimé de cli_env()
+    #       -> garde_fou.py : code de sortie 0
+    #
+    # La seconde est la PROTECTION RÉELLE : le CLI ne peut pas voir une variable
+    # absente de son environnement, quelle que soit sa graphie. Le refus de
+    # démarrer n'est que le diagnostic. Ce contrôle ne vérifiait donc ni l'une
+    # ni l'autre — il vérifiait que deux mots figuraient dans un fichier.
+    #
+    # La suite de tests, elle, attrapait les deux (15 et 6 échecs). Ce n'est pas
+    # une raison de laisser ici un contrôle décoratif : c'est CE script que le
+    # hook de commit et la CI lancent sous le nom « garde live-trading », et
+    # CLAUDE.md le présente comme le mécanisme. Un contrôle qui n'attrape pas ce
+    # qu'il annonce est pire qu'un contrôle absent — il rassure.
+    #
+    # On vérifie donc le COMPORTEMENT, dans un sous-processus, sans réseau :
+    # des identifiants factices sont injectés parce que require_credentials()
+    # sort sur des clés manquantes AVANT d'atteindre le test paper/live — en CI
+    # il n'y a pas de .env, et sans cette injection le contrôle passerait pour
+    # la mauvaise raison.
+    env_test = {
+        "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+        "HOME": os.environ.get("HOME", RACINE),
+        "ALPACA_API_KEY": "cle-factice-garde-fou",
+        "ALPACA_SECRET_KEY": "secret-factice-garde-fou",
+        "ALPACA_LIVE_TRADE": "true",
+    }
+
+    def _sonde(code: str):
+        return subprocess.run(
+            [sys.executable, "-c", code],
+            cwd=RACINE, env=env_test, capture_output=True, text=True, timeout=30,
+        )
+
+    try:
+        refus = _sonde("import config; config.require_credentials(); print('AUCUN REFUS')")
+        fuite = _sonde(
+            "import config; print('PRESENT' if 'ALPACA_LIVE_TRADE' in config.cli_env() "
+            "else 'ABSENT')"
+        )
+    except Exception as exc:
+        # Ne pas conclure « tout va bien » parce que la sonde n'a pas pu tourner.
+        alerte(
+            "config.py",
+            "le refus live-trading n'a PAS pu être vérifié par comportement (%s: %s) — "
+            "seules les vérifications textuelles, beaucoup plus faibles, ont tourné."
+            % (type(exc).__name__, exc),
+        )
+        return
+
+    if refus.returncode == 0 or "AUCUN REFUS" in refus.stdout:
+        bloque(
+            "config.py",
+            "avec ALPACA_LIVE_TRADE=true, require_credentials() ne refuse PAS de "
+            "démarrer — le garde paper-uniquement est tombé.",
+        )
+    if "ABSENT" not in fuite.stdout:
+        bloque(
+            "config.py",
+            "cli_env() laisse ALPACA_LIVE_TRADE atteindre le CLI Alpaca "
+            "(sortie: %r) — c'est la protection RÉELLE du paper-uniquement, pas "
+            "le message de refus." % (fuite.stdout.strip() or fuite.stderr.strip()[:120]),
+        )
+
 
 # ── CONTRÔLE 4 : LES CHIFFRES SANS SOURCE MÉCANIQUE POSSIBLE ───────────────
 # Née de la même soirée du 25/08 que le contrôle 5 ci-dessous, mais pour la
