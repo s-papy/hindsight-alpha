@@ -1694,6 +1694,75 @@ class TestQualiteDesBarres(unittest.TestCase):
                          "qualité : le contrôle ne s'appliquerait jamais")
 
 
+class TestBarresDuBonSymbole(unittest.TestCase):
+    """Ajouté le 27/08. _extract_bars() gère deux formes de réponse connues :
+    {"bars": [...]} et {"bars": {"SYMBOLE": [...]}}. Dans le second cas elle
+    prenait la PREMIÈRE valeur du dictionnaire, sans jamais regarder la clé.
+
+    Reproduit : une réponse portant la clé « GLD » pour une demande « SPY »
+    rendait 700 barres d'or, sans erreur ni avertissement. SPY aurait été
+    évalué, noté par hindsight_guard et tradé sur des prix d'or — et rien,
+    nulle part, n'aurait pu le signaler. Le garde de fuite tourne parfaitement
+    sur des données qui ne sont pas les bonnes.
+
+    ATTEIGNABILITÉ NON DÉMONTRÉE : l'appel passe --symbol, donc une API qui se
+    comporte bien ne peut renvoyer que ce symbole. Mais ce fichier documente
+    DÉJÀ deux surprises de nommage de ce CLI en « Alpha Preview » (--symbols
+    au pluriel pour les snapshots d'options, --symbol-or-asset-id pour la
+    clôture), et une réponse multi-symboles rendrait ici un symbole arbitraire
+    selon l'ordre du dictionnaire.
+
+    Le coût du contrôle est d'une ligne ; celui de son absence est de trader
+    le mauvais instrument. C'est l'asymétrie autour de laquelle tout ce
+    projet est construit."""
+
+    @staticmethod
+    def _barres(depart, n=700):
+        from datetime import datetime, timedelta, timezone
+        maintenant = datetime.now(timezone.utc)
+        return [{"t": (maintenant - timedelta(days=n - i)).isoformat(),
+                 "c": depart + i * 0.01} for i in range(n)]
+
+    def _demander(self, reponse, symbole="SPY"):
+        from unittest import mock
+        with mock.patch.object(alpaca_cli, "run", lambda a: reponse):
+            return alpaca_cli.get_daily_bars(symbole, lookback_days=600)
+
+    def test_une_reponse_portant_un_autre_symbole_est_refusee(self):
+        with self.assertRaises(alpaca_cli.AlpacaCLIError) as e:
+            self._demander({"bars": {"GLD": self._barres(300.0)}}, "SPY")
+        message = str(e.exception)
+        self.assertIn("SPY", message, "le symbole demandé n'est pas nommé")
+        self.assertIn("GLD", message, "le symbole reçu n'est pas nommé")
+
+    def test_une_reponse_multi_symboles_ne_prend_pas_le_premier_venu(self):
+        """Le cas le plus insidieux : le bon symbole EST là, mais pas en
+        premier. Prendre `next(iter(...))` rendait de l'or."""
+        reponse = {"bars": {"GLD": self._barres(300.0),
+                            "SPY": self._barres(760.0)}}
+        barres = self._demander(reponse, "SPY")
+        self.assertAlmostEqual(barres[0].close, 760.0, places=2,
+                               msg="les barres d'un autre symbole ont été "
+                                   "retenues alors que SPY était présent")
+
+    def test_la_forme_a_un_seul_symbole_reste_acceptee(self):
+        """Témoin n°1 : la forme {"bars": {"SPY": [...]}}, la plus courante."""
+        barres = self._demander({"bars": {"SPY": self._barres(760.0)}}, "SPY")
+        self.assertAlmostEqual(barres[0].close, 760.0, places=2)
+
+    def test_la_forme_sans_dictionnaire_reste_acceptee(self):
+        """Témoin n°2 : {"bars": [...]} n'a pas de clé de symbole à vérifier.
+        Exiger une clé partout casserait la forme mono-symbole de l'API."""
+        barres = self._demander({"bars": self._barres(760.0)}, "SPY")
+        self.assertAlmostEqual(barres[0].close, 760.0, places=2)
+
+    def test_la_casse_du_symbole_n_est_pas_un_motif_de_refus(self):
+        """Un refus sur « spy » vs « SPY » serait un faux positif, et un
+        contrôle qui crie sur du normal s'apprend à ignorer."""
+        barres = self._demander({"bars": {"spy": self._barres(760.0)}}, "SPY")
+        self.assertAlmostEqual(barres[0].close, 760.0, places=2)
+
+
 class TestChoixDuContrat(unittest.TestCase):
     """find_near_the_money_contract choisissait le strike délibérément et
     l'échéance pas du tout.

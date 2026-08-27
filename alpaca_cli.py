@@ -361,12 +361,52 @@ def get_option_ask_price(option_symbol: str) -> Optional[float]:
     return None
 
 
-def _extract_bars(data: Any) -> List[dict]:
+def _extract_bars(data: Any, expected_symbol: Optional[str] = None) -> List[dict]:
     """Handle both known REST shapes: {"bars": [...]} (single-symbol) and
-    {"bars": {"SYMBOL": [...]}} (multi-symbol)."""
+    {"bars": {"SYMBOL": [...]}} (multi-symbol).
+
+    CORRIGE le 27/08/2026. Sur la forme a dictionnaire, cette fonction prenait
+    la PREMIERE valeur -- `next(iter(bars_field.values()), [])` -- sans jamais
+    regarder la cle. Reproduit : une reponse portant « GLD » pour une demande
+    « SPY » rendait 700 barres d'or, sans erreur ni avertissement.
+
+    La consequence est la pire de ce depot : SPY aurait ete evalue, note par
+    hindsight_guard et trade sur des prix d'or, et RIEN n'aurait pu le
+    signaler. Le garde de fuite tourne parfaitement sur des donnees qui ne
+    sont pas les bonnes -- il verifie la methode, jamais l'identite de ce
+    qu'on lui donne.
+
+    ATTEIGNABILITE NON DEMONTREE : l'appel passe --symbol, donc une API qui se
+    comporte bien ne peut renvoyer que ce symbole-la. Mais ce fichier
+    documente DEJA deux surprises de nommage de ce CLI en « Alpha Preview »
+    (--symbols au pluriel pour les snapshots d'options, --symbol-or-asset-id
+    pour la cloture), et une reponse multi-symboles rendait ici un symbole
+    ARBITRAIRE, decide par l'ordre du dictionnaire. Le cout du controle est
+    d'une ligne ; celui de son absence est de trader le mauvais instrument.
+
+    La comparaison ignore la casse : refuser « spy » face a « SPY » serait un
+    faux positif, et un controle qui crie sur du normal s'apprend a ignorer.
+    La forme SANS dictionnaire n'a aucune cle a verifier et reste acceptee
+    telle quelle -- exiger une cle partout casserait la forme mono-symbole."""
     bars_field = data.get("bars") if isinstance(data, dict) else data
     if isinstance(bars_field, dict):
-        bars_field = next(iter(bars_field.values()), [])
+        if expected_symbol is not None:
+            correspond = {str(k).upper(): v for k, v in bars_field.items()}
+            attendu = str(expected_symbol).upper()
+            if attendu not in correspond:
+                raise AlpacaCLIError(
+                    "bars response is keyed by symbol but does not contain the "
+                    "one that was requested: asked for %r, got %s. Refusing to "
+                    "trade %s on another instrument's prices -- every check "
+                    "downstream (including hindsight_guard) would run happily "
+                    "on the wrong data."
+                    % (expected_symbol,
+                       ", ".join(repr(k) for k in sorted(bars_field)) or "(none)",
+                       expected_symbol)
+                )
+            bars_field = correspond[attendu]
+        else:
+            bars_field = next(iter(bars_field.values()), [])
     if not isinstance(bars_field, list):
         raise AlpacaCLIError(f"unexpected bars response shape: {type(bars_field)}")
     return bars_field
@@ -482,7 +522,7 @@ def get_daily_bars(symbol: str, lookback_days: int = MIN_TRADING_DAYS_FOR_SWEEP)
     start = (datetime.now(timezone.utc)
              - timedelta(days=int(lookback_days * 1.6) + 10)).strftime("%Y-%m-%d")
     data = run(["data", "bars", "--symbol", symbol, "--start", start, "--timeframe", "1Day"])
-    rows = _extract_bars(data)
+    rows = _extract_bars(data, expected_symbol=symbol)
     _check_bar_quality(symbol, rows, minimum_usable=lookback_days)
     bars = []
     for row in rows:
