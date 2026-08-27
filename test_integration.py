@@ -925,5 +925,89 @@ class TestVerrouDitHebdomadaire(unittest.TestCase):
                          "le README a perdu la nuance « no week-boundary reset »")
 
 
+class TestFenetresCitees(unittest.TestCase):
+    """Deux livrables citent NOMMÉMENT les deux fenêtres du verdict de fuite :
+
+        Writeup : « XLK currently fails hindsight_guard (full-window winner
+                    90d, in-sample winner 10d disagree) »
+        Deck    : « XLK's full-history winner (90d) disagrees with its
+                    in-sample winner (10d) »
+
+    Vérifié à la main : les deux disent VRAI aujourd'hui. Mais ces nombres
+    n'étaient reliés à rien — régénérer le backtest et voir XLK basculer sur
+    d'autres fenêtres rendrait les deux faux, en silence, sur la phrase même
+    qui illustre la revendication centrale du projet.
+    """
+
+    RACINE = Path(__file__).resolve().parent
+
+    def _sortie(self, mutation=None):
+        d = Path(tempfile.mkdtemp(prefix="hindsight-fenetres-"))
+        try:
+            for nom in ("garde_fou.py", "README.md", "BACKTEST_RESULTS.md",
+                        "STRATEGY_COMPARISON.md", "agent.py", "risk_gates.py",
+                        "vol_strategy.py", "monitor_exits.py"):
+                src = self.RACINE / nom
+                if not src.exists():
+                    self.skipTest("%s absent" % nom)
+                shutil.copy(src, d / nom)
+            for sous in ("Video_Script.md", "Hindsight_Alpha_Writeup.docx",
+                         "Hindsight_Alpha_Deck.pptx"):
+                src = self.RACINE / "submission" / sous
+                if src.exists():
+                    (d / "submission").mkdir(exist_ok=True)
+                    shutil.copy(src, d / "submission" / sous)
+            if mutation:
+                chemin = d / "BACKTEST_RESULTS.md"
+                avant = chemin.read_text(encoding="utf-8")
+                ancien, nouveau = mutation
+                self.assertEqual(avant.count(ancien), 1,
+                                 "la ligne de verdict a changé de forme : ce "
+                                 "test ne vérifie plus rien")
+                chemin.write_text(avant.replace(ancien, nouveau), encoding="utf-8")
+            proc = subprocess.run([sys.executable, "garde_fou.py"], cwd=str(d),
+                                  capture_output=True, text=True, timeout=120)
+            return proc.stdout + proc.stderr
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
+    VERDICT_XLK = ("LEAK DETECTED — full-window winner: 90 days, "
+                   "in-sample winner: 10 days.")
+
+    def test_le_depot_sain_ne_declenche_rien(self):
+        """LE contrôle qui compte ici : la première version de ce croisement
+        cherchait les fenêtres dans les 200 caractères SUIVANT chaque symbole,
+        et attribuait le « 90d » de XLK à XLV — parce que le writeup liste
+        « SPY, GLD, XLK, XLV » deux phrases plus haut. C'est le piège de
+        proximité que ce fichier décrit ailleurs, et j'y suis tombé."""
+        self.assertNotIn("FENETRE", self._sortie(),
+                         "faux positif : une fenêtre est attribuée au mauvais "
+                         "symbole")
+
+    def test_une_fenetre_pleine_qui_derive_est_attrapee(self):
+        sortie = self._sortie((self.VERDICT_XLK,
+                               "LEAK DETECTED — full-window winner: 60 days, "
+                               "in-sample winner: 10 days."))
+        self.assertIn("FENETRE PLEINE", sortie)
+        self.assertIn("XLK", sortie)
+
+    def test_une_fenetre_in_sample_qui_derive_est_attrapee(self):
+        sortie = self._sortie((self.VERDICT_XLK,
+                               "LEAK DETECTED — full-window winner: 90 days, "
+                               "in-sample winner: 30 days."))
+        self.assertIn("FENETRE IN-SAMPLE", sortie)
+
+    def test_les_deux_livrables_concernes_sont_nommes(self):
+        """Le write-up ET le deck citent ces nombres. En signaler un seul
+        laisserait l'autre faux."""
+        sortie = self._sortie((self.VERDICT_XLK,
+                               "LEAK DETECTED — full-window winner: 60 days, "
+                               "in-sample winner: 30 days."))
+        for attendu in ("Writeup", "Deck"):
+            if (self.RACINE / "submission").glob("*%s*" % attendu):
+                self.assertIn(attendu, sortie,
+                              "%s cite ces fenêtres et n'est pas signalé" % attendu)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

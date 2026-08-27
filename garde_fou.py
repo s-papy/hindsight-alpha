@@ -560,13 +560,17 @@ def _parse_backtest_results() -> dict | None:
 
         verdict = re.search(
             r"hindsight_guard verdict.*?:\*\*\s*(agrees|LEAK DETECTED).*?"
-            r"full-window winner:\s*(\d+)\s*days",
+            r"full-window winner:\s*(\d+)\s*days"
+            # AJOUTE le 27/08 : la fenetre IN-SAMPLE, jusque-la ignoree du
+            # parseur alors que DEUX livrables la citent nommement.
+            r"(?:,\s*in-sample winner:\s*(\d+)\s*days)?",
             bloc,
         )
         if not verdict:
             continue
         leaked = verdict.group(1) == "LEAK DETECTED"
         fenetre = int(verdict.group(2))
+        fenetre_in_sample = int(verdict.group(3)) if verdict.group(3) else None
 
         ligne = re.search(
             r"\|\s*" + str(fenetre) + r"\s*\|\s*(\d+)/\d+\s*\|[^|]*\|[^|]*\|\s*([\d.]+)%\s*\|",
@@ -585,6 +589,7 @@ def _parse_backtest_results() -> dict | None:
         resultat[symbole] = {
             "leaked": leaked,
             "fenetre": fenetre,
+            "fenetre_in_sample": fenetre_in_sample,
             "trade_days": trade_days,
             "win_rate": win_rate,
             "concentration": concentration,
@@ -949,6 +954,74 @@ def controle_source_de_verite() -> None:
                     "NOMBRE DE TRADES « %s » ne correspond pas à BACKTEST_RESULTS.md "
                     "(devrait être %d–%d, calculé à l'instant)."
                     % (m.group(0).strip(), plage_trades[0], plage_trades[1]),
+                )
+
+        # AJOUTE le 27/08/2026. Deux livrables citent NOMMEMENT les deux
+        # fenetres du verdict de fuite :
+        #
+        #   Writeup : « XLK currently fails hindsight_guard (full-window winner
+        #              90d, in-sample winner 10d disagree) »
+        #   Deck    : « XLK's full-history winner (90d) disagrees with its
+        #              in-sample winner (10d) »
+        #
+        # Verifie a la main le 27/08 : les deux disent VRAI aujourd'hui (la
+        # source donne bien 90 et 10). Mais ces nombres n'etaient relies a rien.
+        # Regenerer le backtest et voir XLK basculer sur d'autres fenetres
+        # rendrait les deux livrables faux, en silence -- sur la phrase meme qui
+        # illustre la revendication centrale du projet.
+        #
+        # On cherche chaque symbole connu, puis les deux fenetres dans les 200
+        # caracteres qui suivent. Les deux formes reelles sont couvertes : le
+        # nombre colle au libelle (« winner 90d ») ou entre parentheses
+        # (« winner (90d) »).
+        # RESSERRE aussitot ecrit : la premiere version cherchait chaque
+        # symbole puis les fenetres dans les 200 caracteres SUIVANTS. Elle a
+        # produit un FAUX POSITIF sur le depot sain -- « FENETRE PLEINE 90d
+        # citee pour XLV » -- parce que le writeup liste l'univers
+        # « SPY, GLD, XLK, XLV » puis parle de XLK deux phrases plus loin. Le
+        # 90d de XLK etait attribue a XLV.
+        #
+        # C'est exactement le piege de proximite que les commentaires de ce
+        # fichier decrivent ailleurs, et j'y suis tombe. Le bon critere n'est
+        # pas « un symbole dans les parages » mais LE SYMBOLE LE PLUS PROCHE
+        # AVANT la phrase : c'est celui dont on parle.
+        def _symbole_le_plus_proche_avant(position: int) -> str | None:
+            avant = texte[max(0, position - 120):position]
+            candidats = [
+                (sm.start(), sym)
+                for sym in backtest
+                for sm in re.finditer(r"\b%s\b" % re.escape(sym), avant)
+            ]
+            return max(candidats)[1] if candidats else None
+
+        for m_full in re.finditer(
+                r"full[- ](?:window|history)\s+winner\s*\(?\s*(\d+)\s*d",
+                texte, re.I):
+            symbole = _symbole_le_plus_proche_avant(m_full.start())
+            if symbole is None:
+                continue
+            attendu = backtest[symbole]
+            if int(m_full.group(1)) != attendu["fenetre"]:
+                bloque(
+                    rel,
+                    "FENETRE PLEINE « %sd » citee pour %s, alors que "
+                    "BACKTEST_RESULTS.md donne %dd."
+                    % (m_full.group(1), symbole, attendu["fenetre"]),
+                )
+
+        for m_in in re.finditer(
+                r"in-sample\s+winner\s*\(?\s*(\d+)\s*d", texte, re.I):
+            symbole = _symbole_le_plus_proche_avant(m_in.start())
+            if symbole is None:
+                continue
+            attendu = backtest[symbole]
+            if (attendu.get("fenetre_in_sample") is not None
+                    and int(m_in.group(1)) != attendu["fenetre_in_sample"]):
+                bloque(
+                    rel,
+                    "FENETRE IN-SAMPLE « %sd » citee pour %s, alors que "
+                    "BACKTEST_RESULTS.md donne %dd."
+                    % (m_in.group(1), symbole, attendu["fenetre_in_sample"]),
                 )
 
         for m in LEAK_COUNT.finditer(texte):
