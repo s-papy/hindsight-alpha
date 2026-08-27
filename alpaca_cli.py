@@ -458,6 +458,44 @@ def _check_bar_quality(symbol: str, rows: List[dict], minimum_usable: Optional[i
     if not rows:
         raise DataQualityError(f"{symbol}: no bars returned at all")
 
+    # AJOUTE le 27/08/2026. RIEN ne verifiait que les barres arrivent dans
+    # l'ordre chronologique, alors que TOUT en depend : daily_returns() fait
+    # closes[i] - closes[i-1], et surtout score_hv_window() decoupe
+    # `bars[:len - IN_SAMPLE_HOLDOUT_DAYS]` en appelant ca « tout sauf les 20
+    # derniers jours » -- ce qui n'est vrai que si la liste est triee.
+    #
+    # Autrement dit, la correction du test de FUITE, qui est la these entiere
+    # de ce projet, reposait sur une hypothese jamais verifiee.
+    #
+    # Mesure avant ce controle :
+    #     ordre chronologique          -> accepte  (juste)
+    #     ordre INVERSE                -> refuse, mais « feed may be frozen » :
+    #                                     diagnostic FAUX, le flux n'est pas
+    #                                     gele, il est a l'envers
+    #     deux barres permutees        -> ACCEPTE
+    #     les deux DERNIERES permutees -> ACCEPTE  <- la frontiere du holdout
+    #
+    # Le desordre partiel passait donc tout, en silence. Les horodatages
+    # illisibles sont ignores ici, pas refuses : le controle de fraicheur
+    # juste en dessous fait deja ce choix et le documente.
+    precedent = None
+    for i, ligne in enumerate(rows):
+        brut = ligne.get("t")
+        if not brut:
+            continue
+        try:
+            ts = datetime.fromisoformat(str(brut).replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if precedent is not None and ts < precedent[1]:
+            raise DataQualityError(
+                "%s: bars are not in chronological order -- row %d (%s) is "
+                "OLDER than row %d (%s). Every return, every volatility window "
+                "and the in-sample/full split of the leak check assume this "
+                "list is sorted oldest-first; refusing to compute on it."
+                % (symbol, i, brut, precedent[0], precedent[2]))
+        precedent = (i, ts, brut)
+
     last_ts_raw = rows[-1].get("t")
     if last_ts_raw:
         try:

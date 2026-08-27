@@ -2259,6 +2259,51 @@ class TestQualiteDesBarresFaceAuNaN(unittest.TestCase):
                                 "%s : une clôture non finie est entrée dans la "
                                 "série de prix" % cas)
 
+    def test_les_barres_hors_ordre_sont_refusees(self):
+        """RIEN ne vérifiait l'ordre chronologique, alors que TOUT en dépend.
+
+        daily_returns() fait closes[i] − closes[i−1], et surtout
+        score_hv_window() découpe `bars[:len − IN_SAMPLE_HOLDOUT_DAYS]` en
+        appelant ça « tout sauf les 20 derniers jours » — ce qui n'est vrai
+        que si la liste est triée. La correction du test de FUITE, c'est-à-dire
+        la thèse entière du projet, reposait sur une hypothèse jamais vérifiée.
+
+        Mesuré avant ce contrôle :
+
+            ordre inversé                -> refusé, mais « feed may be frozen » :
+                                            diagnostic FAUX, il n'est pas gelé
+            deux barres permutées        -> ACCEPTÉ
+            les deux DERNIÈRES permutées -> ACCEPTÉ  <- la frontière du holdout
+        """
+        base = self._lignes(lambda i: 100.0 + i * 0.01)
+        cas = [("ordre inversé", list(reversed(base)))]
+        for i, etiquette in ((300, "deux barres permutées au milieu"),
+                             (698, "les deux dernières permutées")):
+            r = list(base)
+            r[i], r[i + 1] = r[i + 1], r[i]
+            cas.append((etiquette, r))
+        for etiquette, r in cas:
+            with self.subTest(cas=etiquette):
+                with self.assertRaises(alpaca_cli.DataQualityError) as e:
+                    alpaca_cli._check_bar_quality("SPY", r, minimum_usable=600)
+                self.assertIn("chronological", str(e.exception),
+                              "%s : refusé, mais pour une autre raison — %s"
+                              % (etiquette, str(e.exception)[:70]))
+
+    def test_l_ordre_tolere_ce_qui_doit_l_etre(self):
+        """Témoins. Un horodatage absent est déjà ignoré par le contrôle de
+        fraîcheur, qui documente ce choix ; deux barres au même horodatage ne
+        sont pas un DÉSORDRE. Refuser l'un ou l'autre serait crier sur du
+        normal."""
+        base = self._lignes(lambda i: 100.0 + i * 0.01)
+        sans_ts = list(base); sans_ts[300] = dict(sans_ts[300]); sans_ts[300].pop("t")
+        egaux = list(base); egaux[300] = dict(egaux[300]); egaux[300]["t"] = egaux[301]["t"]
+        for etiquette, r in (("horodatage manquant", sans_ts),
+                             ("horodatages égaux", egaux),
+                             ("ordre normal", base)):
+            with self.subTest(cas=etiquette):
+                alpaca_cli._check_bar_quality("SPY", r, minimum_usable=600)
+
     def test_les_controles_existants_ne_regressent_pas(self):
         """Témoins : la porte doit toujours attraper ce qu'elle attrapait."""
         with self.assertRaises(alpaca_cli.DataQualityError):
