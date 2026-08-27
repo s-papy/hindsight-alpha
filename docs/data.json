@@ -1,41 +1,45 @@
 {
-  "generated_at": "2026-08-26T19:30:02.330876+00:00",
+  "generated_at": "2026-08-27T17:00:06.272738+00:00",
   "team": "Hindsight Alpha",
   "account": {
     "account_number": "PA3I2OIKF5F4",
     "status": "ACTIVE",
-    "equity": "99497.71",
-    "cash": "98937.71",
-    "buying_power": "395750.84",
-    "portfolio_value": "99497.71"
+    "equity": "99305.66",
+    "cash": "99305.66",
+    "buying_power": "397222.64",
+    "portfolio_value": "99305.66"
   },
-  "positions": [
-    {
-      "asset_class": "us_option",
-      "asset_id": "27880012-6dfa-4396-8901-ca54ac7b0240",
-      "asset_marginable": true,
-      "avg_entry_price": "4.69",
-      "change_today": "-0.19308",
-      "cost_basis": "938",
-      "current_price": "2.8",
-      "exchange": "",
-      "lastday_price": "3.47",
-      "market_value": "560",
-      "qty": "2",
-      "qty_available": "2",
-      "side": "long",
-      "symbol": "SPY260831P00764000",
-      "unrealized_intraday_pl": "-134",
-      "unrealized_intraday_plpc": "-0.19308",
-      "unrealized_pl": "-378",
-      "unrealized_plpc": "-0.40299",
-      "usd": {
-        "avg_entry_price": "",
-        "cost_basis": ""
-      }
-    }
-  ],
+  "positions": [],
   "recent_decisions": [
+    {
+      "timestamp": "2026-08-27T13:30:07.611863+00:00",
+      "run_type": "exit_monitor",
+      "dry_run": false,
+      "outcome": "checked",
+      "market_open": true,
+      "exit_actions": [
+        {
+          "symbol": "SPY260831P00764000",
+          "kind": "closed",
+          "text": "SPY260831P00764000: CLOSED \u2014 stop-loss hit (-60.3%), consecutive losses now 1",
+          "pnl_pct": -0.6034,
+          "label": "stop-loss",
+          "consecutive_losses": 1
+        }
+      ]
+    },
+    {
+      "timestamp": "2026-08-26T20:08:03.476207+00:00",
+      "dry_run": true,
+      "symbols": [
+        "SPY",
+        "GLD",
+        "XLK",
+        "XLV"
+      ],
+      "outcome": "error",
+      "error": "AlpacaCLIError: alpaca clock failed (exit 1): {\n  \"code\": 0,\n  \"error\": \"could not reach https://paper-api.alpaca.markets/v2/clock: Get \\\"https://paper-api.alpaca.markets/v2/clock\\\": Forbidden\",\n  \"hint\": \"check your internet connection and base URL. Run `alpaca doctor` to verify configuration\",\n  \"status\": 0\n}"
+    },
     {
       "timestamp": "2026-08-26T19:18:06.523845+00:00",
       "dry_run": true,
@@ -778,46 +782,10 @@
       "tradeable_symbols": [
         "SPY"
       ]
-    },
-    {
-      "timestamp": "2026-08-24T15:37:10.744347+00:00",
-      "dry_run": true,
-      "symbols": [
-        "SPY",
-        "QQQ",
-        "IWM"
-      ],
-      "outcome": "dry_run_tradeable",
-      "market_open": true,
-      "exit_actions": [
-        "SPY260831P00763000: holding (-10.5%, thresholds are +50%/-50%)"
-      ],
-      "verdicts": [
-        {
-          "symbol": "SPY",
-          "tradeable": true,
-          "reason": "cheap-vol regime confirmed, hindsight_guard clean",
-          "direction": -1
-        },
-        {
-          "symbol": "QQQ",
-          "tradeable": true,
-          "reason": "cheap-vol regime confirmed, hindsight_guard clean",
-          "direction": -1
-        },
-        {
-          "symbol": "IWM",
-          "tradeable": true,
-          "reason": "cheap-vol regime confirmed, hindsight_guard clean",
-          "direction": -1
-        }
-      ],
-      "chosen_symbol": "SPY",
-      "direction": "bearish (put)"
     }
   ],
   "monitor_status": {
-    "last_run_at": "2026-08-26T19:15:06.011828+00:00",
+    "last_run_at": "2026-08-27T17:00:06.179869+00:00",
     "outcome": "checked",
     "market_open": true
   }
