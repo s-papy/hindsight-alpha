@@ -13,11 +13,68 @@ import os
 import sys
 from pathlib import Path
 
+# Photographie de l'environnement AVANT tout chargement de fichier : c'est
+# la seule facon de savoir ensuite qui a eu la priorite.
+_ENVIRONNEMENT_AVANT = dict(os.environ)
+
+def _signaler_precedence(chemin) -> list:
+    """Une variable presente A LA FOIS dans l'environnement et dans le fichier,
+    avec des valeurs DIFFERENTES ?
+
+    AJOUTE le 27/08/2026. Mesure sur la bibliotheque elle-meme : load_dotenv()
+    n'ECRASE PAS, par defaut, une variable deja presente dans l'environnement.
+
+        environnement pre-rempli + fichier charge -> valeur de L'ENVIRONNEMENT
+        avec override=True                        -> valeur du FICHIER
+
+    Consequence, et elle tombe pile le jour du kickoff : si un identifiant
+    traine dans le shell (un `export` dans un profil, un `launchctl setenv`)
+    et que l'operateur bascule le fichier sur le compte du hackathon, l'agent
+    continue silencieusement sur l'ANCIEN compte. Rien ne le dit -- pas meme
+    la detection de bascule de compte de risk_gates, qui remarque un
+    changement, pas son ABSENCE quand on en attendait un.
+
+    LA PRECEDENCE N'EST PAS CHANGEE, deliberement : forcer override=True
+    surprendrait dans l'autre sens, en ignorant un reglage volontaire passe
+    par l'environnement (CI, essai ponctuel). Les deux comportements peuvent
+    etre justes ; ce qui ne l'est pas, c'est de choisir en silence.
+
+    Les VALEURS ne sont jamais imprimees -- seulement les NOMS. Un
+    avertissement qui divulgue ce qu'il protege serait pire que son absence."""
+    try:
+        from dotenv import dotenv_values
+    except ImportError:
+        return []
+    try:
+        du_fichier = dotenv_values(chemin)
+    except OSError:
+        return []
+    divergentes = [
+        nom for nom, valeur in du_fichier.items()
+        if valeur is not None
+        and nom in _ENVIRONNEMENT_AVANT
+        and _ENVIRONNEMENT_AVANT[nom] != valeur
+    ]
+    if divergentes:
+        print(
+            "  WARNING: %s est(sont) defini(s) A LA FOIS dans l'environnement "
+            "et dans le fichier de configuration, avec des valeurs "
+            "DIFFERENTES. python-dotenv n'ecrase pas : c'est la valeur de "
+            "L'ENVIRONNEMENT qui est utilisee, celle du fichier est ignoree. "
+            "Si tu viens de basculer de compte, la bascule N'A PAS pris "
+            "effet -- `unset %s` puis relance."
+            % (", ".join(divergentes), " ".join(divergentes)),
+            file=sys.stderr, flush=True)
+    return divergentes
+
 try:
     from dotenv import load_dotenv
-    load_dotenv(Path(__file__).parent / ".env")
+    _CHEMIN_CONFIG = Path(__file__).parent / ".env"
+    load_dotenv(_CHEMIN_CONFIG)
+    _signaler_precedence(_CHEMIN_CONFIG)
 except ImportError:
     pass  # fall back to real environment variables if python-dotenv isn't installed
+
 
 API_KEY = os.environ.get("ALPACA_API_KEY")
 SECRET_KEY = os.environ.get("ALPACA_SECRET_KEY")

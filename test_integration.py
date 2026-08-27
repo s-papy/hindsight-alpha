@@ -2454,6 +2454,75 @@ class TestVerdictPublieDansLesRapports(unittest.TestCase):
 
 
 
+
+class TestPrecedenceDesIdentifiants(unittest.TestCase):
+    """Ajouté le 27/08. Mesuré sur python-dotenv : load_dotenv() n'écrase PAS,
+    par défaut, une variable déjà présente dans l'environnement.
+
+        environnement pré-rempli + fichier chargé -> valeur de L'ENVIRONNEMENT
+        avec override=True                        -> valeur du FICHIER
+
+    Conséquence, et elle tombe pile le jour du kickoff : si un identifiant
+    traîne dans le shell et que l'opérateur bascule le fichier sur le compte
+    du hackathon, l'agent continue silencieusement sur l'ANCIEN compte. La
+    détection de bascule de compte de risk_gates ne rattrape pas ça : elle
+    remarque un changement, pas son ABSENCE quand on en attendait un.
+
+    La précédence n'est pas changée — forcer override=True surprendrait dans
+    l'autre sens, en ignorant un réglage volontaire passé par l'environnement.
+    Les deux comportements peuvent être justes ; ce qui ne l'est pas, c'est de
+    choisir en silence."""
+
+    def _appeler(self, contenu_fichier, environnement):
+        import config
+        from unittest import mock
+        dossier = tempfile.mkdtemp(prefix="hindsight-precedence-")
+        chemin = Path(dossier, "variables")
+        chemin.write_text(contenu_fichier, encoding="utf-8")
+        try:
+            with mock.patch.object(config, "_ENVIRONNEMENT_AVANT", environnement):
+                flux = io.StringIO()
+                with contextlib.redirect_stderr(flux):
+                    divergentes = config._signaler_precedence(chemin)
+            return divergentes, flux.getvalue()
+        finally:
+            shutil.rmtree(dossier, ignore_errors=True)
+
+    def test_une_divergence_est_signalee_et_nomme_la_variable(self):
+        div, texte = self._appeler(
+            "ALPACA_API_KEY=VALEUR_DU_FICHIER\n",
+            {"ALPACA_API_KEY": "VALEUR_DE_L_ENVIRONNEMENT"})
+        self.assertEqual(div, ["ALPACA_API_KEY"])
+        self.assertIn("ALPACA_API_KEY", texte)
+        self.assertIn("unset", texte,
+                      "l'avertissement ne dit pas quoi faire")
+
+    def test_l_avertissement_ne_divulgue_JAMAIS_les_valeurs(self):
+        """L'assertion la plus importante des quatre. Un avertissement qui
+        imprime ce qu'il protège serait pire que son absence — et il partirait
+        sur la sortie standard du travail programmé, c'est-à-dire dans un
+        fichier de log."""
+        div, texte = self._appeler(
+            "ALPACA_API_KEY=VALEUR_DU_FICHIER\n",
+            {"ALPACA_API_KEY": "VALEUR_DE_L_ENVIRONNEMENT"})
+        self.assertNotIn("VALEUR_DU_FICHIER", texte)
+        self.assertNotIn("VALEUR_DE_L_ENVIRONNEMENT", texte)
+
+    def test_des_valeurs_identiques_ne_font_aucun_bruit(self):
+        """Témoin. C'est le cas NORMAL d'un opérateur qui a exporté la même
+        chose des deux côtés ; crier là-dessus à chaque démarrage apprend à
+        ignorer l'avertissement."""
+        div, texte = self._appeler("ALPACA_API_KEY=MEME\n",
+                                   {"ALPACA_API_KEY": "MEME"})
+        self.assertEqual(div, [])
+        self.assertEqual(texte, "")
+
+    def test_une_variable_absente_de_l_environnement_ne_fait_aucun_bruit(self):
+        """Témoin : le cas courant, où le fichier est la seule source."""
+        div, texte = self._appeler("ALPACA_API_KEY=DU_FICHIER\n", {})
+        self.assertEqual(div, [])
+        self.assertEqual(texte, "")
+
 class TestCaviardageDuRepli(unittest.TestCase):
     """Ajouté le 27/08. log_run() caviarde la ligne sérialisée AVANT de
     l'écrire — c'est la protection qui existe parce qu'alpaca_cli.run() lève,
