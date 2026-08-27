@@ -1170,6 +1170,72 @@ def controle_source_de_verite() -> None:
                                           dict(SEUILS_RISQUE).get(nom, "?")),
                     )
 
+        # AJOUTE le 27/08 au soir. La regle ci-dessus n'attrape un seuil que
+        # sous la forme `NOM`, 3 -- nom de constante entre backticks
+        # IMMEDIATEMENT suivi d'un nombre. Mesure sur les livrables reels :
+        #
+        #     declenchements de cette regle : 3, toutes dans README.md
+        #     (MAX_SECTOR_EXPOSURE_PCT, MAX_OPEN_POSITIONS, MAX_CONSECUTIVE_LOSSES)
+        #
+        #     les MEMES plafonds enonces en PROSE : 9 fois, dans les QUATRE
+        #     livrables -- README, script video, write-up, deck
+        #
+        # Et les deux chiffres les plus mis en avant du dossier -- 1% par
+        # trade, 3% au total -- n'etaient recoupes NULLE PART. Doubler
+        # MAX_TOTAL_RISK_PCT dans le code ne produisait pas une alerte :
+        # verifie sur un clone, memes trois alertes a 3% et a 6%.
+        #
+        # C'est la these du projet non gardee sur ses propres chiffres. Le
+        # controle existait, mais dans une forme que les livrables n'emploient
+        # presque jamais.
+        #
+        # Meme methode que les plages de concentration plus haut : un NOMBRE,
+        # puis une ANCRE proche qui dit de quel plafond il s'agit. Sans ancre
+        # on ne conclut rien -- un « 3% » isole peut parler d'autre chose.
+        for nom_seuil, ancre in (
+            ("MAX_RISK_PCT_PER_TRADE",
+             r"per[- ]trade|par trade|per position|of equity per"),
+            # Ancre RESSERREE : « total » seul attrapait « 82.6% of each clean
+            # symbol's TOTAL came from its best 5 days » -- un chiffre de
+            # concentration, pas un plafond. Les livrables disent toujours
+            # « total premium » ou « total exposure », ou nomment les positions
+            # ouvertes. « drawdown » est volontairement absent : le verrou
+            # hebdomadaire vaut AUSSI 3% et se cite « 3% drawdown lock », mais
+            # c'est une autre constante (WEEKLY_LOSS_LOCK_PCT).
+            ("MAX_TOTAL_RISK_PCT",
+             r"total\s*(premium|exposure)|au total sur toutes les positions"
+             r"|across [Aa][Ll][Ll] open positions"),
+            ("MAX_SECTOR_EXPOSURE_PCT", r"sector|secteur"),
+        ):
+            valeur_reelle = seuils.get(nom_seuil)
+            if valeur_reelle is None:
+                continue
+            attendu = valeur_reelle * 100 if valeur_reelle < 1 else valeur_reelle
+            for m in re.finditer(r"(\d{1,2}(?:[.,]\d)?)\s*%", texte):
+                # La fenetre s'arrete au PROCHAIN pourcentage. Mesure : une
+                # fenetre fixe de 60 caracteres produisait 5 faux positifs sur
+                # des livrables corrects, parce qu'une phrase comme « 1% of
+                # equity per trade, 3% total » fait tomber le mot « total »,
+                # qui appartient au SECOND chiffre, dans la fenetre du PREMIER.
+                # Un plafond annonce juste devenait alors une alerte bloquante,
+                # ce qui est la pire facon de rater : un controle qui refuse un
+                # dossier correct se fait desactiver.
+                suite = texte[m.end():]
+                prochain = suite.find("%")
+                fenetre = suite[:prochain] if 0 <= prochain < 40 else suite[:40]
+                if not re.search(ancre, fenetre, re.I):
+                    continue
+                cite = float(m.group(1).replace(",", "."))
+                if abs(cite - attendu) > 0.01:
+                    bloque(
+                        rel,
+                        "« %s%% » suivi de « %s » ne correspond pas a %s, qui "
+                        "vaut %s dans le code. Un livrable annonce un plafond "
+                        "de risque que l'agent n'applique pas."
+                        % (m.group(1), fenetre.strip()[:28], nom_seuil,
+                           _fmt(attendu)),
+                    )
+
         # AJOUTE le 27/08. La regle ci-dessus attrape un ticker PERIME cite dans
         # un livrable. Elle n'attrape pas le cas miroir : l'univers a GRANDI et
         # le livrable ne parle toujours que des anciens. Aucune liste n'y est

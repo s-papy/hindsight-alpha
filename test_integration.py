@@ -109,8 +109,13 @@ class BaseIntegration(unittest.TestCase):
 
         alpaca_cli.run = _interdit
         alpaca_cli.get_clock = lambda: {"is_open": True}
+        # `self.id_compte` rendu paramétrable le 27/08 pour la répétition du
+        # kickoff : elle a besoin de faire CHANGER l'identifiant entre l'état
+        # enregistré et le compte courant. Valeur par défaut inchangée, donc
+        # aucun test existant ne bouge.
+        self.id_compte = "compte-integ"
         alpaca_cli.get_account = lambda: {
-            "id": "compte-integ", "equity": str(self.EQUITE),
+            "id": self.id_compte, "equity": str(self.EQUITE),
             "portfolio_value": str(self.EQUITE)}
         self.positions = []
         alpaca_cli.list_positions = lambda: list(self.positions)
@@ -3028,6 +3033,82 @@ class TestEntreesAttendues(unittest.TestCase):
 
 
 
+
+
+class TestRepetitionDuKickoff(BaseIntegration):
+    """La séquence exacte de demain, jouée d'un bout à l'autre : un state.json
+    qui décrit le compte de DÉV, puis un run sur le compte du HACKATHON.
+
+    Ajoutée le 27/08 au soir. Chaque pièce était testée séparément — la
+    détection de bascule, les plafonds, le journal — mais jamais la
+    SÉQUENCE, qui ne s'exécutera qu'une fois, sans personne devant, et dont
+    dépend tout le P&L jugé.
+
+    Ce qu'elle vérifie en une fois : l'équité de référence est reprise sur le
+    NOUVEAU compte (sinon le drawdown se mesure contre le solde d'un autre),
+    le verrou et le compteur de pertes du compte de dév sont effacés, les
+    symboles déjà tradés la veille sur l'ancien compte ne bloquent pas le
+    nouveau, un ordre part vraiment, et le journal en garde une trace
+    exploitable."""
+
+    def _etat_du_compte_de_dev(self):
+        return {"account_id": "uuid-compte-DEV", "starting_equity": 99497.71,
+                "locked": True, "lock_reason": "verrou du compte de dev",
+                "consecutive_losses": 2,
+                "traded_today": {"date": risk_gates._today(), "symbols": ["SPY", "GLD"]}}
+
+    def test_la_sequence_complete_du_jour_J(self):
+        import json
+        risk_gates.STATE_FILE.write_text(
+            json.dumps(self._etat_du_compte_de_dev()), encoding="utf-8")
+        self.id_compte = "uuid-compte-HACKATHON"
+        self.barres = {s: serie(self.N_BARRES, graine=g, calme_a_la_fin=60)
+                       for s, g in (("SPY", 3), ("GLD", 5), ("XLK", 7), ("XLV", 11))}
+        record, _ = self.lancer(("SPY", "GLD", "XLK", "XLV"))
+        etat = json.loads(risk_gates.STATE_FILE.read_text(encoding="utf-8"))
+
+        self.assertEqual(etat["account_id"], "uuid-compte-HACKATHON",
+                         "l'état n'a pas suivi la bascule de compte")
+        self.assertEqual(etat["starting_equity"], 100000.0,
+                         "le drawdown se mesurerait encore contre l'équité du "
+                         "compte de DÉV (%s)" % etat["starting_equity"])
+        self.assertFalse(etat["locked"],
+                         "le verrou du compte de dév s'applique au compte neuf")
+        self.assertEqual(etat["consecutive_losses"], 0,
+                         "le disjoncteur hérite des pertes d'un autre compte")
+        self.assertNotIn("SPY", etat.get("traded_today", {}).get("symbols", []),
+                         "un symbole tradé la veille sur l'ANCIEN compte "
+                         "bloque encore le nouveau")
+        self.assertTrue(self.ordres,
+                        "aucun ordre n'est parti le jour du kickoff : "
+                        "verdict=%s" % record.get("outcome"))
+        self.assertEqual(record["outcome"], "order_submitted")
+
+    def test_l_enveloppe_de_risque_tient_sur_le_premier_run(self):
+        """Le pendant chiffré. Rien ne doit dépasser les plafonds annoncés
+        dans le deck, même quand plusieurs symboles passent d'un coup — c'est
+        le cas le plus chargé, et il tombe le jour où le compte est neuf."""
+        import json
+        risk_gates.STATE_FILE.write_text(
+            json.dumps(self._etat_du_compte_de_dev()), encoding="utf-8")
+        self.id_compte = "uuid-compte-HACKATHON"
+        self.barres = {s: serie(self.N_BARRES, graine=g, calme_a_la_fin=60)
+                       for s, g in (("SPY", 3), ("GLD", 5), ("XLK", 7), ("XLV", 11))}
+        self.lancer(("SPY", "GLD", "XLK", "XLV"))
+
+        engage = sum(qty * 280.0 for _, qty in self.ordres)   # 2.80 $ x 100
+        equite = 100000.0
+        self.assertLessEqual(len(self.ordres), risk_gates.MAX_OPEN_POSITIONS,
+                             "plus de positions ouvertes que le plafond annoncé")
+        self.assertLessEqual(
+            engage, equite * risk_gates.MAX_TOTAL_RISK_PCT + 1e-6,
+            "l'exposition totale (%.0f $) dépasse le plafond de %.0f %% "
+            "(%.0f $)" % (engage, risk_gates.MAX_TOTAL_RISK_PCT * 100,
+                          equite * risk_gates.MAX_TOTAL_RISK_PCT))
+        for _, qty in self.ordres:
+            self.assertLessEqual(
+                qty * 280.0, equite * risk_gates.MAX_RISK_PCT_PER_TRADE + 1e-6,
+                "une position dépasse le plafond par trade")
 
 class TestScriptDeConnexion(unittest.TestCase):
     """Ajouté le 27/08, la veille du kickoff. test_connection.py est l'outil
