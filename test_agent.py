@@ -644,5 +644,64 @@ class TestCroisementDeLUnivers(unittest.TestCase):
             "symbole : le contrôle se taisait")
 
 
+@unittest.skipUnless(GIT, "git absent")
+class TestHooksBranches(unittest.TestCase):
+    """CLAUDE.md décrit une protection en TROIS couches et dit d'activer la
+    première « une fois par clone » : git config core.hooksPath githooks.
+
+    Rien ne vérifiait que ce soit fait. Mesuré le 27/08 : dans un clone où
+    hooksPath n'est pas configuré, on peut supprimer le refus paper-uniquement
+    de config.py et COMMITTER — le hook n'existe pas, garde_fou.py n'est jamais
+    lancé, et rien ne dit que la couche est absente. Vérifié des deux côtés :
+    hooksPath configuré -> commit REFUSÉ ; hooksPath absent -> commit passe.
+    """
+
+    RACINE = Path(__file__).resolve().parent
+
+    def _clone(self, hooks_path=None):
+        d = Path(tempfile.mkdtemp(prefix="hindsight-hooks-"))
+        shutil.copy(self.RACINE / "garde_fou.py", d / "garde_fou.py")
+        shutil.copytree(self.RACINE / "githooks", d / "githooks")
+        subprocess.run([GIT, "init", "-q", "."], cwd=str(d), check=True,
+                       capture_output=True, timeout=30)
+        if hooks_path is not None:
+            subprocess.run([GIT, "config", "core.hooksPath", hooks_path],
+                           cwd=str(d), check=True, capture_output=True, timeout=30)
+        return d
+
+    def _sortie(self, dossier, env_ci=False):
+        env = dict(os.environ)
+        env.pop("GITHUB_ACTIONS", None)
+        env.pop("CI", None)
+        if env_ci:
+            env["GITHUB_ACTIONS"] = "true"
+        proc = subprocess.run([sys.executable, "garde_fou.py"], cwd=str(dossier),
+                              capture_output=True, text=True, timeout=120, env=env)
+        shutil.rmtree(dossier, ignore_errors=True)
+        return proc.stdout + proc.stderr
+
+    def test_un_clone_non_configure_est_signale(self):
+        sortie = self._sortie(self._clone())
+        self.assertIn("core.hooksPath N'EST PAS CONFIGURE", sortie,
+                      "la première couche de protection est absente et rien "
+                      "ne le dit")
+        self.assertIn("git config core.hooksPath githooks", sortie,
+                      "l'alerte ne donne pas la commande qui corrige")
+
+    def test_un_clone_configure_ne_declenche_rien(self):
+        """Contrôle : sans lui, alerter TOUJOURS passerait le test du dessus."""
+        self.assertNotIn("hooksPath", self._sortie(self._clone("githooks")))
+
+    def test_un_hooksPath_qui_pointe_ailleurs_est_signale(self):
+        sortie = self._sortie(self._clone(".git/hooks"))
+        self.assertIn("pointe vers", sortie)
+
+    def test_la_CI_ne_recoit_pas_cette_alerte(self):
+        """Les hooks n'ont aucun sens en CI — aucun commit n'y est fait, et la
+        CI EST la couche de protection à cet endroit. Alerter à chaque run
+        apprendrait à ignorer les 🟡."""
+        self.assertNotIn("hooksPath", self._sortie(self._clone(), env_ci=True))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

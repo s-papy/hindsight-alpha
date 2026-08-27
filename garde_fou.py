@@ -1128,6 +1128,63 @@ def controle_dependances_scellees() -> None:
 
 
 # ── EXÉCUTION ────────────────────────────────────────────────────────────
+def controle_hooks_actifs() -> None:
+    """Le hook local est-il seulement branche ?
+
+    AJOUTE le 27/08/2026. CLAUDE.md decrit une protection en TROIS couches
+    (hook de commit, CI, hook de push) et dit d'activer la premiere « une fois
+    par clone » :
+
+        git config core.hooksPath githooks
+
+    Rien ne verifiait que ce soit fait. Mesure : dans un clone ou hooksPath
+    n'est pas configure, on peut supprimer le refus paper-uniquement de
+    config.py et COMMITTER -- le hook n'existe pas, garde_fou.py n'est jamais
+    lance, et rien ne dit que la couche est absente. La chaine complete a ete
+    verifiee des deux cotes le meme jour : hooksPath configure -> commit
+    REFUSE ; hooksPath absent -> commit passe.
+
+    Alerte et non blocage : un clone frais n'a legitimement pas encore ete
+    configure, et le refuser empecherait le premier commit d'un nouveau poste.
+    Ce qui compte est que l'absence soit DITE, pas qu'elle arrete tout.
+
+    Silencieux en CI : les hooks n'y ont aucun sens (aucun commit n'y est
+    fait), et la CI EST la couche de protection a cet endroit. Alerter a chaque
+    run apprendrait a ignorer les 🟡.
+    """
+    if os.environ.get("GITHUB_ACTIONS") or os.environ.get("CI"):
+        return
+    dossier_hooks = os.path.join(RACINE, "githooks")
+    if not os.path.isdir(dossier_hooks):
+        return
+    try:
+        proc = subprocess.run(
+            ["git", "config", "core.hooksPath"],
+            cwd=RACINE, capture_output=True, text=True, timeout=15,
+        )
+    except Exception as exc:
+        alerte("githooks", "impossible de lire core.hooksPath (%s)" % exc)
+        return
+    configure = proc.stdout.strip()
+    if configure == "githooks":
+        return
+    if not configure:
+        alerte(
+            "githooks",
+            "core.hooksPath N'EST PAS CONFIGURE dans ce clone — les hooks "
+            "pre-commit et pre-push ne tournent PAS. La premiere des trois "
+            "couches decrites dans CLAUDE.md est absente : un commit qui casse "
+            "un garde passerait sans un mot ici (verifie par mutation). "
+            "Corrige avec :  git config core.hooksPath githooks",
+        )
+    else:
+        alerte(
+            "githooks",
+            "core.hooksPath pointe vers %r et non vers 'githooks' — les hooks "
+            "de ce depot ne tournent pas. Voulu ?" % configure,
+        )
+
+
 def main() -> int:
     print("=" * 74)
     print("GARDE-FOU — hindsight-alpha — %s" % datetime.now().strftime("%d/%m/%Y %H:%M"))
@@ -1139,6 +1196,7 @@ def main() -> int:
     controle_chiffres_perimes()
     controle_source_de_verite()
     controle_dependances_scellees()
+    controle_hooks_actifs()
 
     if blocages:
         print("🔴 BLOQUANT : %d" % len(blocages))
