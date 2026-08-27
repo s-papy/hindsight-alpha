@@ -1,0 +1,33 @@
+{
+  "gele_le": "2026-08-27T21:07:02.814966+00:00",
+  "kickoff": "2026-08-28T15:00:00+00:00",
+  "valeurs": {
+    "agent.DEFAULT_UNIVERSE": [
+      "SPY",
+      "GLD",
+      "XLK",
+      "XLV"
+    ],
+    "agent.sharpe_threshold_defaut": 0.0,
+    "agent.strategie_live": "vol_strategy",
+    "risk_gates.MAX_CONSECUTIVE_LOSSES": 3,
+    "risk_gates.MAX_OPEN_POSITIONS": 4,
+    "risk_gates.MAX_RISK_PCT_PER_TRADE": 0.01,
+    "risk_gates.MAX_SECTOR_EXPOSURE_PCT": 0.015,
+    "risk_gates.MAX_TOTAL_RISK_PCT": 0.03,
+    "risk_gates.STOP_LOSS_PCT": 0.5,
+    "risk_gates.TAKE_PROFIT_PCT": 0.5,
+    "risk_gates.WEEKLY_LOSS_LOCK_PCT": 0.03,
+    "vol_strategy.CANDIDATE_HV_WINDOWS": [
+      10,
+      20,
+      30,
+      60,
+      90
+    ],
+    "vol_strategy.CHEAP_VOL_PERCENTILE": 30,
+    "vol_strategy.IN_SAMPLE_HOLDOUT_DAYS": 20,
+    "vol_strategy.MIN_TRADING_DAYS_FOR_SWEEP": 592,
+    "vol_strategy.RANK_LOOKBACK_DAYS": 252
+  }
+}

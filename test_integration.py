@@ -3616,5 +3616,105 @@ class TestRangEtVolatiliteFaceALIncertitude(unittest.TestCase):
                         vol_strategy.CANDIDATE_HV_WINDOWS)
 
 
+class TestGelDesParametresAuKickoff(unittest.TestCase):
+    """Le contrôle 16, et surtout la propriété sans laquelle il ne vaut rien.
+
+    Rien dans les règles n'interdit de modifier le code pendant la semaine du
+    hackathon. Mais la semaine live est le SEUL résultat vraiment hors
+    échantillon du dossier : toucher un seuil en cours de route la
+    transformerait en énième backtest ajusté — l'erreur que ce projet existe
+    pour dénoncer.
+
+    Le contrôle ne l'empêche pas (rien n'empêche un `git commit`). Il le rend
+    visible et AUTO-DÉCLARÉ. Ce qui exige une propriété précise : **après le
+    kickoff, il ne se re-calibre jamais tout seul**. Un gel qui régénère sa
+    référence dès qu'elle ne correspond plus ne gèle rien — c'est la version
+    « contrôle » du 0.0 qui veut dire « je n'ai pas pu mesurer »."""
+
+    def setUp(self):
+        import garde_fou
+        self.g = garde_fou
+        self.dossier = tempfile.mkdtemp(prefix="hindsight-gel-")
+        self._racine, self._kick = garde_fou.RACINE, garde_fou.KICKOFF_UTC
+        self._valeurs = garde_fou._valeurs_gelees
+        garde_fou.RACINE = self.dossier
+        del garde_fou.blocages[:], garde_fou.alertes[:]
+
+    def tearDown(self):
+        self.g.RACINE, self.g.KICKOFF_UTC = self._racine, self._kick
+        self.g._valeurs_gelees = self._valeurs
+        del self.g.blocages[:], self.g.alertes[:]
+        shutil.rmtree(self.dossier, ignore_errors=True)
+
+    def _preparer(self, valeurs, apres_kickoff, ecrire_reference=True):
+        self.g.KICKOFF_UTC = ("2026-08-01T15:00:00+00:00" if apres_kickoff
+                              else "2099-01-01T00:00:00+00:00")
+        self.g._valeurs_gelees = lambda: dict(valeurs)
+        chemin = os.path.join(self.dossier, self.g.FICHIER_GEL)
+        if ecrire_reference:
+            self.g._ecrire_gel(chemin, {"vol_strategy.CHEAP_VOL_PERCENTILE": 30})
+        return chemin
+
+    def test_apres_le_kickoff_une_derive_bloque(self):
+        self._preparer({"vol_strategy.CHEAP_VOL_PERCENTILE": 45},
+                       apres_kickoff=True)
+        self.g.controle_gel_des_parametres_au_kickoff()
+        self.assertTrue(self.g.blocages,
+                        "un seuil modifié après le kickoff ne bloque pas")
+        self.assertIn("CHEAP_VOL_PERCENTILE", self.g.blocages[0][1])
+
+    def test_apres_le_kickoff_la_reference_n_est_PAS_reecrite(self):
+        """LE test qui distingue un gel d'un théâtre."""
+        chemin = self._preparer({"vol_strategy.CHEAP_VOL_PERCENTILE": 45},
+                                apres_kickoff=True)
+        with open(chemin, encoding="utf-8") as fh:
+            avant = fh.read()
+        self.g.controle_gel_des_parametres_au_kickoff()
+        with open(chemin, encoding="utf-8") as fh:
+            self.assertEqual(fh.read(), avant,
+                             "la référence a été réécrite après le kickoff : "
+                             "le gel se recalibre tout seul, il ne gèle rien")
+
+    def test_apres_le_kickoff_une_reference_absente_bloque_sans_la_recreer(self):
+        chemin = self._preparer({"vol_strategy.CHEAP_VOL_PERCENTILE": 30},
+                                apres_kickoff=True, ecrire_reference=False)
+        self.g.controle_gel_des_parametres_au_kickoff()
+        self.assertTrue(self.g.blocages, "référence disparue : ne bloque pas")
+        self.assertFalse(os.path.exists(chemin),
+                         "la référence a été recréée — supprimer le témoin "
+                         "suffirait alors à effacer toute trace d'une dérive")
+
+    def test_avant_le_kickoff_une_derive_est_legitime(self):
+        """Témoin dans l'autre sens : avant le kickoff, ajuster est normal et
+        la référence doit suivre. Sans ce test, un contrôle qui bloque TOUJOURS
+        passerait les trois ci-dessus."""
+        chemin = self._preparer({"vol_strategy.CHEAP_VOL_PERCENTILE": 45},
+                                apres_kickoff=False)
+        self.g.controle_gel_des_parametres_au_kickoff()
+        self.assertFalse(self.g.blocages, "bloque AVANT le kickoff")
+        self.assertTrue(self.g.alertes)
+        with open(chemin, encoding="utf-8") as fh:
+            self.assertEqual(json.load(fh)["valeurs"]
+                             ["vol_strategy.CHEAP_VOL_PERCENTILE"], 45)
+
+    def test_sans_derive_le_controle_est_silencieux(self):
+        """Second témoin : sans lui, crier tout le temps passerait le reste."""
+        self._preparer({"vol_strategy.CHEAP_VOL_PERCENTILE": 30},
+                       apres_kickoff=True)
+        self.g.controle_gel_des_parametres_au_kickoff()
+        self.assertEqual((self.g.blocages, self.g.alertes), ([], []))
+
+    def test_la_strategie_live_fait_partie_du_gel(self):
+        """Une bascule vers momentum_strategy est une décision de méthode, pas
+        un correctif — elle doit être visible."""
+        # setUp a détourné RACINE vers un dossier temporaire ; ce test-ci lit
+        # les VRAIES constantes du dépôt, on le rétablit donc le temps de
+        # l'appel (tearDown le remet de toute façon).
+        self.g.RACINE = self._racine
+        valeurs = self._valeurs()
+        self.assertIn("agent.strategie_live", valeurs)
+        self.assertEqual(valeurs["agent.strategie_live"], "vol_strategy")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

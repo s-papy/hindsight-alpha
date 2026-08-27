@@ -2304,6 +2304,151 @@ def controle_entrees_attendues_presentes() -> None:
                     "lisent ne disent RIEN, ni oui ni non." % quoi)
 
 
+KICKOFF_UTC = "2026-08-28T15:00:00+00:00"
+FICHIER_GEL = "kickoff_freeze.json"
+
+# Les constantes GELEES au kickoff. Pas les seuils de risque seulement : tout
+# ce dont la modification transformerait la semaine live en enieme backtest
+# ajuste. Lues par IMPORT, pas par lecture de texte -- ce projet a deja appris
+# qu'un controle qui cherche deux mots dans un fichier reste vert quand le
+# comportement disparait.
+CONSTANTES_GELEES = {
+    "risk_gates": ("MAX_RISK_PCT_PER_TRADE", "MAX_TOTAL_RISK_PCT",
+                   "MAX_SECTOR_EXPOSURE_PCT", "MAX_OPEN_POSITIONS",
+                   "WEEKLY_LOSS_LOCK_PCT", "MAX_CONSECUTIVE_LOSSES",
+                   "TAKE_PROFIT_PCT", "STOP_LOSS_PCT"),
+    "vol_strategy": ("CANDIDATE_HV_WINDOWS", "CHEAP_VOL_PERCENTILE",
+                     "RANK_LOOKBACK_DAYS", "IN_SAMPLE_HOLDOUT_DAYS",
+                     "MIN_TRADING_DAYS_FOR_SWEEP"),
+    "agent": ("DEFAULT_UNIVERSE",),
+}
+
+
+def _valeurs_gelees() -> dict:
+    """L'empreinte des constantes, telle qu'elle est REELLEMENT chargee."""
+    import importlib
+    valeurs = {}
+    for module, noms in CONSTANTES_GELEES.items():
+        mod = importlib.import_module(module)
+        for nom in noms:
+            valeurs["%s.%s" % (module, nom)] = getattr(mod, nom)
+
+    # La strategie LIVE : quel module fournit reellement today_regime a
+    # agent.py. Comportemental -- une bascule vers momentum_strategy le
+    # changerait, meme si l'import etait maquille.
+    import agent
+    valeurs["agent.strategie_live"] = agent.today_regime.__module__
+
+    # Le seuil de Sharpe par defaut. Lu dans l'AST : construire le parser
+    # demanderait d'executer main(). C'est structurel, pas une recherche de
+    # mots dans de la prose.
+    import ast
+    with open(os.path.join(RACINE, "agent.py"), encoding="utf-8") as fh:
+        arbre = ast.parse(fh.read())
+    for n in ast.walk(arbre):
+        if (isinstance(n, ast.Call)
+                and getattr(n.func, "attr", None) == "add_argument"
+                and any(isinstance(a, ast.Constant) and a.value == "--sharpe-threshold"
+                        for a in n.args)):
+            for kw in n.keywords:
+                if kw.arg == "default" and isinstance(kw.value, ast.Constant):
+                    valeurs["agent.sharpe_threshold_defaut"] = kw.value.value
+    return valeurs
+
+
+def _ecrire_gel(chemin: str, valeurs: dict) -> None:
+    from datetime import datetime, timezone
+    with open(chemin, "w", encoding="utf-8") as fh:
+        json.dump({"kickoff": KICKOFF_UTC,
+                   "gele_le": datetime.now(timezone.utc).isoformat(),
+                   "valeurs": valeurs}, fh, indent=2, sort_keys=True)
+        fh.write("\n")
+
+
+def controle_gel_des_parametres_au_kickoff() -> None:
+    """Les parametres de decision ont-ils bouge depuis le kickoff ?
+
+    AJOUTE le 27/08/2026, la veille du kickoff, a la demande de Spap.
+
+    POURQUOI. Rien dans les regles n'interdit de modifier le code pendant la
+    semaine -- la seule echeance est le 04/09. Mais la semaine live est le SEUL
+    resultat vraiment hors echantillon de tout le dossier. Toucher un seuil ou
+    une fenetre candidate en cours de route la transformerait en enieme
+    backtest ajuste : exactement l'erreur que ce projet existe pour denoncer.
+
+    Ce controle ne l'empeche pas -- rien ne peut empecher un `git commit`. Il
+    le rend VISIBLE et AUTO-DECLARE, au lieu d'etre decouvert par un juge qui
+    lit l'historique. « Voici le controle qui m'aurait attrape » vaut mieux que
+    « je promets de ne pas avoir touche ».
+
+    LA PROPRIETE QUI COMPTE. Apres le kickoff, ce controle ne se re-calibre
+    JAMAIS tout seul. Un gel qui regenere sa propre reference des qu'elle ne
+    correspond plus ne gele rien du tout -- c'est du theatre, et ce serait la
+    version « controle » du 0.0 qui veut dire « je n'ai pas pu mesurer ».
+    Avant le kickoff, au contraire, ajuster est legitime : la reference suit.
+
+    Le fichier de reference est COMMITE : le modifier apres coup laisse une
+    trace dans l'historique public, qui est lui-meme la preuve.
+    """
+    from datetime import datetime, timezone
+
+    chemin = os.path.join(RACINE, FICHIER_GEL)
+    kickoff = datetime.fromisoformat(KICKOFF_UTC)
+    apres_kickoff = datetime.now(timezone.utc) >= kickoff
+
+    try:
+        actuelles = _valeurs_gelees()
+    except Exception as e:
+        bloque(FICHIER_GEL, "impossible de lire les constantes gelees (%s: %s) — "
+                            "le gel ne peut pas être vérifié"
+                            % (type(e).__name__, e))
+        return
+
+    if not os.path.exists(chemin):
+        if apres_kickoff:
+            bloque(FICHIER_GEL,
+                   "ABSENT alors que le kickoff est passé — la référence du gel "
+                   "a disparu, donc plus rien ne prouve que les paramètres n'ont "
+                   "pas bougé. Ne pas la régénérer : la restaurer depuis git.")
+            return
+        _ecrire_gel(chemin, actuelles)
+        alerte(FICHIER_GEL, "référence du gel créée (%d constantes) — avant le "
+                            "kickoff, c'est normal. À committer."
+                            % len(actuelles))
+        return
+
+    try:
+        with open(chemin, encoding="utf-8") as fh:
+            reference = json.load(fh)
+        attendues = reference["valeurs"]
+    except Exception as e:
+        bloque(FICHIER_GEL, "illisible (%s) — le gel ne peut pas être vérifié"
+                            % type(e).__name__)
+        return
+
+    derives = []
+    for cle in sorted(set(attendues) | set(actuelles)):
+        avant, apres = attendues.get(cle, "<absente>"), actuelles.get(cle, "<absente>")
+        if avant != apres:
+            derives.append("%s : %r -> %r" % (cle, avant, apres))
+
+    if not derives:
+        return  # vert, silencieux
+
+    if apres_kickoff:
+        bloque(FICHIER_GEL,
+               "%d paramètre(s) de décision ont CHANGÉ depuis le kickoff — %s. "
+               "La semaine live est le seul résultat hors échantillon du "
+               "dossier ; la modifier en cours de route en fait un backtest "
+               "ajusté." % (len(derives), " | ".join(derives)))
+        return
+
+    _ecrire_gel(chemin, actuelles)
+    alerte(FICHIER_GEL, "%d paramètre(s) modifiés AVANT le kickoff — légitime, "
+                        "référence mise à jour (%s). À committer."
+                        % (len(derives), " | ".join(derives)))
+
+
 def controle_plists_sont_du_xml_valide() -> None:
     """Les plists livres sont-ils du XML que N'IMPORTE QUEL parseur accepte ?
 
@@ -2387,6 +2532,7 @@ def main() -> int:
         controle_motifs_d_identifiants,
         controle_entrees_attendues_presentes,
         controle_plists_sont_du_xml_valide,
+        controle_gel_des_parametres_au_kickoff,
         controle_journal,
         controle_env_hackathon_scelle,
         controle_garde_live_trading,
