@@ -1,16 +1,92 @@
 {
-  "generated_at": "2026-08-27T19:30:06.360610+00:00",
+  "generated_at": "2026-08-27T20:00:06.864997+00:00",
   "team": "Hindsight Alpha",
   "account": {
     "account_number": "PA3I2OIKF5F4",
     "status": "ACTIVE",
-    "equity": "99305.66",
-    "cash": "99305.66",
-    "buying_power": "397222.64",
-    "portfolio_value": "99305.66"
+    "equity": "99199.61",
+    "cash": "98473.61",
+    "buying_power": "393894.44",
+    "portfolio_value": "99199.61"
   },
-  "positions": [],
+  "positions": [
+    {
+      "asset_class": "us_option",
+      "asset_id": "79a0ad5a-073d-4610-98bf-a13b9a6ca0f1",
+      "asset_marginable": true,
+      "avg_entry_price": "4.16",
+      "change_today": "-0.46302",
+      "cost_basis": "832",
+      "current_price": "3.63",
+      "exchange": "",
+      "lastday_price": "6.76",
+      "market_value": "726",
+      "qty": "2",
+      "qty_available": "2",
+      "side": "long",
+      "symbol": "SPY260903P00770000",
+      "unrealized_intraday_pl": "-106",
+      "unrealized_intraday_plpc": "-0.1274",
+      "unrealized_pl": "-106",
+      "unrealized_plpc": "-0.1274",
+      "usd": {
+        "avg_entry_price": "",
+        "cost_basis": ""
+      }
+    }
+  ],
   "recent_decisions": [
+    {
+      "timestamp": "2026-08-27T19:30:13.766818+00:00",
+      "dry_run": false,
+      "symbols": [
+        "SPY",
+        "GLD",
+        "XLK",
+        "XLV"
+      ],
+      "outcome": "order_submitted",
+      "market_open": true,
+      "exit_actions": [],
+      "verdicts": [
+        {
+          "symbol": "SPY",
+          "tradeable": true,
+          "reason": "cheap-vol regime confirmed, hindsight_guard clean",
+          "direction": -1
+        },
+        {
+          "symbol": "GLD",
+          "tradeable": false,
+          "reason": "volatility not cheap today (HV rank 47.6)",
+          "direction": null
+        },
+        {
+          "symbol": "XLK",
+          "tradeable": false,
+          "reason": "hindsight_guard: full-window winner (90) and in-sample winner (10) disagree",
+          "direction": null
+        },
+        {
+          "symbol": "XLV",
+          "tradeable": false,
+          "reason": "volatility not cheap today (HV rank 98.4)",
+          "direction": null
+        }
+      ],
+      "trades": [
+        {
+          "symbol": "SPY",
+          "direction": "bearish (put)",
+          "contract": "SPY260903P00770000",
+          "risk_gate_reason": "cleared all gates: sizing 2 contract(s) at ~$423.00 each",
+          "outcome": "order_submitted",
+          "order_id": "95507183-289e-48ef-9807-66b6f0376be7",
+          "qty": 2
+        }
+      ],
+      "orders_submitted": 1
+    },
     {
       "timestamp": "2026-08-27T18:21:55.381518+00:00",
       "dry_run": true,
@@ -701,61 +777,10 @@
         "SPY260831P00764000: holding (-0.4%, thresholds are +50%/-50%)"
       ],
       "halt_reason": "HALT file present (no reason given)"
-    },
-    {
-      "timestamp": "2026-08-24T19:05:09.188556+00:00",
-      "dry_run": false,
-      "symbols": [
-        "SPY",
-        "GLD",
-        "XLK",
-        "XLV"
-      ],
-      "outcome": "order_submitted",
-      "market_open": true,
-      "exit_actions": [],
-      "verdicts": [
-        {
-          "symbol": "SPY",
-          "tradeable": true,
-          "reason": "cheap-vol regime confirmed, hindsight_guard clean",
-          "direction": -1
-        },
-        {
-          "symbol": "GLD",
-          "tradeable": false,
-          "reason": "volatility not cheap today (HV rank 57.9)",
-          "direction": null
-        },
-        {
-          "symbol": "XLK",
-          "tradeable": false,
-          "reason": "hindsight_guard: winning HV window doesn't hold up in-sample",
-          "direction": null
-        },
-        {
-          "symbol": "XLV",
-          "tradeable": false,
-          "reason": "volatility not cheap today (HV rank 98.4)",
-          "direction": null
-        }
-      ],
-      "trades": [
-        {
-          "symbol": "SPY",
-          "direction": "bearish (put)",
-          "contract": "SPY260831P00764000",
-          "risk_gate_reason": "cleared all gates: sizing 2 contract(s) at ~$475.00 each",
-          "outcome": "order_submitted",
-          "order_id": "2e7ba582-3784-4c80-8abb-d1e4eb0a79eb",
-          "qty": 2
-        }
-      ],
-      "orders_submitted": 1
     }
   ],
   "monitor_status": {
-    "last_run_at": "2026-08-27T19:30:06.357952+00:00",
+    "last_run_at": "2026-08-27T19:58:05.818504+00:00",
     "outcome": "checked",
     "market_open": true
   }
