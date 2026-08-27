@@ -656,14 +656,20 @@ def _parse_strategy_comparison() -> dict | None:
     #   - tous qui disparaissent -> `sharpes_valides` est vide et le controle
     #     du Sharpe est saute entierement (faux negatif).
     for m in re.finditer(
-        r"\|\s*(\w+)\s*\|\s*\d+d\s*\|\s*(yes|\*\*LEAK\*\*)\s*\|\s*(-?[\d.]+|[Nn]a[Nn])\s*\|", texte
+        # ELARGI le 27/08 : la cellule de verdict porte desormais QUATRE valeurs
+        # et non deux. Sans cet elargissement, une ligne « no edge » ou
+        # « unscored » disparaissait EN SILENCE -- la panne exacte decrite
+        # ci-dessus pour la colonne Sharpe, une colonne plus loin.
+        r"\|\s*(\w+)\s*\|\s*\d+d\s*\|\s*(yes|\*\*LEAK\*\*|no edge|unscored)\s*\|"
+        r"\s*(-?[\d.]+|[Nn]a[Nn])\s*\|", texte
     ):
         symbole, agrees, brut = m.group(1), m.group(2), m.group(3)
         try:
             sharpe = float(brut)
         except ValueError:
             continue
-        resultat[symbole] = {"leaked": agrees != "yes", "sharpe": sharpe}
+        resultat[symbole] = {"leaked": agrees == "**LEAK**",
+                             "verdict": agrees, "sharpe": sharpe}
 
     if not resultat:
         # Le fichier EXISTE mais rien n'en a ete tire : c'est un changement de

@@ -102,13 +102,18 @@ def etiquette_de_verdict(report) -> str:
     donnees que personne n'a encore vues. Un symbole qui bascule dans le
     troisieme cas annoncerait une fuite qui n'en est pas -- dans un dossier
     dont tout l'argument est de ne pas exagerer ses prises."""
-    if report.agrees:
-        return "agrees (no leak)"
-    if getattr(report, "unscorable", None):
-        return "CANNOT CONCLUDE (a candidate could not be scored)"
-    if not report.in_sample_clears_bar and not report._plein_franchit_le_seuil():
-        return "NO EDGE (nothing clears the threshold on either window)"
-    return "LEAK DETECTED"
+    # DELEGUE le 27/08 a LeakageReport.verdict_label() : la meme regle vivait
+    # ici et allait etre recopiee dans compare_strategies.py. Une regle ecrite
+    # deux fois n'est vraie qu'a un seul endroit -- constate deux fois
+    # aujourd'hui, dans manage_exits puis ici.
+    detail = {
+        "agrees": "agrees (no leak)",
+        "NO EDGE": "NO EDGE (nothing clears the threshold on either window)",
+        "CANNOT CONCLUDE": "CANNOT CONCLUDE (a candidate could not be scored)",
+        "LEAK DETECTED": "LEAK DETECTED",
+    }
+    cle = report.verdict_label()
+    return detail.get(cle, cle)
 
 
 def backtest_symbol(symbol: str, bars: List[Bar]) -> dict:

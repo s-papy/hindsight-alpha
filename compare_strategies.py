@@ -63,6 +63,26 @@ from momentum_strategy import (
 RESULTS_FILE = Path(__file__).parent / "STRATEGY_COMPARISON.md"
 
 
+def cellule_de_verdict(report) -> str:
+    """Le verdict tel qu'il s'ecrit dans la colonne « agrees? » du tableau.
+
+    AJOUTE le 27/08/2026. Ces quatre endroits ecrivaient
+    `'yes' if agrees else '**LEAK**'`, le meme binaire que backtest.py --
+    corrige la-bas une heure plus tot, oublie ici. STRATEGY_COMPARISON.md est
+    un livrable cite dans le write-up : un symbole ou rien ne franchit le
+    seuil sur aucune des deux fenetres y aurait ete publie comme une fuite.
+
+    Les libelles restent COURTS parce que garde_fou._parse_strategy_comparison
+    lit cette cellule, et que sa regex n'acceptait que `yes|**LEAK**` : toute
+    valeur nouvelle faisait disparaitre la ligne EN SILENCE. Le commentaire de
+    ce parseur decrit exactement cette panne -- pour la colonne d'a cote, la
+    Sharpe, corrigee le 26/08. La regex est elargie en meme temps que ceci."""
+    return {"agrees": "yes",
+            "LEAK DETECTED": "**LEAK**",
+            "NO EDGE": "no edge",
+            "CANNOT CONCLUDE": "unscored"}[report.verdict_label()]
+
+
 def _win_rate(rets: List[float]) -> float:
     nonzero = [r for r in rets if r != 0.0]
     if not nonzero:
@@ -84,6 +104,7 @@ def compare_symbol(symbol: str, bars) -> dict:
     result["vol_strategy"] = {
         "vetted_window_days": vol_window,
         "hindsight_guard_agrees": vol_report.agrees,
+        "hindsight_guard_verdict": cellule_de_verdict(vol_report),
         "in_sample_sharpe_of_winner": round(score_hv_window(vol_window, "in_sample", bars), 3),
         "trade_days": len(vol_trade_rets),
         "total_days_scored": len(vol_rets),
@@ -107,6 +128,7 @@ def compare_symbol(symbol: str, bars) -> dict:
     result["momentum_strategy"] = {
         "vetted_lookback_days": mom_lookback,
         "hindsight_guard_agrees": mom_report.agrees,
+        "hindsight_guard_verdict": cellule_de_verdict(mom_report),
         "in_sample_sharpe_of_winner": round(score_lookback(mom_lookback, "in_sample", bars), 3),
         "trade_days": len(mom_rets),  # always "in the market" -- every day is a trade day
         "win_rate_pct": round(_win_rate(mom_rets), 1),
@@ -153,10 +175,10 @@ def format_report(results: List[dict]) -> str:
         v, m = r["vol_strategy"], r["momentum_strategy"]
         lines.append(
             f"| {r['symbol']} | {v['vetted_window_days']}d | "
-            f"{'yes' if v['hindsight_guard_agrees'] else '**LEAK**'} | "
+            f"{v['hindsight_guard_verdict']} | "
             f"{v['in_sample_sharpe_of_winner']} | {v['win_rate_pct']}% | "
             f"{m['vetted_lookback_days']}d | "
-            f"{'yes' if m['hindsight_guard_agrees'] else '**LEAK**'} | "
+            f"{m['hindsight_guard_verdict']} | "
             f"{m['in_sample_sharpe_of_winner']} | {m['win_rate_pct']}% |"
         )
     lines.append("")
@@ -168,7 +190,7 @@ def format_report(results: List[dict]) -> str:
         lines.append("")
         lines.append(
             f"- **vol_strategy** — vetted window {v['vetted_window_days']}d, "
-            f"hindsight_guard {'agrees (no leak)' if v['hindsight_guard_agrees'] else 'LEAK DETECTED'}, "
+            f"hindsight_guard {v['hindsight_guard_verdict'].replace('**','')}, "
             f"in-sample Sharpe {v['in_sample_sharpe_of_winner']} "
             f"(mean/day {v['mean_daily']:+}, sd/day {v['stdev_daily']}), "
             f"{v['trade_days']}/{v['total_days_scored']} days traded ({v['win_rate_pct']}% win rate on those days), "
@@ -176,7 +198,7 @@ def format_report(results: List[dict]) -> str:
         )
         lines.append(
             f"- **momentum_strategy** — vetted lookback {m['vetted_lookback_days']}d, "
-            f"hindsight_guard {'agrees (no leak)' if m['hindsight_guard_agrees'] else 'LEAK DETECTED'}, "
+            f"hindsight_guard {m['hindsight_guard_verdict'].replace('**','')}, "
             f"in-sample Sharpe {m['in_sample_sharpe_of_winner']} "
             f"(mean/day {m['mean_daily']:+}, sd/day {m['stdev_daily']}), "
             f"{m['trade_days']} days traded (always in the market), {m['win_rate_pct']}% win rate, "

@@ -2359,6 +2359,65 @@ class TestVerdictPublieDansLesRapports(unittest.TestCase):
             shutil.rmtree(dossier, ignore_errors=True)
             garde_fou.alertes.clear()
 
+    def test_le_tableau_de_comparaison_distingue_aussi_les_trois_cas(self):
+        """compare_strategies.py portait le MÊME binaire que backtest.py, en
+        QUATRE endroits, et produit STRATEGY_COMPARISON.md — un livrable cité
+        dans le write-up. Oubli de ma part au commit précédent : j'avais
+        corrigé un jumeau et pas l'autre."""
+        import compare_strategies
+        from hindsight_guard import LeakageReport
+        sans_edge = LeakageReport(
+            candidates=[10, 90], full_scores={10: -1.0, 90: -0.4},
+            in_sample_scores={10: -1.2, 90: -0.5}, full_winner=90,
+            in_sample_winner=90, in_sample_clears_bar=False, threshold=0.0)
+        cellule = compare_strategies.cellule_de_verdict(sans_edge)
+        self.assertNotIn("LEAK", cellule.upper(),
+                         "un symbole sans edge est publié comme une fuite "
+                         "dans le tableau : %r" % cellule)
+
+        vraie_fuite = LeakageReport(
+            candidates=[10, 90], full_scores={10: 0.5, 90: 1.2},
+            in_sample_scores={10: 0.8, 90: 0.3}, full_winner=90,
+            in_sample_winner=10, in_sample_clears_bar=True, threshold=0.0)
+        self.assertIn("LEAK", compare_strategies.cellule_de_verdict(vraie_fuite),
+                      "une vraie fuite n'est plus signalée dans le tableau")
+
+    def test_le_parseur_du_tableau_ne_perd_pas_une_ligne_qu_il_ne_lit_pas(self):
+        """Le vrai risque de ce changement, et il est documenté juste
+        au-dessus du code fautif — pour l'AUTRE colonne. La regex n'acceptait
+        que `yes|**LEAK**` dans la cellule de verdict : toute valeur nouvelle
+        fait disparaître la ligne, donc le symbole, EN SILENCE.
+
+        Le commentaire de _parse_strategy_comparison décrit exactement ça pour
+        la colonne Sharpe (« SPY disparu EN SILENCE »), corrigé le 26/08. La
+        colonne d'à côté avait la même exposition."""
+        import garde_fou
+        garde_fou.alertes.clear()
+        vraie = garde_fou.RACINE
+        dossier = tempfile.mkdtemp(prefix="hindsight-tableau-")
+        try:
+            Path(dossier, "STRATEGY_COMPARISON.md").write_text(
+                "| symbol | vol_strategy: window | agrees? | in-sample Sharpe |\n"
+                "|---|---|---|---|\n"
+                "| SPY | 10d | yes | 1.598 |\n"
+                "| ZZZ | 20d | no edge | -0.412 |\n", encoding="utf-8")
+            garde_fou.RACINE = dossier
+            lu = garde_fou._parse_strategy_comparison()
+            self.assertIsNotNone(lu)
+            self.assertIn("SPY", lu, "prérequis : la ligne normale est lue")
+            self.assertIn(
+                "ZZZ", lu,
+                "une ligne dont le verdict n'est ni « yes » ni « **LEAK** » "
+                "disparaît en silence : le symbole sort de tous les "
+                "recoupements, exactement comme les Sharpe négatifs avant le "
+                "26/08")
+            self.assertFalse(lu["ZZZ"]["leaked"],
+                             "« no edge » compté comme une fuite")
+        finally:
+            garde_fou.RACINE = vraie
+            shutil.rmtree(dossier, ignore_errors=True)
+            garde_fou.alertes.clear()
+
     def test_le_parseur_du_garde_fou_ne_saute_plus_un_verdict_illisible(self):
         """Le vrai correctif de cette série. Le parseur faisait
         `if not verdict: continue` — un saut MUET. Si le libellé du rapport

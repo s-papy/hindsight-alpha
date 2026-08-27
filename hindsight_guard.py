@@ -111,6 +111,24 @@ class LeakageReport:
         except (KeyError, TypeError):
             return False
 
+    def verdict_label(self) -> str:
+        """Le verdict en UN mot-cle, pour les rapports ecrits.
+
+        AJOUTE le 27/08/2026. backtest.py et compare_strategies.py ecrivaient
+        chacun `'agrees' if agrees else 'LEAK DETECTED'` -- un binaire, alors
+        qu'`agrees` est faux dans TROIS cas dont un qui n'a rien d'une fuite.
+        Corrige d'abord dans backtest.py seulement ; le jumeau a ete oublie
+        une heure, ce qui est exactement l'argument pour poser la logique ICI
+        plutot que chez les appelants. Deux constructions independantes de la
+        meme regle finissent toujours par diverger -- ici en trois heures."""
+        if self.agrees:
+            return "agrees"
+        if self.unscorable:
+            return "CANNOT CONCLUDE"
+        if not self.in_sample_clears_bar and not self._plein_franchit_le_seuil():
+            return "NO EDGE"
+        return "LEAK DETECTED"
+
     def summary(self) -> str:
         lines = []
         if self.agrees:
