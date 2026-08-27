@@ -160,12 +160,20 @@ def check_selection_leakage(
     # certifie propre. C'est un echec silencieux au coeur meme du mecanisme que
     # cette bibliotheque existe pour fournir.
     #
-    # Non atteignable aujourd'hui par vol_strategy.py (`_sharpe` rend 0.0 sur
-    # un ecart-type nul ou moins de deux points, et la porte qualite-donnees
-    # refuse les barres aberrantes en amont). Mais cette bibliotheque est
-    # explicitement concue pour un `score_fn` quelconque -- son propre
-    # docstring dit qu'elle ne touche jamais aux donnees -- donc le cas est
-    # ouvert pour tout autre appelant.
+    # MISE A JOUR le 27/08/2026. Ce commentaire disait « non atteignable
+    # aujourd'hui par vol_strategy.py (`_sharpe` rend 0.0 sur un ecart-type nul
+    # ou moins de deux points) », et un test verifiait cette propriete. C'etait
+    # exact, et c'etait le probleme : la RAISON pour laquelle le cas n'etait pas
+    # atteignable ETAIT un defaut de vol_strategy -- elle fabriquait un 0.0
+    # plutot que d'avouer qu'elle n'avait rien pu mesurer, donc ce garde ne
+    # voyait rien (math.isfinite(0.0) est True) et certifiait des selections ou
+    # une fenetre candidate n'avait jamais ete notee. Reproduit avec 325 barres
+    # au lieu des 592 requises.
+    #
+    # _sharpe rend desormais NaN dans ces deux cas, des deux cotes
+    # (vol_strategy ET momentum_strategy). Ce garde est donc PORTANT, plus
+    # defensif : c'est lui qui transforme « je n'ai pas pu noter cette
+    # candidate » en refus de certifier.
     unscorable = [
         c for c in candidates
         if not math.isfinite(full_scores[c]) or not math.isfinite(in_sample_scores[c])

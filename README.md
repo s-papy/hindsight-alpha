@@ -307,7 +307,7 @@ cp .env.example .env
 # Alpaca dashboard, Home page -> API Keys widget). Never the live-account keys.
 
 # 4. Run
-python3 -m unittest discover   # 61 offline tests, no credentials needed
+python3 -m unittest discover   # 67 offline tests, no credentials needed
 python test_connection.py      # confirms CLI install + credentials + network
 python agent.py --dry-run      # runs the full leakage check, no order placed
 python agent.py                # if vetted, places a real (paper) options order

@@ -87,11 +87,45 @@ def daily_returns(bars: Sequence[Bar]) -> List[float]:
 
 
 def _sharpe(returns: Sequence[float]) -> float:
+    """Sharpe annualise, ou NaN quand il n'y a rien a mesurer.
+
+    CORRIGE le 27/08/2026. Ces deux cas rendaient 0.0 -- un zero qui veut dire
+    « je n'ai pas pu mesurer », strictement indiscernable d'un Sharpe mesure a
+    zero. C'est une valeur FABRIQUEE, et elle remonte telle quelle dans
+    hindsight_guard.check_selection_leakage() comme si c'etait un resultat.
+
+    Reproduit le 27/08 : avec 325 barres au lieu des 592 que
+    MIN_TRADING_DAYS_FOR_SWEEP exige, la fenetre 90 obtient ZERO echantillon,
+    rend 0.000, et le garde conclut :
+
+        OK: full-window winner (10) matches the in-sample winner and clears
+        the threshold (0.0).
+
+    `unscorable` etait vide : math.isfinite(0.0) est True, donc le garde
+    NaN/infini ajoute le 26/08 ne voyait rien. Une fenetre qu'on n'a PAS PU
+    noter etait comptee comme une fenetre qui a PERDU -- exactement la panne
+    que ce garde existe pour empecher, au coeur meme du mecanisme.
+
+    Le plus instructif : hindsight_guard.py justifiait sa propre portee en
+    disant « non atteignable aujourd'hui par vol_strategy.py (_sharpe rend 0.0
+    sur un ecart-type nul ou moins de deux points) », et un test verifiait
+    cette propriete. La RAISON pour laquelle le cas n'etait pas atteignable
+    ETAIT le defaut : la stratégie ne produisait jamais de non-fini parce
+    qu'elle mentait a la place.
+
+    NaN plutot qu'une exception : hindsight_guard sait deja traiter un score
+    non-fini (il le range dans `unscorable` et refuse de certifier), et une
+    exception ferait tomber tout le symbole la ou une seule fenetre est en
+    cause. Rendre le mecanisme PORTANT plutot que defensif etait tout l'objet
+    de ce garde."""
     if len(returns) < 2:
-        return 0.0
+        return float("nan")   # rien a mesurer, pas « mesure a zero »
     sd = pstdev(returns)
     if sd == 0:
-        return 0.0
+        # Ecart-type nul : le ratio est 0/0, indefini. La strategie n'est
+        # jamais entree sur cette fenetre -- ce n'est pas une performance
+        # neutre, c'est une absence de mesure.
+        return float("nan")
     return (mean(returns) / sd) * (252 ** 0.5)  # annualized, daily bars
 
 

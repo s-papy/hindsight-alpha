@@ -354,7 +354,7 @@ MAX_STALE_DAYS = 5           # refuse to trade if the most recent bar is older t
 MAX_DAILY_JUMP_PCT = 0.50    # refuse to trade if any adjacent-day close moves more than this -- likely bad data, not a real move, for a liquid sector ETF
 
 
-def _check_bar_quality(symbol: str, rows: List[dict]) -> None:
+def _check_bar_quality(symbol: str, rows: List[dict], minimum_usable: Optional[int] = None) -> None:
     """Raises DataQualityError instead of silently handing bad data to the
     strategy layer. Two checks, both deliberately generous (long weekends,
     holidays, and real market moves all need to pass without a false
@@ -378,6 +378,35 @@ def _check_bar_quality(symbol: str, rows: List[dict]) -> None:
 
     closes = [row.get("c", row.get("close")) for row in rows]
     closes = [float(c) for c in closes if c is not None]
+
+    # AJOUTE le 27/08/2026. Les deux controles ci-dessus attrapent un feed GELE
+    # (barre la plus recente trop vieille) et un feed CORROMPU (saut de prix
+    # invraisemblable). Aucun n'attrapait un feed TRONQUE.
+    #
+    # Ce compte-la est celui des clotures REELLEMENT exploitables, pas des
+    # lignes rendues : get_daily_bars() ecarte silencieusement toute ligne sans
+    # prix de cloture, et la ligne juste au-dessus fait pareil ici.
+    #
+    # Pourquoi ca compte, mesure le 27/08 : avec 325 barres au lieu des 592 que
+    # MIN_TRADING_DAYS_FOR_SWEEP exige, la fenetre HV de 90 jours obtient ZERO
+    # echantillon. hindsight_guard refuse desormais de certifier dans ce cas
+    # (voir _sharpe, corrige le meme jour), mais son diagnostic parle de
+    # « fenetres 20, 60, 90 non notables » -- vrai, et illisible pour qui
+    # cherche la cause. Ici on peut dire la chose : il manque des barres.
+    #
+    # Un symbole dont l'historique est plus court que la fenetre de balayage
+    # n'est pas un symbole a traiter avec precaution, c'est un symbole sur
+    # lequel ce balayage ne veut rien dire.
+    if minimum_usable is not None and len(closes) < minimum_usable:
+        raise DataQualityError(
+            f"{symbol}: only {len(closes)} usable daily closes returned, need at least "
+            f"{minimum_usable} for the parameter sweep to score every candidate window "
+            f"(vol_strategy.MIN_TRADING_DAYS_FOR_SWEEP). A shorter history makes the "
+            f"largest HV windows unscorable, so the selection would be made among "
+            f"candidates that were never actually measured -- refusing rather than "
+            f"sweeping on it."
+        )
+
     for i in range(1, len(closes)):
         prev = closes[i - 1]
         if prev == 0:
@@ -408,7 +437,7 @@ def get_daily_bars(symbol: str, lookback_days: int = MIN_TRADING_DAYS_FOR_SWEEP)
     start = (datetime.utcnow() - timedelta(days=int(lookback_days * 1.6) + 10)).strftime("%Y-%m-%d")
     data = run(["data", "bars", "--symbol", symbol, "--start", start, "--timeframe", "1Day"])
     rows = _extract_bars(data)
-    _check_bar_quality(symbol, rows)
+    _check_bar_quality(symbol, rows, minimum_usable=lookback_days)
     bars = []
     for row in rows:
         close = row.get("c", row.get("close"))

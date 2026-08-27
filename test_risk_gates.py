@@ -51,6 +51,7 @@ import tempfile
 import threading
 import time
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -428,12 +429,22 @@ class TestHindsightGuard(unittest.TestCase):
             self._verdict({}, {})
         self.assertIn("at least one candidate", str(ctx.exception))
 
-    def test_la_vraie_fonction_de_score_ne_produit_jamais_de_non_fini(self):
-        """Vérifie la portée annoncée plus haut plutôt que de l'affirmer.
+    def test_la_vraie_fonction_de_score_AVOUE_quand_elle_ne_peut_pas_mesurer(self):
+        """Ce test disait l'inverse jusqu'au 27/08 : il vérifiait que
+        score_hv_window ne produit JAMAIS de non-fini, ce qui justifiait la
+        note « cas non atteignable par vol_strategy » dans hindsight_guard.py.
 
-        Barres absentes, trop courtes, prix strictement plats, et un prix à
-        zéro — le cas qui pourrait diviser par zéro."""
+        C'était exact, et c'était le défaut. _sharpe rendait 0.0 sur moins de
+        deux points et sur un écart-type nul — un zéro qui veut dire « je n'ai
+        pas pu mesurer », indiscernable d'un Sharpe mesuré à zéro. Comme
+        math.isfinite(0.0) est True, le garde `unscorable` ne voyait rien et
+        certifiait des sélections où une fenêtre candidate n'avait jamais été
+        notée.
+
+        Le contrat est désormais l'inverse : sur une entrée dégénérée, la
+        fonction de score doit rendre un NON-FINI, pas un chiffre inventé."""
         import vol_strategy
+        import momentum_strategy
         from vol_strategy import Bar
         cas = {
             "aucune barre": [],
@@ -445,8 +456,58 @@ class TestHindsightGuard(unittest.TestCase):
             for split in ("full", "in_sample"):
                 with self.subTest(cas=nom, split=split):
                     score = vol_strategy.score_hv_window(10, split, barres)
-                    self.assertTrue(math.isfinite(score),
-                                    "score_hv_window rend un non-fini sur %r" % nom)
+                    self.assertFalse(
+                        math.isfinite(score),
+                        "score_hv_window a rendu %r sur %r : une valeur fabriquée "
+                        "que hindsight_guard prendra pour un résultat" % (score, nom))
+
+        # momentum_strategy portait le défaut à l'identique (deux `return 0.0`
+        # copiés). Sans cette boucle, seule la moitié serait verrouillée.
+        #
+        # « un prix a zero » est EXCLU ici, et c'est un point de fond, pas une
+        # concession pour faire passer le test : momentum est en position en
+        # permanence, donc sur ces 301 barres elle produit de vrais échantillons
+        # et un vrai Sharpe (mesuré : 0,94). La stratégie de volatilité, elle,
+        # n'entre que sur régime bon marché et n'a rien à mesurer. Le contrat
+        # n'est pas « rendre un non-fini sur ces entrées-là », c'est « ne jamais
+        # fabriquer un chiffre quand il n'y a rien à mesurer ». Assertion élargie
+        # = test qui ment sur ce qu'il vérifie.
+        for nom in ("aucune barre", "une barre", "prix plats"):
+            with self.subTest(cas=nom, module="momentum"):
+                self.assertFalse(
+                    math.isfinite(momentum_strategy.score_lookback(10, "full", cas[nom])),
+                    "momentum_strategy.score_lookback a rendu un fini sur %r" % nom)
+
+    def test_une_fenetre_non_mesuree_empeche_la_certification(self):
+        """Le témoin de bout en bout, avec la VRAIE fonction de score.
+
+        325 barres au lieu des 592 exigées : la fenêtre 90 obtient zéro
+        échantillon. Avant le 27/08, le garde répondait « OK: full-window
+        winner (10) matches the in-sample winner and clears the threshold »."""
+        import vol_strategy
+        from vol_strategy import Bar, CANDIDATE_HV_WINDOWS
+        from hindsight_guard import check_selection_leakage
+
+        prix, barres, x = 100.0, [], 1
+        for _ in range(325):
+            x = (1103515245 * x + 12345) % (2 ** 31)
+            prix *= 1.0 + ((x % 2001) - 1000) / 100000.0
+            barres.append(Bar(close=prix))
+
+        self.assertEqual(
+            len(vol_strategy._vol_strategy_returns(barres, 90)), 0,
+            "prérequis du test : la fenêtre 90 doit être sans échantillon ici")
+
+        rapport = check_selection_leakage(
+            CANDIDATE_HV_WINDOWS,
+            lambda w, split: vol_strategy.score_hv_window(w, split, barres),
+            threshold=0.0)
+        self.assertIn(90, rapport.unscorable,
+                      "la fenêtre 90, jamais notée, n'est pas signalée")
+        self.assertFalse(rapport.agrees,
+                         "le garde certifie une sélection où une fenêtre "
+                         "candidate n'a jamais été notée")
+        self.assertIn("CANNOT CONCLUDE", rapport.summary())
 
 
 class HarnaisPlafonds:
@@ -1172,6 +1233,77 @@ class TestCoutIllisible(HarnaisPlafonds, BaseExit):
         actions = risk_gates.manage_exits(dry_run=False)
         self.assertTrue(actions, "aucune sortie déclenchée sur une position "
                                  "à -55 % dont le coût est illisible")
+
+
+class TestQualiteDesBarres(unittest.TestCase):
+    """_check_bar_quality attrapait un feed GELÉ (barre la plus récente trop
+    vieille) et un feed CORROMPU (saut de prix invraisemblable). Il n'attrapait
+    pas un feed TRONQUÉ.
+
+    Mesuré le 27/08 : avec 325 barres au lieu des 592 qu'exige
+    MIN_TRADING_DAYS_FOR_SWEEP, la fenêtre HV de 90 jours obtient zéro
+    échantillon — et la sélection se faisait parmi des candidates dont
+    certaines n'avaient jamais été mesurées.
+    """
+
+    @staticmethod
+    def _lignes(n, avec_cloture=True, prix=100.0):
+        maintenant = datetime.now(timezone.utc).isoformat()
+        lignes = []
+        for i in range(n):
+            ligne = {"t": maintenant}
+            if avec_cloture:
+                ligne["c"] = prix + (i % 3) * 0.01   # variation minime, aucun saut
+            lignes.append(ligne)
+        return lignes
+
+    def test_trop_peu_de_barres_est_refuse(self):
+        with self.assertRaises(alpaca_cli.DataQualityError) as ctx:
+            alpaca_cli._check_bar_quality("SPY", self._lignes(325), minimum_usable=592)
+        message = str(ctx.exception)
+        self.assertIn("325", message)
+        self.assertIn("592", message)
+
+    def test_assez_de_barres_passe(self):
+        """Contrôle : sans lui, refuser toujours passerait le test du dessus."""
+        alpaca_cli._check_bar_quality("SPY", self._lignes(592), minimum_usable=592)
+
+    def test_les_lignes_sans_cloture_ne_comptent_pas(self):
+        """get_daily_bars écarte silencieusement toute ligne sans prix de
+        clôture. Compter les LIGNES plutôt que les clôtures exploitables
+        laisserait donc passer un feed qui a la bonne longueur et pas les
+        données."""
+        lignes = self._lignes(592, avec_cloture=False)
+        with self.assertRaises(alpaca_cli.DataQualityError) as ctx:
+            alpaca_cli._check_bar_quality("SPY", lignes, minimum_usable=592)
+        self.assertIn("0 usable", str(ctx.exception))
+
+    def test_sans_minimum_le_controle_ne_s_applique_pas(self):
+        """get_last_price() demande 5 barres ; les autres appelants passent
+        leur propre horizon. Un minimum non fourni ne doit rien refuser."""
+        alpaca_cli._check_bar_quality("SPY", self._lignes(3))
+
+    def test_get_daily_bars_transmet_bien_l_horizon_demande(self):
+        """Sans cette transmission, le contrôle existerait sans jamais servir —
+        exactement la forme d'échec que ce fichier traque."""
+        vus = {}
+        vrai_run = alpaca_cli.run
+        vrai_check = alpaca_cli._check_bar_quality
+        alpaca_cli.run = lambda args: {"bars": self._lignes(600)}
+
+        def espion(symbol, rows, minimum_usable=None):
+            vus["minimum"] = minimum_usable
+            return vrai_check(symbol, rows, minimum_usable)
+
+        alpaca_cli._check_bar_quality = espion
+        try:
+            alpaca_cli.get_daily_bars("SPY", lookback_days=42)
+        finally:
+            alpaca_cli.run = vrai_run
+            alpaca_cli._check_bar_quality = vrai_check
+        self.assertEqual(vus.get("minimum"), 42,
+                         "get_daily_bars ne transmet pas son horizon au contrôle "
+                         "qualité : le contrôle ne s'appliquerait jamais")
 
 
 if __name__ == "__main__":
