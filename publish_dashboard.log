@@ -16,3 +16,20 @@ To https://github.com/s-papy/hindsight-alpha.git
    0d95681..e35f17a  main -> main
 Wrote /Users/s-pap/hindsight-alpha/docs/data.json
 Published to GitHub Pages (after the next Pages build completes).
+==========================================================================
+GARDE-FOU — hindsight-alpha — 27/08/2026 19:30
+==========================================================================
+🟡 À REGARDER : 1
+   submission/Hindsight_Alpha_Deck.pptx          cite un nombre d'équipes inscrites — vérifier à la main sur lablab.ai avant la soumission finale, ce script ne peut pas savoir si le chiffre a encore bougé.
+
+--------------------------------------------------------------------------
+VERDICT : 🟡 À VÉRIFIER — rien de bloquant, mais relis les points ci-dessus.
+
+  ⚠️  Même au vert : ce script attrape 15 formes d'erreur précises,
+     pas le fond. Un dossier qu'il approuve peut encore être faux.
+[main 21d0b67] dashboard: snapshot 2026-08-27T17:30:04.404702+00:00
+ 1 file changed, 2 insertions(+), 6 deletions(-)
+To https://github.com/s-papy/hindsight-alpha.git
+   c1ff880..21d0b67  main -> main
+Wrote /Users/s-pap/hindsight-alpha/docs/data.json
+Published to GitHub Pages (after the next Pages build completes).
