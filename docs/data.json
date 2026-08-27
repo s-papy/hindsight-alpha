@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-08-27T17:00:06.272738+00:00",
+  "generated_at": "2026-08-27T17:30:04.315816+00:00",
   "team": "Hindsight Alpha",
   "account": {
     "account_number": "PA3I2OIKF5F4",
@@ -784,9 +784,5 @@
       ]
     }
   ],
-  "monitor_status": {
-    "last_run_at": "2026-08-27T17:00:06.179869+00:00",
-    "outcome": "checked",
-    "market_open": true
-  }
+  "monitor_status": null
 }
