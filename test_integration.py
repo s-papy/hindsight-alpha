@@ -1105,5 +1105,119 @@ class TestReadmeEtPlistsSAccordent(unittest.TestCase):
             [])
 
 
+class TestAucunIdentifiantPublie(unittest.TestCase):
+    """decision_log.jsonl et docs/data.json ne sont PAS gitignorés : ce sont les
+    preuves publiées, et depuis le rétablissement de la publication automatique
+    elles partent sur le dépôt PUBLIC toutes les 30 minutes sans intervention.
+
+    Le chemin par lequel une clé pourrait y entrer : alpaca_cli.run(), quand la
+    sortie du CLI n'est pas du JSON, lève avec « first 500 chars of output:
+    {stdout[:500]} » — la sortie BRUTE. Les identifiants sont dans
+    l'environnement de ce sous-processus. Un CLI en « Alpha Preview » qui
+    recracherait son environnement ou une URL signée suffirait.
+
+    Deux couches : caviardage à l'ÉCRITURE (decision_log), et contrôle de ce qui
+    est DÉJÀ sur le disque (garde_fou), y compris des lignes écrites avant que
+    le caviardage existe.
+
+    Une clé poussée sur un dépôt public est publique pour toujours : c'est le
+    seul défaut irréversible que ce projet puisse produire.
+    """
+
+    CLE = "CLEFACTICEPOURLETEST1234567890"
+    SECRET = "SECRETFACTICEPOURLETEST0987654321"
+
+    # ── couche 1 : caviardage a l'ecriture ────────────────────────────────
+    def _journalise(self, record, cle=None, secret=None):
+        import decision_log
+        d = Path(tempfile.mkdtemp(prefix="hindsight-caviard-"))
+        vrai, avant = decision_log.LOG_FILE, dict(os.environ)
+        decision_log.LOG_FILE = d / "decision_log.jsonl"
+        os.environ["ALPACA_API_KEY"] = cle if cle is not None else self.CLE
+        os.environ["ALPACA_SECRET_KEY"] = secret if secret is not None else self.SECRET
+        try:
+            decision_log.log_run(record)
+            return decision_log.LOG_FILE.read_text(encoding="utf-8").strip()
+        finally:
+            decision_log.LOG_FILE = vrai
+            os.environ.clear()
+            os.environ.update(avant)
+            shutil.rmtree(d, ignore_errors=True)
+
+    def test_une_cle_est_caviardee_a_n_importe_quelle_profondeur(self):
+        ligne = self._journalise({
+            "outcome": "error",
+            "error": "output: ALPACA_API_KEY=%s" % self.CLE,
+            "trades": [{"symbol": "SPY",
+                        "error": "url=https://x/?key=%s" % self.CLE}],
+        })
+        self.assertNotIn(self.CLE, ligne,
+                         "une clé API atteint un fichier committé et poussé "
+                         "automatiquement sur un dépôt public")
+        self.assertIn("CAVIARDE", ligne)
+        rec = json.loads(ligne)
+        self.assertEqual(rec["outcome"], "error",
+                         "le caviardage a cassé le JSON")
+        self.assertIn("SPY", rec["trades"][0]["symbol"],
+                      "le caviardage a mangé autre chose que la clé")
+
+    def test_le_secret_aussi(self):
+        ligne = self._journalise({"outcome": "error",
+                                  "error": "secret=%s" % self.SECRET})
+        self.assertNotIn(self.SECRET, ligne)
+
+    def test_une_valeur_trop_courte_ne_fait_pas_tout_disparaitre(self):
+        """Contrôle : une variable vide ou d'un caractère caviarderait le
+        journal entier si le seuil de longueur n'existait pas."""
+        ligne = self._journalise(
+            {"outcome": "no_edge", "reason": "volatility not cheap today"},
+            cle="a", secret="")
+        self.assertIn("volatility not cheap today", ligne)
+        self.assertNotIn("CAVIARDE", ligne)
+
+    # ── couche 2 : le controle sur ce qui est deja sur le disque ──────────
+    def _verdict(self, contenu_journal=None, contenu_data=None):
+        import garde_fou
+        d = Path(tempfile.mkdtemp(prefix="hindsight-fuite-"))
+        try:
+            shutil.copy(Path(garde_fou.__file__).resolve().parent / "garde_fou.py",
+                        d / "garde_fou.py")
+            (d / ("." + "env")).write_text(
+                "ALPACA_API_KEY=%s\nALPACA_SECRET_KEY=%s\n"
+                % (self.CLE, self.SECRET), encoding="utf-8")
+            if contenu_journal is not None:
+                (d / "decision_log.jsonl").write_text(contenu_journal,
+                                                      encoding="utf-8")
+            if contenu_data is not None:
+                (d / "docs").mkdir(exist_ok=True)
+                (d / "docs" / "data.json").write_text(contenu_data,
+                                                      encoding="utf-8")
+            proc = subprocess.run([sys.executable, "garde_fou.py"], cwd=str(d),
+                                  capture_output=True, text=True, timeout=120)
+            return proc.stdout + proc.stderr
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
+    def test_une_cle_dans_le_journal_committe_bloque(self):
+        sortie = self._verdict(
+            contenu_journal='{"outcome":"error","error":"key=%s"}\n' % self.CLE)
+        self.assertIn("CONTIENT LA VALEUR DE ALPACA_API_KEY", sortie)
+        self.assertIn("REVOQUER", sortie,
+                      "le message ne dit pas quoi faire : une clé déjà poussée "
+                      "doit être révoquée, pas seulement retirée du fichier")
+
+    def test_une_cle_dans_data_json_bloque_aussi(self):
+        sortie = self._verdict(contenu_data='{"x":"%s"}' % self.SECRET)
+        self.assertIn("CONTIENT LA VALEUR DE ALPACA_SECRET_KEY", sortie)
+
+    def test_des_fichiers_propres_ne_declenchent_rien(self):
+        """Contrôle : sans lui, bloquer TOUJOURS passerait les deux tests
+        ci-dessus."""
+        sortie = self._verdict(
+            contenu_journal='{"outcome":"no_edge","reason":"rien a signaler"}\n',
+            contenu_data='{"account":{"equity":"100000"}}')
+        self.assertNotIn("CONTIENT LA VALEUR", sortie)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

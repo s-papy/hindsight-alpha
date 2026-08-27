@@ -1556,6 +1556,93 @@ def controle_readme_decrit_les_agents() -> None:
             )
 
 
+def controle_aucun_identifiant_dans_les_fichiers_publies() -> None:
+    """Un identifiant est-il present dans un fichier COMMITTE ?
+
+    AJOUTE le 27/08/2026. decision_log.jsonl et docs/data.json ne sont pas
+    gitignores : ce sont les preuves publiees, et depuis le retablissement de la
+    publication automatique le meme jour, elles partent sur le depot PUBLIC
+    toutes les 30 minutes sans intervention humaine.
+
+    Le chemin par lequel une cle pourrait y entrer : alpaca_cli.run() leve,
+    quand la sortie du CLI n'est pas du JSON, avec « first 500 chars of output:
+    {stdout[:500]} » -- la sortie BRUTE. Les identifiants sont dans
+    l'environnement de ce sous-processus. Un CLI en « Alpha Preview » qui
+    recracherait son environnement ou une URL signee dans un message d'erreur
+    suffirait.
+
+    decision_log.caviarder() ferme ce chemin a l'ECRITURE depuis le meme jour.
+    Ce controle-ci est la seconde couche : il regarde ce qui est DEJA sur le
+    disque, y compris des lignes ecrites avant que le caviardage existe.
+
+    BLOQUE, contrairement a la plupart des controles de ce script. Une cle
+    poussee sur un depot public est publique pour toujours : c'est le seul
+    defaut irreversible que ce projet puisse produire.
+
+    Recherche par VALEUR EXACTE, jamais par motif : aucun faux positif possible.
+    Sans identifiants dans l'environnement -- le cas de la CI -- il n'y a rien a
+    chercher et le controle ne dit rien. C'est voulu : il est effectif la ou il
+    compte, dans le hook de pre-commit, sur la machine qui detient les cles.
+    """
+    # Les identifiants ne sont PAS dans os.environ quand ce script tourne : ils
+    # vivent dans les fichiers d'environnement, charges par python-dotenv A
+    # L'INTERIEUR de config.py -- que ce script n'importe pas volontairement
+    # (config sort du programme sur cles manquantes ; l'importer ferait mourir
+    # le garde-fou en CI).
+    #
+    # Trouve en verifiant ce controle sur le depot reel juste apres l'avoir
+    # ecrit : il ne trouvait aucune valeur, donc il ne cherchait RIEN, donc il
+    # aurait ete inerte precisement dans le hook de pre-commit -- le seul
+    # endroit qui compte. Un controle qu'on ne verifie pas est un controle qui
+    # rassure sans proteger. On lit donc les fichiers directement.
+    NOMS = ("ALPACA_API_KEY", "ALPACA_SECRET_KEY", "ALPACA_ACCOUNT_ID")
+    trouvees = {}
+    for nom in NOMS:
+        v = os.environ.get(nom) or ""
+        if len(v) >= 8:
+            trouvees[nom] = v
+    for fichier in ('.env', '.env.hackathon'):
+        chemin = os.path.join(RACINE, fichier)
+        if not os.path.exists(chemin):
+            continue
+        try:
+            contenu = open(chemin, encoding="utf-8", errors="replace").read()
+        except OSError:
+            continue
+        for ligne in contenu.splitlines():
+            ligne = ligne.strip()
+            if ligne.startswith("#") or "=" not in ligne:
+                continue
+            cle, _, val = ligne.partition("=")
+            cle = cle.strip()
+            val = val.strip().strip("'").strip('"')
+            if cle in NOMS and len(val) >= 8:
+                trouvees[cle] = val
+    if not trouvees:
+        return
+    valeurs = sorted(trouvees.items())
+
+    for rel in ("decision_log.jsonl", os.path.join("docs", "data.json")):
+        chemin = os.path.join(RACINE, rel)
+        if not os.path.exists(chemin):
+            continue
+        try:
+            texte = open(chemin, encoding="utf-8", errors="replace").read()
+        except OSError as err:
+            alerte(rel, "illisible (%s) -- impossible de verifier qu'aucun "
+                        "identifiant ne s'y trouve." % err)
+            continue
+        for nom, valeur in valeurs:
+            if valeur in texte:
+                bloque(
+                    rel,
+                    "CONTIENT LA VALEUR DE %s. Ce fichier est committe et pousse "
+                    "sur le depot PUBLIC. Ne pas committer, ne pas pousser : "
+                    "retirer la ligne, puis REVOQUER cette cle chez Alpaca -- si "
+                    "elle est deja partie, elle est publique pour toujours." % nom,
+                )
+
+
 def main() -> int:
     print("=" * 74)
     print("GARDE-FOU — hindsight-alpha — %s" % datetime.now().strftime("%d/%m/%Y %H:%M"))
@@ -1577,6 +1664,7 @@ def main() -> int:
         controle_hooks_actifs,
         controle_verrou_dit_hebdomadaire,
         controle_readme_decrit_les_agents,
+        controle_aucun_identifiant_dans_les_fichiers_publies,
     )
     for controle in CONTROLES:
         controle()

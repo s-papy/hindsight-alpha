@@ -12,6 +12,7 @@ reasoning over the week, not a secret.
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List
@@ -35,12 +36,51 @@ LOG_FILE = Path(__file__).parent / "decision_log.jsonl"
 # maximale observee, 1006 o). Aucun correctif n'a donc ete applique ici.
 
 
+# AJOUTE le 27/08/2026. decision_log.jsonl n'est PAS gitignore : c'est la
+# preuve publiee, committee, et -- depuis le retablissement de la publication
+# automatique le meme jour -- poussee sur le depot PUBLIC toutes les 30 minutes
+# sans intervention humaine.
+#
+# Or rien ne rediger ce qui y entre, et un chemin plausible y mene :
+# alpaca_cli.run() leve, quand la sortie du CLI n'est pas du JSON, avec
+# « first 500 chars of output: {stdout[:500]} » -- la sortie BRUTE. Les
+# identifiants sont dans l'environnement de ce sous-processus (config.cli_env()
+# les y met). Un CLI que sa propre documentation qualifie d'« Alpha Preview »
+# qui recracherait son environnement, une URL signee ou un en-tete
+# Authorization dans un message d'erreur ferait donc atterrir une cle API dans
+# un fichier committe et pousse automatiquement.
+#
+# Le journal actuel est propre -- verifie, aucun motif de cle, de secret,
+# d'Authorization. Ce n'est pas une raison de laisser la porte ouverte : c'est
+# la contrainte la plus dure de ce projet (« aucun fichier .env, secret ou
+# identifiant »), et le seul defaut irreversible qu'il puisse produire. Une cle
+# poussee sur un depot public est publique pour toujours.
+#
+# On caviarde par VALEUR EXACTE, jamais par motif : on sait ce qu'on cherche,
+# donc aucun faux positif possible sur un texte legitime. Le seuil de longueur
+# evite qu'une variable vide ou d'un caractere ne fasse tout disparaitre.
+_VARIABLES_SECRETES = ("ALPACA_API_KEY", "ALPACA_SECRET_KEY")
+_LONGUEUR_MINIMALE = 8
+
+
+def caviarder(texte: str) -> str:
+    """Remplace toute occurrence d'un identifiant connu par un marqueur."""
+    for nom in _VARIABLES_SECRETES:
+        valeur = os.environ.get(nom) or ""
+        if len(valeur) >= _LONGUEUR_MINIMALE and valeur in texte:
+            texte = texte.replace(valeur, "[%s CAVIARDE]" % nom)
+    return texte
+
+
 def log_run(record: Dict[str, Any]) -> None:
     """Appends one record. Always stamps a UTC timestamp; caller supplies
     the rest (market_open, exits, symbol verdicts, trade decision, error)."""
     record = {"timestamp": datetime.now(timezone.utc).isoformat(), **record}
+    # Caviardage sur la ligne SERIALISEE : une cle enfouie a n'importe quelle
+    # profondeur du dictionnaire est attrapee, sans avoir a parcourir la
+    # structure ni a deviner quels champs peuvent en contenir.
     with LOG_FILE.open("a") as f:
-        f.write(json.dumps(record) + "\n")
+        f.write(caviarder(json.dumps(record)) + "\n")
 
 
 def log_run_or_dump(record: Dict[str, Any], context: str = "") -> bool:
