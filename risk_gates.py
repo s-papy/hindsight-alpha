@@ -1327,8 +1327,18 @@ def check_gates(
             "which is not a number. Every cap and every position size is a "
             "percentage of this figure, so nothing is sized until it reads "
             "cleanly." % (brut,))
-    if equity <= 0:
-        return RiskDecision(False, "could not read a usable equity figure from the account")
+    # `math.isfinite` ajoute le 27/08 : une equite a NaN ou infinie plantait
+    # plus loin sur « cannot convert float NaN to integer » -- fail-closed,
+    # donc sans danger, mais avec un message inutile, affiche a l'identique
+    # pour NaN ET pour l'infini. Les cas voisins (absente, zero, non
+    # numerique) ont tous une phrase qui dit ce qui ne va pas ; celui-la
+    # n'en avait pas.
+    if not math.isfinite(equity) or equity <= 0:
+        return RiskDecision(
+            False,
+            "could not read a usable equity figure from the account: got %r. "
+            "Every cap and every position size is a percentage of this "
+            "figure, so nothing is sized until it reads cleanly." % (brut,))
 
     account_id = account.get("id")
     state = _load_state()

@@ -36,6 +36,7 @@ as the first thing to verify once this runs against the real CLI, with
 from __future__ import annotations
 
 import json
+import math
 import re
 import shutil
 import subprocess
@@ -644,6 +645,43 @@ def find_near_the_money_contract(
     contracts = data["option_contracts"]
     if not contracts:
         return None
+
+    # AJOUTE le 27/08/2026, en fermant la famille NaN. La cle de tri ci-dessous
+    # fait `abs(float(strike) - spot)`, et min() compare avec `<` : TOUTE
+    # comparaison impliquant un NaN rend False, donc le PREMIER element reste.
+    # Mesure, memes contrats, deux ordres :
+    #
+    #     [strike "nan", strike "500"]  -> le contrat au strike ILLISIBLE gagne
+    #     [strike "500", strike "nan"]  -> le contrat a 500 gagne
+    #
+    # Le contrat retenu dependait donc de sa POSITION dans la reponse, et un
+    # contrat dont on n'a pas su lire le strike pouvait partir a l'ordre.
+    # C'est le meme mecanisme que le defaut d'ordre corrige le matin meme dans
+    # hindsight_guard, a un autre endroit.
+    #
+    # On ecarte les strikes illisibles plutot que de les laisser gagner. Si
+    # AUCUN n'est lisible alors qu'on a bien recu des contrats, on leve : « je
+    # n'ai pas su lire » n'est pas « aucun contrat », meme argument que juste
+    # au-dessus.
+    def _strike_lisible(c):
+        try:
+            return math.isfinite(float(c.get("strike_price")))
+        except (TypeError, ValueError):
+            return False
+
+    lisibles = [c for c in contracts if _strike_lisible(c)]
+    if not lisibles:
+        raise AlpacaCLIError(
+            "received %d option contract(s) for %s but could not read a "
+            "numeric strike_price on any of them. Refusing to pick one at "
+            "random -- with an unreadable strike, 'closest to spot' is decided "
+            "by list order, not by distance." % (len(contracts), underlying))
+    if len(lisibles) != len(contracts):
+        print("  WARNING: %d of %d option contracts for %s had an unreadable "
+              "strike_price and were skipped."
+              % (len(contracts) - len(lisibles), len(contracts), underlying),
+              flush=True)
+    contracts = lisibles
 
     # AJOUTE le 27/08/2026. La bande a +/-5% (ci-dessus, 24/08) a REDUIT la
     # troncature de page sans la fermer, et l'arithmetique le montre :

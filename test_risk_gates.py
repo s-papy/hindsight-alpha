@@ -2225,6 +2225,39 @@ class TestReponseDesContratsIllisible(unittest.TestCase):
                               "%s : le message ne nomme pas le symbole — %s"
                               % (cas, e.exception))
 
+    def test_un_strike_illisible_ne_gagne_pas_la_selection(self):
+        """La clé de tri fait `abs(float(strike) - spot)`, et min() compare
+        avec `<` : TOUTE comparaison impliquant un NaN rend False, donc le
+        PREMIER élément reste. Mesuré, mêmes contrats, deux ordres :
+
+            [strike "nan", strike "500"]  -> le contrat ILLISIBLE gagne
+            [strike "500", strike "nan"]  -> le contrat à 500 gagne
+
+        Le contrat retenu dépendait donc de sa POSITION dans la réponse, et un
+        contrat dont on n'a pas su lire le strike pouvait partir à l'ordre.
+        Même mécanisme que le défaut d'ordre corrigé le matin même dans
+        hindsight_guard, à un autre endroit."""
+        c = lambda k, sym: {"strike_price": k, "symbol": sym,
+                            "expiration_date": "2026-09-11"}
+        for page, cas in (([c("nan", "ILLISIBLE"), c("500", "BON")], "NaN en premier"),
+                          ([c("500", "BON"), c("nan", "ILLISIBLE")], "NaN en second"),
+                          ([c("inf", "ILLISIBLE"), c("500", "BON")], "inf en premier")):
+            with self.subTest(cas=cas):
+                self.assertEqual(
+                    self._demander({"option_contracts": page}), "BON",
+                    "%s : le contrat au strike illisible a été retenu — le "
+                    "choix dépend de l'ordre de la réponse" % cas)
+
+    def test_aucun_strike_lisible_n_est_pas_zero_contrat(self):
+        """Si l'on a bien REÇU des contrats mais qu'aucun strike ne se lit,
+        « aucun contrat » serait faux. Même argument que la réponse
+        incomprise juste au-dessus."""
+        c = lambda k, sym: {"strike_price": k, "symbol": sym,
+                            "expiration_date": "2026-09-11"}
+        with self.assertRaises(alpaca_cli.AlpacaCLIError) as e:
+            self._demander({"option_contracts": [c("nan", "A"), c("x", "B")]})
+        self.assertIn("SPY", str(e.exception))
+
     def test_zero_contrat_reste_zero_contrat(self):
         """Témoin, et il compte : une réponse COMPRISE annonçant zéro contrat
         est un résultat légitime, pas une erreur. Confondre les deux dans
@@ -2270,10 +2303,20 @@ class TestLectureDeLEquite(HarnaisPlafonds, BaseExit):
             alpaca_cli.get_account = vrai
 
     def test_une_equite_illisible_refuse_avec_une_phrase(self):
+        """Les valeurs NON FINIES ont été ajoutées le 27/08 au soir, en
+        fermant la famille NaN. Elles ne présentaient pas le danger du coût
+        non fini — une équité à NaN PLANTAIT plus loin, sur « cannot convert
+        float NaN to integer », donc fail-closed — mais avec un message
+        inutile, affiché à l'identique pour NaN et pour l'infini, alors que
+        les quatre cas voisins ont tous une phrase qui dit ce qui ne va pas."""
         for valeur, cas in (("non-numerique", "chaîne non numérique"),
                             (None, "None"),
                             ({"a": 1}, "objet"),
-                            ("", "chaîne vide")):
+                            ("", "chaîne vide"),
+                            ("nan", "chaîne « nan »"),
+                            ("inf", "chaîne « inf »"),
+                            (float("nan"), "flottant NaN"),
+                            (float("inf"), "flottant Infinity")):
             with self.subTest(cas=cas):
                 d = self._avec_equite(valeur)
                 self.assertFalse(self._autorise(d),
