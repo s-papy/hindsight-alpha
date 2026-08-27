@@ -72,6 +72,10 @@ def position(symbol: str = "SPY260831P00764000", plpc: str = "-0.10") -> dict:
     }
 
 
+# Sentinelle : distingue « champ absent » de « champ à None ».
+_ABSENT = object()
+
+
 class BaseExit(unittest.TestCase):
     """Isolates state.json and stubs every call that would touch the network."""
 
@@ -1901,6 +1905,87 @@ class TestQualiteDesBarres(unittest.TestCase):
                          "qualité : le contrôle ne s'appliquerait jamais")
 
 
+
+
+class TestLectureDeLEquite(HarnaisPlafonds, BaseExit):
+    """L'équité est la base de TOUT : chaque plafond et chaque taille de
+    position en est un pourcentage. Ajouté le 27/08 au soir.
+
+    Les cas « champ absent » et « valeur zéro » étaient déjà couverts par un
+    refus clair. Mesuré, il restait la valeur NON NUMÉRIQUE :
+
+        equity absent          -> refus clair
+        equity = "0"           -> refus clair
+        equity = "non-numeric" -> ValueError brut
+
+    Le SENS de l'échec était déjà bon — l'exception remonte, agent.py la
+    rattrape par symbole et journalise `error`, donc rien ne trade à
+    l'aveugle. Ce qui manquait, c'est le MESSAGE : « could not convert string
+    to float » ne nomme ni l'équité, ni le compte, ni quoi faire, alors que
+    les deux autres cas ont une phrase qui le dit.
+
+    Échouer fermé ne dispense pas d'échouer clairement — c'est la même
+    exigence que partout ailleurs dans ce fichier."""
+
+    def _avec_equite(self, valeur):
+        compte = {"id": "compte-test", "status": "ACTIVE"}
+        if valeur is not _ABSENT:
+            compte["equity"] = valeur
+        vrai = alpaca_cli.get_account
+        alpaca_cli.get_account = lambda: compte
+        try:
+            return self._decide()
+        finally:
+            alpaca_cli.get_account = vrai
+
+    def test_une_equite_illisible_refuse_avec_une_phrase(self):
+        for valeur, cas in (("non-numerique", "chaîne non numérique"),
+                            (None, "None"),
+                            ({"a": 1}, "objet"),
+                            ("", "chaîne vide")):
+            with self.subTest(cas=cas):
+                d = self._avec_equite(valeur)
+                self.assertFalse(self._autorise(d),
+                                 "%s : le trade passe" % cas)
+                self.assertIn("could not read a usable equity figure",
+                              (d.reason or "").lower(),
+                              "%s : le refus ne dit pas que l'équité est "
+                              "illisible — %s" % (cas, d.reason))
+
+    def test_une_equite_absente_ou_nulle_refuse_EN_LE_DISANT(self):
+        """Témoin des deux cas déjà couverts — et l'assertion porte sur la
+        RAISON, pas seulement sur le refus.
+
+        Resserré après qu'une mutation soit restée verte : retirer le garde
+        `equity <= 0` ne cassait rien, parce qu'un autre plafond finit par
+        refuser de toute façon. Mesuré, la raison devient alors :
+
+            « sector concentration cap reached for 'broad_market':
+              $0.00 already committed, >= the 1.5% sector cap »
+
+        Techniquement vraie, et complètement trompeuse : un opérateur irait
+        chercher une exposition sectorielle alors que le vrai problème est
+        qu'on n'a pas su lire l'équité du compte. Le garde n'existe pas pour
+        provoquer le refus — il existe pour en donner la BONNE raison."""
+        for valeur, cas in ((_ABSENT, "champ absent"), ("0", "zéro")):
+            with self.subTest(cas=cas):
+                d = self._avec_equite(valeur)
+                self.assertFalse(self._autorise(d), "%s : le trade passe" % cas)
+                # La PHRASE du garde, pas le mot « equity » : celui-ci
+                # apparaît de toute façon dans le détail de dimensionnement
+                # (« $0.00 of $0.00 equity ») en fin de message, ce qui
+                # faisait passer une assertion par sous-chaîne alors que le
+                # garde était retiré.
+                self.assertIn("could not read a usable equity figure",
+                              (d.reason or "").lower(),
+                              "%s : refusé, mais pour une raison qui ne dit "
+                              "pas que l'équité est illisible — %s"
+                              % (cas, d.reason))
+
+    def test_une_equite_normale_passe_toujours(self):
+        """Témoin : un garde qui refuse tout ne protège rien."""
+        d = self._avec_equite(str(self.EQUITE))
+        self.assertTrue(self._autorise(d), d.reason)
 
 class TestHorlogeDeMarche(unittest.TestCase):
     """Ajouté le 27/08 au soir, la veille du kickoff.

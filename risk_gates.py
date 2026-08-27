@@ -1248,7 +1248,33 @@ def check_gates(
             "Exits keep running; remove the HALT file to resume." % motif_pause)
 
     account = alpaca_cli.get_account()
-    equity = float(account.get("equity", account.get("portfolio_value", 0)))
+    # ELARGI le 27/08/2026. Le garde `equity <= 0` ci-dessous couvrait deja le
+    # champ ABSENT et la valeur ZERO -- les deux cas les plus probables -- mais
+    # pas une valeur NON NUMERIQUE. Mesure :
+    #
+    #     equity absent          -> refus clair, « could not read a usable ... »
+    #     equity = "0"           -> refus clair
+    #     equity = "non-numeric" -> ValueError: could not convert string to
+    #                               float: 'non-numeric'
+    #
+    # Le sens de l'echec etait deja bon -- l'exception remonte, agent.py la
+    # rattrape par symbole et journalise `error`, donc rien ne trade a
+    # l'aveugle. Ce qui manquait, c'est le MESSAGE : « could not convert
+    # string to float » ne nomme ni l'equite, ni le compte, ni quoi faire,
+    # alors que les deux autres cas ont une phrase qui le dit.
+    #
+    # Meme exigence que partout ailleurs dans ce fichier : echouer ferme ne
+    # dispense pas d'echouer clairement.
+    brut = account.get("equity", account.get("portfolio_value", 0))
+    try:
+        equity = float(brut)
+    except (TypeError, ValueError):
+        return RiskDecision(
+            False,
+            "could not read a usable equity figure from the account: got %r, "
+            "which is not a number. Every cap and every position size is a "
+            "percentage of this figure, so nothing is sized until it reads "
+            "cleanly." % (brut,))
     if equity <= 0:
         return RiskDecision(False, "could not read a usable equity figure from the account")
 
