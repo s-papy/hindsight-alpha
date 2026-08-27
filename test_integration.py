@@ -854,5 +854,76 @@ class TestLivrablesCroisesAvecLaSource(unittest.TestCase):
         self.assertNotEqual(code, 0)
 
 
+class TestVerrouDitHebdomadaire(unittest.TestCase):
+    """risk_gates.py titre son propre commentaire « NOM TROMPEUR » et écrit :
+    « Ce verrou n'est pas hebdomadaire. » Il compare l'équité courante à une
+    référence posée UNE FOIS, sans aucune remise à zéro en fin de semaine.
+
+    Le README porte la correction. Les trois autres livrables — ceux qu'un jury
+    lit — décrivaient un verrou qui repart à zéro chaque semaine. Il ne repart
+    jamais : un lecteur en déduirait que l'agent reprend le lundi suivant.
+
+    Ces tests portent sur le COMPORTEMENT du contrôle, pas sur l'état actuel des
+    livrables : asserter « ces trois fichiers sont signalés » deviendrait faux
+    le jour où ils sont reformulés, et un test qui casse quand on corrige le
+    dossier est un test qui décourage de le corriger.
+    """
+
+    def _alertes(self, contenu):
+        import garde_fou
+        d = Path(tempfile.mkdtemp(prefix="hindsight-hebdo-"))
+        (d / "README.md").write_text(contenu, encoding="utf-8")
+        vraie = garde_fou.RACINE
+        avant = len(garde_fou.alertes)
+        garde_fou.RACINE = str(d)
+        try:
+            garde_fou.controle_verrou_dit_hebdomadaire()
+            return [a[1] for a in garde_fou.alertes[avant:]]
+        finally:
+            garde_fou.RACINE = vraie
+            del garde_fou.alertes[avant:]
+            shutil.rmtree(d, ignore_errors=True)
+
+    def test_une_formulation_hebdomadaire_seule_est_signalee(self):
+        alertes = self._alertes("The agent has a 3% weekly drawdown lock.")
+        self.assertTrue(alertes, "un livrable décrit le verrou comme "
+                                 "hebdomadaire et rien ne le dit")
+        self.assertIn("HEBDOMADAIRE", alertes[0])
+
+    def test_le_francais_aussi(self):
+        alertes = self._alertes(
+            "Un verrou automatique si le compte perd 3% sur la semaine.")
+        self.assertTrue(alertes)
+
+    def test_la_nuance_presente_desamorce_l_alerte(self):
+        """C'est ainsi que le README reste vert : il dit « weekly » ET
+        explique que ce n'est pas hebdomadaire."""
+        alertes = self._alertes(
+            "Named \"weekly\" in the code, but measured from the first "
+            "recorded equity — there is no week-boundary reset.")
+        self.assertEqual(alertes, [])
+
+    def test_un_texte_sans_rapport_ne_declenche_rien(self):
+        """Contrôle : « week » seul ne suffit pas, sinon toute mention de la
+        semaine du hackathon déclencherait."""
+        alertes = self._alertes(
+            "The dashboard is republished every day of the judged week.")
+        self.assertEqual(alertes, [])
+
+    def test_le_README_reel_reste_vert(self):
+        """Le README porte la nuance aujourd'hui. S'il la perdait, ce test
+        tomberait — c'est le but."""
+        import garde_fou
+        avant = len(garde_fou.alertes)
+        try:
+            garde_fou.controle_verrou_dit_hebdomadaire()
+            nouvelles = [a for a in garde_fou.alertes[avant:]
+                         if a[0].endswith("README.md")]
+        finally:
+            del garde_fou.alertes[avant:]
+        self.assertEqual(nouvelles, [],
+                         "le README a perdu la nuance « no week-boundary reset »")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -1348,6 +1348,63 @@ def controle_hooks_actifs() -> None:
         )
 
 
+def controle_verrou_dit_hebdomadaire() -> None:
+    """Les livrables decrivent-ils le verrou de perte comme HEBDOMADAIRE ?
+
+    AJOUTE le 27/08/2026. risk_gates.py titre lui-meme son commentaire
+    « NOM TROMPEUR » et ecrit : « Ce verrou n'est pas hebdomadaire. » Il compare
+    l'equite courante a une reference posee UNE FOIS, sans aucune remise a zero
+    en fin de semaine -- verifie par test
+    (test_la_reference_ne_suit_PAS_le_sommet_ni_la_semaine).
+
+    Le README porte la correction explicitement : « Named "weekly" in the code,
+    but measured from the first [...] there is no week-boundary reset. »
+
+    Les TROIS AUTRES livrables -- ceux qu'un jury lit -- ne la portaient pas :
+
+        Video_Script.md  « un verrou automatique si le compte perd 3% sur la
+                          semaine »
+        Writeup.docx     « 3% weekly drawdown lock »
+        Deck.pptx        « 3% weekly drawdown — Sticky lock »
+
+    Ils decrivent un verrou qui repart a zero chaque semaine. Il ne repart
+    jamais. Un lecteur en deduirait que l'agent reprend le lundi suivant.
+
+    ALERTE et non blocage : c'est une formulation dans des documents de
+    soumission, pas une valeur fausse dans le code. Le choix de reformuler --
+    ou d'assumer le raccourci -- appartient a l'auteur. Ce qui ne lui appartient
+    pas, c'est de ne pas etre au courant.
+    """
+    CORRECTIONS = re.compile(
+        r"no week-boundary reset|not from the start of each week|"
+        r"pas hebdomadaire|n'est pas hebdomadaire|never resets|"
+        r"jamais remis a zero|jamais remis à zéro",
+        re.I,
+    )
+    PROXIMITE = re.compile(
+        r"(?:weekly|hebdomadaire|sur la semaine|per week)"
+        r"[^.\n]{0,60}(?:lock|drawdown|verrou|perte)"
+        r"|(?:lock|drawdown|verrou|perte)[^.\n]{0,60}"
+        r"(?:weekly|hebdomadaire|sur la semaine|per week)",
+        re.I,
+    )
+    for rel, texte in _charger_textes_livrables().items():
+        trouves = [m.group(0).strip() for m in PROXIMITE.finditer(texte)]
+        if not trouves:
+            continue
+        if CORRECTIONS.search(texte):
+            continue  # le livrable porte deja la nuance
+        alerte(
+            rel,
+            "decrit le verrou de perte comme HEBDOMADAIRE (« %s ») alors que "
+            "risk_gates.py dit explicitement l'inverse -- « Ce verrou n'est pas "
+            "hebdomadaire », il n'y a AUCUNE remise a zero en fin de semaine. Un "
+            "lecteur en deduirait que l'agent reprend le lundi suivant. Le README "
+            "porte la nuance, celui-ci non."
+            % trouves[0][:70],
+        )
+
+
 def main() -> int:
     print("=" * 74)
     print("GARDE-FOU — hindsight-alpha — %s" % datetime.now().strftime("%d/%m/%Y %H:%M"))
@@ -1367,6 +1424,7 @@ def main() -> int:
         controle_source_de_verite,
         controle_dependances_scellees,
         controle_hooks_actifs,
+        controle_verrou_dit_hebdomadaire,
     )
     for controle in CONTROLES:
         controle()
