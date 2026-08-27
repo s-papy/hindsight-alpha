@@ -126,10 +126,55 @@ def evaluate_symbol(symbol: str, sharpe_threshold: float) -> SymbolVerdict:
             return score_hv_window(window, split, bars)
 
         report = check_selection_leakage(CANDIDATE_HV_WINDOWS, score_fn, threshold=sharpe_threshold)
-        print(f"  hindsight_guard: {'OK' if report.agrees else 'LEAK DETECTED'} (winner: {report.full_winner})")
-
+        # CORRIGE le 27/08/2026. `report.agrees` est faux dans TROIS cas
+        # distincts -- les gagnants divergent, rien ne passe le seuil in-sample,
+        # ou une candidate n'a PAS PU etre notee -- et ce bloc les resumait tous
+        # par la MEME phrase fixe, en imprimant « LEAK DETECTED ». Mesure sur
+        # deux situations reelles :
+        #
+        #   fuite reelle       -> "hindsight_guard: winning HV window doesn't
+        #                         hold up in-sample"
+        #   donnees tronquees  -> exactement la meme phrase
+        #
+        # Consequence sur la page publique : renderLeakStat() compte les
+        # verdicts dont la raison commence par « hindsight_guard: » et les
+        # annonce comme « Hindsight leaks caught » -- le chiffre le plus mis en
+        # avant du projet. Un PROBLEME DE DONNEES y etait donc publie comme une
+        # prise du garde anti-fuite.
+        #
+        # C'est exactement l'echec d'honnetete que ce projet existe pour
+        # empecher, dans son mecanisme phare. Et report.summary() savait deja
+        # distinguer les trois : backtest.py l'utilise, agent.py le jetait.
+        #
+        # Le prefixe « hindsight_guard: » est desormais RESERVE aux vraies
+        # prises. Un « cannot conclude » porte un prefixe distinct, donc ne
+        # gonfle plus le compteur -- "hindsight_guard CANNOT CONCLUDE: ..." ne
+        # satisfait pas startswith("hindsight_guard:").
         if not report.agrees:
-            return SymbolVerdict(symbol, False, "hindsight_guard: winning HV window doesn't hold up in-sample")
+            if report.unscorable:
+                etiquette = "CANNOT CONCLUDE"
+                raison = (
+                    "hindsight_guard CANNOT CONCLUDE: no score for "
+                    + ", ".join(str(c) for c in report.unscorable)
+                    + " -- a candidate that could not be scored is not a "
+                      "candidate that lost, so this selection cannot be "
+                      "certified leak-free")
+            elif not report.in_sample_clears_bar:
+                etiquette = "LEAK DETECTED"
+                raison = (
+                    "hindsight_guard: no candidate clears the in-sample "
+                    "threshold -- the full-window winner (%r) only wins on data "
+                    "that wasn't knowable yet" % (report.full_winner,))
+            else:
+                etiquette = "LEAK DETECTED"
+                raison = (
+                    "hindsight_guard: full-window winner (%r) and in-sample "
+                    "winner (%r) disagree"
+                    % (report.full_winner, report.in_sample_winner))
+            print(f"  hindsight_guard: {etiquette} (winner: {report.full_winner})")
+            return SymbolVerdict(symbol, False, raison)
+
+        print(f"  hindsight_guard: OK (winner: {report.full_winner})")
 
         vetted_window = report.full_winner
         is_cheap, hv_rank = today_regime(bars, vetted_window)

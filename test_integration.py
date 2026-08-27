@@ -194,6 +194,42 @@ class TestPipelineComplet(BaseIntegration):
         self.assertEqual(self.ordres, [],
                          "un ordre est parti sur un symbole refusé pour fuite")
 
+    def test_un_probleme_de_donnees_n_est_pas_publie_comme_une_prise(self):
+        """`report.agrees` est faux dans TROIS cas — gagnants divergents, rien
+        au-dessus du seuil, ou candidate NON NOTABLE — et agent.py les résumait
+        tous par la même phrase fixe en imprimant « LEAK DETECTED ».
+
+        renderLeakStat() compte les verdicts dont la raison commence par
+        « hindsight_guard: » et les annonce comme « Hindsight leaks caught » :
+        le chiffre le plus mis en avant du projet. Un problème de données y
+        était donc publié comme une prise du garde anti-fuite.
+
+        Le préfixe est désormais RÉSERVÉ aux vraies prises."""
+        self.barres = {"SPY": serie(325, graine=1)}      # trop peu de barres
+        record, sortie = self.lancer(("SPY",))
+        raison = record["verdicts"][0]["reason"]
+        self.assertIn("CANNOT CONCLUDE", raison)
+        self.assertFalse(
+            raison.startswith("hindsight_guard:"),
+            "un problème de données est compté comme une fuite attrapée par "
+            "le tableau de bord : %r" % raison)
+        self.assertIn("CANNOT CONCLUDE", sortie,
+                      "la sortie imprime encore « LEAK DETECTED » pour un cas "
+                      "où le garde dit ne pas pouvoir conclure")
+
+    def test_les_trois_refus_du_garde_ont_trois_raisons_distinctes(self):
+        """« the agent refuses to trade and prints why » (README). Une seule
+        phrase pour trois pourquoi différents n'est pas une explication."""
+        raisons = set()
+        for barres in (serie(self.N_BARRES, graine=3, calme_a_la_fin=60),
+                       serie(325, graine=1)):
+            self.barres = {"SPY": barres}
+            record, _ = self.lancer(("SPY",))
+            raisons.add(record["verdicts"][0]["reason"])
+        self.assertEqual(len(raisons), 2,
+                         "deux situations différentes produisent la même "
+                         "raison : %r" % raisons)
+
     def test_le_coupe_circuit_arrete_les_entrees_sans_toucher_aux_sorties(self):
         """L'asymétrie que le docstring de is_halted() promet, vérifiée sur le
         pipeline entier et non sur la fonction seule."""
