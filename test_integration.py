@@ -21,6 +21,7 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import math
 import os
 import shutil
 import subprocess
@@ -453,6 +454,129 @@ class TestToutDemarre(unittest.TestCase):
                 casses.append(nom)
         self.assertEqual(casses, [], "module(s) touchant au réseau à l'import : "
                          "%s" % ", ".join(casses))
+
+
+class TestSourcesDeVerite(unittest.TestCase):
+    """backtest.py ÉCRIT BACKTEST_RESULTS.md ; garde_fou.py le RELIT pour
+    valider les livrables destinés au jury. compare_strategies.py et le parseur
+    des Sharpes forment le même couple.
+
+    Rien ne vérifiait que l'écrivain et le lecteur soient d'accord. Si le format
+    dérive d'un côté, le contrôle 5 se tait — et on sait qu'il se tait sans
+    bloquer (« introuvable ou illisible — contrôle 5 sans effet »).
+    """
+
+    RACINE = Path(__file__).resolve().parent
+
+    def _dans(self, nom, contenu):
+        """Écrit `contenu` dans un dossier temporaire et y pointe garde_fou."""
+        import garde_fou
+        d = Path(tempfile.mkdtemp(prefix="hindsight-verite-"))
+        (d / nom).write_text(contenu, encoding="utf-8")
+        vraie = garde_fou.RACINE
+        garde_fou.RACINE = str(d)
+        try:
+            yield garde_fou
+        finally:
+            garde_fou.RACINE = vraie
+            shutil.rmtree(d, ignore_errors=True)
+
+    def _parse_comparaison(self, corps):
+        import garde_fou
+        entete = ("| symbol | vol_strategy: window | agrees? | in-sample Sharpe |\n"
+                  "|---|---|---|---|\n")
+        d = Path(tempfile.mkdtemp(prefix="hindsight-verite-"))
+        (d / "STRATEGY_COMPARISON.md").write_text(entete + corps, encoding="utf-8")
+        vraie = garde_fou.RACINE
+        garde_fou.RACINE = str(d)
+        try:
+            return garde_fou._parse_strategy_comparison()
+        finally:
+            garde_fou.RACINE = vraie
+            shutil.rmtree(d, ignore_errors=True)
+
+    def test_ce_que_backtest_ecrit_est_relu_a_l_identique(self):
+        """L'aller-retour complet, avec les VRAIES fonctions des deux côtés."""
+        import backtest
+        import garde_fou
+
+        def barres(graine, calme):
+            prix, out, x = 100.0, [], graine
+            n = vol_strategy.MIN_TRADING_DAYS_FOR_SWEEP + 20
+            for i in range(n):
+                x = (1103515245 * x + 12345) % (2 ** 31)
+                amp = 1000 if i < n - calme else 25
+                prix *= 1.0 + ((x % (2 * amp + 1)) - amp) / 100000.0
+                out.append(vol_strategy.Bar(close=prix))
+            return out
+
+        # graine 3 produit une FUITE, graine 5 un symbole propre : les deux
+        # branches du parseur sont exercées.
+        res = [backtest.backtest_symbol("SPY", barres(5, 60)),
+               backtest.backtest_symbol("XLK", barres(3, 60))]
+        d = Path(tempfile.mkdtemp(prefix="hindsight-verite-"))
+        (d / "BACKTEST_RESULTS.md").write_text(
+            backtest.format_report(res), encoding="utf-8")
+        vraie = garde_fou.RACINE
+        garde_fou.RACINE = str(d)
+        try:
+            relu = garde_fou._parse_backtest_results()
+        finally:
+            garde_fou.RACINE = vraie
+            shutil.rmtree(d, ignore_errors=True)
+
+        self.assertIsNotNone(relu, "garde_fou ne sait plus lire ce que "
+                                   "backtest.py vient d'écrire")
+        for r in res:
+            sym = r["symbol"]
+            verdict = r["hindsight_guard_verdict"]
+            w = r["windows"][verdict["full_winner"]]
+            self.assertIn(sym, relu)
+            self.assertEqual(relu[sym]["leaked"], not verdict["agrees"])
+            self.assertEqual(relu[sym]["win_rate"], w["win_rate_on_trade_days_pct"])
+            self.assertEqual(relu[sym]["concentration"], w["top5_share_pct"])
+            self.assertEqual(relu[sym]["trade_days"], w["trade_days"])
+
+    def test_un_sharpe_negatif_ne_fait_pas_disparaitre_le_symbole(self):
+        """Le motif était `([\d.]+)`, incapable de matcher un signe moins. Un
+        Sharpe in-sample négatif n'est pas une anomalie ici : c'est l'histoire
+        d'origine du projet."""
+        r = self._parse_comparaison(
+            "| SPY | 10d | yes | -0.750 |\n| GLD | 20d | yes | 1.956 |\n")
+        self.assertEqual(sorted(r or {}), ["GLD", "SPY"],
+                         "un symbole au Sharpe négatif disparaît de l'ensemble "
+                         "de référence, en silence")
+        self.assertEqual(r["SPY"]["sharpe"], -0.75)
+
+    def test_un_sharpe_nan_ne_fait_pas_disparaitre_le_symbole(self):
+        """Depuis le correctif de _sharpe du 27/08, nan est une valeur légitime
+        du rapport."""
+        r = self._parse_comparaison(
+            "| SPY | 10d | yes | nan |\n| GLD | 20d | yes | 1.956 |\n")
+        self.assertEqual(sorted(r or {}), ["GLD", "SPY"])
+        self.assertFalse(math.isfinite(r["SPY"]["sharpe"]))
+
+    def test_tous_negatifs_ne_vide_pas_le_controle(self):
+        """Le pire cas : le parseur rendait None, donc l'ensemble de référence
+        était vide et le contrôle du Sharpe était sauté ENTIÈREMENT."""
+        r = self._parse_comparaison(
+            "| SPY | 10d | yes | -0.750 |\n| GLD | 20d | yes | -1.200 |\n")
+        self.assertEqual(sorted(r or {}), ["GLD", "SPY"])
+
+    def test_un_format_illisible_est_signale_et_non_confondu_avec_une_absence(self):
+        import garde_fou
+        # La liste s'appelle `alertes`, en minuscules. La première version de ce
+        # test testait `hasattr(garde_fou, "ALERTES")` — faux — et sautait donc
+        # son assertion en silence. Un test qui ne vérifie rien passe toujours ;
+        # on nomme l'attribut sans repli, pour que le renommer fasse tomber le
+        # test au lieu de le vider.
+        avant = len(garde_fou.alertes)
+        r = self._parse_comparaison("SPY vol_strategy 10 jours yes 1.598\n")
+        self.assertIsNone(r, "prérequis : rien ne doit être lisible ici")
+        self.assertGreater(len(garde_fou.alertes), avant,
+                           "un fichier présent mais illisible est traité comme "
+                           "un fichier absent, sans un mot")
+        self.assertIn("format a change", garde_fou.alertes[-1][1])
 
 
 if __name__ == "__main__":

@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import re
 import subprocess
@@ -599,12 +600,47 @@ def _parse_strategy_comparison() -> dict | None:
         return None
     texte = open(chemin, encoding="utf-8").read()
     resultat = {}
+    # CORRIGE le 27/08/2026. Le motif etait `([\d.]+)`, qui ne peut matcher ni
+    # un Sharpe NEGATIF ni un `nan`. Mesure sur quatre tableaux fabriques :
+    #
+    #     tous positifs      -> ['GLD', 'SPY']
+    #     un Sharpe NEGATIF  -> ['GLD']   SPY disparu EN SILENCE
+    #     un Sharpe NaN      -> ['GLD']   SPY disparu EN SILENCE
+    #     tous negatifs      -> None      les deux disparus
+    #
+    # Un Sharpe in-sample negatif n'est pas une anomalie ici : c'est
+    # L'HISTOIRE D'ORIGINE du projet -- « The in-sample score was negative for
+    # every candidate » (hindsight_guard.py). Et depuis le correctif de _sharpe
+    # du meme jour, `nan` est une valeur legitime du rapport.
+    #
+    # Les deux directions d'echec etaient silencieuses :
+    #   - un symbole qui disparait -> son Sharpe n'est plus une reference
+    #     connue, donc une citation LEGITIME de ce chiffre dans un livrable
+    #     serait BLOQUEE comme inconnue (faux positif) ;
+    #   - tous qui disparaissent -> `sharpes_valides` est vide et le controle
+    #     du Sharpe est saute entierement (faux negatif).
     for m in re.finditer(
-        r"\|\s*(\w+)\s*\|\s*\d+d\s*\|\s*(yes|\*\*LEAK\*\*)\s*\|\s*([\d.]+)\s*\|", texte
+        r"\|\s*(\w+)\s*\|\s*\d+d\s*\|\s*(yes|\*\*LEAK\*\*)\s*\|\s*(-?[\d.]+|[Nn]a[Nn])\s*\|", texte
     ):
-        symbole, agrees, sharpe = m.group(1), m.group(2), float(m.group(3))
+        symbole, agrees, brut = m.group(1), m.group(2), m.group(3)
+        try:
+            sharpe = float(brut)
+        except ValueError:
+            continue
         resultat[symbole] = {"leaked": agrees != "yes", "sharpe": sharpe}
-    return resultat or None
+
+    if not resultat:
+        # Le fichier EXISTE mais rien n'en a ete tire : c'est un changement de
+        # format, pas une absence. Le dire, au lieu de rendre None comme si le
+        # fichier n'etait pas la.
+        alerte(
+            "STRATEGY_COMPARISON.md",
+            "present mais AUCUNE ligne de tableau n'a pu etre lue -- le format a "
+            "change ? Le controle du Sharpe cite dans les livrables est sans effet "
+            "tant que ce fichier n'est pas relisible.",
+        )
+        return None
+    return resultat
 
 
 def _parse_univers_actuel() -> list | None:
@@ -744,8 +780,24 @@ def controle_source_de_verite() -> None:
     nb_leaks = len(fuites)
 
     comparaison = _parse_strategy_comparison() or {}
+    # AJOUTE le 27/08 : un Sharpe NON FINI (nan) n'est pas une valeur de
+    # reference -- on ne peut pas valider une citation contre un chiffre qui
+    # n'a pas pu etre calcule. On l'exclut, et on le DIT plutot que de reduire
+    # silencieusement l'ensemble de reference (ce qui ferait bloquer a tort une
+    # citation legitime d'un AUTRE symbole).
+    non_finis = sorted(s for s, d in comparaison.items()
+                       if not d["leaked"] and not math.isfinite(d["sharpe"]))
+    if non_finis:
+        alerte(
+            "STRATEGY_COMPARISON.md",
+            "Sharpe non fini (nan) pour %s -- ces symboles sortent de l'ensemble "
+            "de reference du controle des Sharpes cites. Regenere le fichier : un "
+            "nan signale une fenetre que la strategie n'a pas pu noter."
+            % ", ".join(non_finis),
+        )
     sharpes_valides = {
-        round(d["sharpe"], 2) for s, d in comparaison.items() if not d["leaked"]
+        round(d["sharpe"], 2) for s, d in comparaison.items()
+        if not d["leaked"] and math.isfinite(d["sharpe"])
     }
 
     univers_actuel = _parse_univers_actuel()
