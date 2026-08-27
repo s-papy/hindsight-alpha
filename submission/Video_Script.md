@@ -1,10 +1,10 @@
 # Hindsight Alpha — script vidéo de démo
 
-*Cible : **~4:30**, démo HALT exclue. Chiffre MESURÉ, pas estimé : 623 mots prononcés, comptés section par section sur le texte ci-dessous, plus le temps des manipulations à l'écran. Contrainte officielle confirmée le 25/08 (page lablab "Submission Guidelines") : **maximum 5 minutes, format MP4**, structure attendue "introduction → discuter la présentation PDF → montrer les fonctionnalités". Structure suivie du guide officiel lablab ("how to win an AI hackathon") : démo tôt, problème énoncé en moins de 30 secondes, ne pas cacher la rigueur derrière une prose ronflante. Le texte ci-dessous est un brouillon à dire avec tes mots, pas un texte à lire mot pour mot — adapte le ton, garde les chiffres exacts.*
+*Cible : **~4:30**, démo HALT exclue. Chiffre MESURÉ, pas estimé : **602 mots prononcés** (les didascalies entre crochets sont exclues — elles ne se disent pas), soit 4:09 à 145 mots/min, plus ~21 s de manipulations à l'écran. Le compte annoncé ici était 623 : irreproductible par aucune convention claire, donc remplacé par un chiffre que l'on peut re-dériver — compter les mots des lignes commençant par « > », didascalies retirées. Contrainte officielle confirmée le 25/08 (page lablab "Submission Guidelines") : **maximum 5 minutes, format MP4**, structure attendue "introduction → discuter la présentation PDF → montrer les fonctionnalités". Structure suivie du guide officiel lablab ("how to win an AI hackathon") : démo tôt, problème énoncé en moins de 30 secondes, ne pas cacher la rigueur derrière une prose ronflante. Le texte ci-dessous est un brouillon à dire avec tes mots, pas un texte à lire mot pour mot — adapte le ton, garde les chiffres exacts.*
 
 ---
 
-## 0:00–0:34 — Accroche (montrer le tableau de bord en direct)
+## 0:00–0:34 — Accroche (montrer le tableau de bord public)
 
 **À l'écran :** le tableau de bord public (`s-papy.github.io/hindsight-alpha`) ouvert dans le navigateur, la section "Recent decisions" visible.
 
@@ -26,7 +26,7 @@
 
 **À dire :**
 
-> "Voici un run réel. Pour chaque symbole de l'univers — SPY, GLD, XLK, XLV, volontairement choisis dans des secteurs non corrélés — l'agent affiche son verdict et pourquoi. [pointer un cas TRADEABLE, ex. SPY ou XLV] Ici, la fenêtre gagne sur tout l'historique ET sur la version cachée : pas de fuite, la volatilité est bon marché aujourd'hui, l'agent est prêt à trader. [pointer XLK — refusé de façon systématique, pas un cas rare à espérer pendant le tournage] Ici en revanche, XLK est refusé : sur tout l'historique, la fenêtre de 90 jours gagne ; mais en ne regardant que ce qui était connu avant, c'est la fenêtre de 10 jours qui gagne. Les deux ne sont pas d'accord — un vrai désaccord détecté sur de vraies données, pas un cas hypothétique — donc l'agent refuse XLK, à chaque run, jusqu'à ce que ça change. Chaque décision, y compris les refus, est journalisée dans `decision_log.jsonl` — c'est ce fichier-là qui alimente le tableau de bord public, en temps réel, tout au long de la semaine du hackathon."
+> "Voici un run réel. Pour chaque symbole de l'univers — SPY, GLD, XLK, XLV, volontairement choisis dans des secteurs non corrélés — l'agent affiche son verdict et pourquoi. [pointer un cas TRADEABLE, ex. SPY ou XLV] Ici, la fenêtre gagne sur tout l'historique ET sur la version cachée : pas de fuite, la volatilité est bon marché aujourd'hui, l'agent est prêt à trader. [pointer XLK — refusé de façon systématique, pas un cas rare à espérer pendant le tournage] Ici en revanche, XLK est refusé : sur tout l'historique, la fenêtre de 90 jours gagne ; mais en ne regardant que ce qui était connu avant, c'est la fenêtre de 10 jours qui gagne. Les deux ne sont pas d'accord — un vrai désaccord détecté sur de vraies données, pas un cas hypothétique — donc l'agent refuse XLK, à chaque run, jusqu'à ce que ça change. Chaque décision, y compris les refus, est journalisée dans `decision_log.jsonl` — c'est ce fichier-là qui alimente le tableau de bord public, republié toutes les 30 minutes en séance, tout au long de la semaine du hackathon."
 
 ## 2:31–3:07 — Les garde-fous de risque
 
@@ -50,7 +50,7 @@
 
 **À dire :**
 
-> "Hindsight Alpha, c'est un pari sur l'agent, pas sur la stratégie : le mécanisme qui refuse une fausse victoire compte plus que n'importe quel chiffre de performance sur une seule semaine de marché. Projet solo, code source public, dashboard en direct, licence MIT. Merci d'avoir regardé."
+> "Hindsight Alpha, c'est un pari sur l'agent, pas sur la stratégie : le mécanisme qui refuse une fausse victoire compte plus que n'importe quel chiffre de performance sur une seule semaine de marché. Projet solo, code source public, tableau de bord public, licence MIT. Merci d'avoir regardé."
 
 ---
 

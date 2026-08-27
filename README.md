@@ -11,8 +11,10 @@ at design time.**
 Entry for the **Alpaca AI Trading Agents Hackathon** (lablab.ai, deadline
 04/09/2026). Team: Hindsight Alpha.
 
-**Live dashboard: [s-papy.github.io/hindsight-alpha](https://s-papy.github.io/hindsight-alpha)** —
-every run, every refusal, every real order.
+**Public dashboard: [s-papy.github.io/hindsight-alpha](https://s-papy.github.io/hindsight-alpha)** —
+every run, every refusal, every real order. It is a *snapshot*, not a live feed: republished every
+30 minutes on weekdays from 15:30 to 22:00 CEST, plus once at 22:05 after the US close. The page
+says so itself when it goes stale.
 
 | | |
 |---|---|
