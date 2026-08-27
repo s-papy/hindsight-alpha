@@ -593,6 +593,13 @@ function outcomeBadge(d) {
       // La tentative de cloture a leve. La position est TOUJOURS OUVERTE.
       return '<span class="badge badge-red">close FAILED — position still open</span>';
     }
+    if (kinds.indexOf('unrecognised') !== -1) {
+      // AJOUTE 27/08, et signale par le test de pont AVANT d'avoir pu passer
+      // en gris : une position que manage_exits() ne sait pas classer. Elle
+      // porte du risque reel et AUCUN stop-loss ne peut lui etre applique.
+      // Meme severite qu'un echec de cloture.
+      return '<span class="badge badge-red">position not recognised — no stop-loss applies</span>';
+    }
     if (kinds.indexOf('unreadable') !== -1) {
       // Absence d'information, pas une cloture : on ignore si le stop est
       // franchi. Jaune plutot que rouge -- la position n'est pas forcement

@@ -160,6 +160,20 @@ class TestBadgeDuMoniteurDeSorties(BaseRendu):
         self.assertNotEqual(couleur, "green",
                             "un échec noyé dans deux réussites disparaît : %s" % texte)
 
+    def test_une_position_non_classee_est_rouge(self):
+        """`unrecognised` est né le 27/08 dans manage_exits(). Le test de pont
+        (test_integration.TestVocabulairePartageAvecLaPage) l'a signalé AVANT
+        qu'il n'atteigne cette page en `badge-muted` gris — exactement le
+        scénario pour lequel ce pont a été posé le matin même.
+
+        Sévérité rouge : la position porte du risque réel et aucun stop-loss
+        ne peut lui être appliqué."""
+        couleur, texte = self._badge("""{
+            run_type:'exit_monitor', outcome:'checked', dry_run:false,
+            exit_actions:[{symbol:'CONTRAT-INCONNU-42', kind:'unrecognised'}]}""")
+        self.assertEqual(couleur, "red", texte)
+        self.assertIn("no stop-loss", texte)
+
     def test_une_vraie_cloture_reste_verte(self):
         """Pendant obligatoire : si tout devient rouge, plus rien n'est lu."""
         couleur, texte = self._badge("""{

@@ -804,6 +804,10 @@ class ExitKind(str, Enum):
     WOULD_CLOSE = "would_close"
     UNREADABLE = "unreadable"  # position present, but its P&L% couldn't be read
     ERROR = "error"            # the close attempt itself raised
+    # AJOUTE le 27/08/2026 : position presente, mais on ne sait pas la CLASSER
+    # -- ni option reconnaissable, ni action declaree. Voir la boucle de
+    # manage_exits() pour la raison.
+    UNRECOGNISED = "unrecognised"
 
 
 @dataclass
@@ -1011,7 +1015,36 @@ def manage_exits(dry_run: bool = False) -> List[ExitAction]:
     for pos in positions:
         asset_class = str(pos.get("asset_class", "")).lower()
         symbol = str(pos.get("symbol", ""))
-        if "option" not in asset_class and not alpaca_cli._OCC_PATTERN.match(symbol):
+        # CORRIGE le 27/08/2026, en relisant le correctif d'entree du meme jour.
+        #
+        # Cette ligne etait une COPIE de la logique d'alpaca_cli.is_option_position(),
+        # et les deux copies avaient deja diverge : l'originale normalise la
+        # casse depuis ce matin, celle-ci non, donc un symbole en minuscules
+        # echappait encore ici. Une regle ecrite deux fois finit toujours par
+        # etre vraie a un seul endroit -- on appelle la fonction.
+        if not alpaca_cli.is_option_position(pos):
+            # Et surtout : le `continue` etait NU. Une position qu'on ne sait
+            # pas classer disparaissait sans AUCUNE trace -- pas d'ExitAction,
+            # pas de ligne de journal, rien sur le tableau de bord. Un P&L
+            # illisible produit au moins une action UNREADABLE visible ; ne pas
+            # savoir de QUOI il s'agit ne produisait rien du tout.
+            #
+            # Or manage_exits() est le seul mecanisme protegeant une position
+            # ouverte : Alpaca ne supporte pas les ordres bracket/OCO sur
+            # options. Ecarter en silence, c'est decider qu'une position n'a
+            # pas besoin de stop-loss sans l'avoir verifie.
+            #
+            # Une action ORDINAIRE reste ecartee en silence : elle est
+            # explicitement declaree comme telle, il n'y a pas de doute a
+            # signaler, et une alerte a chaque passage est le bruit qui apprend
+            # a ignorer un journal.
+            if "equity" not in asset_class:
+                actions.append(ExitAction(
+                    symbol, ExitKind.UNRECOGNISED,
+                    error="position ni reconnue comme option (asset_class=%r, "
+                          "symbole non-OCC) ni declaree comme action -- aucun "
+                          "stop-loss ne peut lui etre applique, verifier a la "
+                          "main" % asset_class))
             continue
 
         try:

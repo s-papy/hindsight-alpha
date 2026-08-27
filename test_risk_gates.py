@@ -743,6 +743,91 @@ class HarnaisPlafonds:
 
 
 
+
+class TestPositionNonReconnueALaSortie(BaseExit):
+    """Ajouté le 27/08, en relisant mon propre correctif d'une heure plus tôt.
+
+    J'avais écrit que « les sorties ne passent pas par là » parce que
+    manage_exits() lit list_positions() — toutes les positions — et non la
+    liste filtrée. C'était imprécis : elle les lit toutes, puis FILTRE EN
+    LIGNE, avec une copie de la même logique de reconnaissance :
+
+        if "option" not in asset_class and not _OCC_PATTERN.match(symbol):
+            continue
+
+    Deux conséquences, et la seconde est la vraie :
+
+    1. Le symbole n'est PAS normalisé ici (pas de .upper()), donc une écriture
+       en minuscules échappe encore au motif — là où alpaca_cli le gère
+       désormais. Deux copies de la même règle qui divergent.
+
+    2. Une position non reconnue est écartée par un `continue` NU : aucune
+       ExitAction, aucune ligne de journal, rien. Un P&L illisible produit au
+       moins une action UNREADABLE visible ; une position qu'on ne classe pas
+       ne produit AUCUNE trace. Or manage_exits est le seul mécanisme
+       protégeant une position ouverte — Alpaca ne supporte pas les ordres
+       bracket/OCO sur options.
+
+    C'est le jumeau, côté sortie, du trou corrigé côté entrée. Et c'est le
+    côté qui compte le plus."""
+
+    @staticmethod
+    def _pos(symbole, **extra):
+        d = {"symbol": symbole, "cost_basis": "840.00", "qty": "1",
+             "unrealized_plpc": "-0.60"}          # au-delà du stop-loss
+        d.update(extra)
+        return d
+
+    def _actions(self, positions):
+        self.positions = list(positions)
+        return risk_gates.manage_exits(dry_run=True)
+
+    def test_un_symbole_en_minuscules_est_toujours_gere(self):
+        """L'assertion porte sur le KIND, pas sur « une action existe ».
+
+        Première version : `assertTrue(actions)`. Une mutation l'a passée au
+        vert en remettant la reconnaissance dupliquée — la position tombait
+        alors dans la branche UNRECOGNISED, qui produit bien une action, et
+        le test était satisfait. Or une position à −60 % doit être FERMÉE, pas
+        signalée comme non classée. « Il s'est passé quelque chose » n'est pas
+        « la bonne chose s'est passée »."""
+        actions = self._actions([self._pos("spy260831p00764000")])
+        self.assertTrue(
+            actions,
+            "une position au-delà de son stop-loss est ignorée parce que son "
+            "symbole est en minuscules : aucune sortie, aucune trace")
+        self.assertEqual(
+            actions[0].kind, risk_gates.ExitKind.WOULD_CLOSE,
+            "la position en minuscules est vue mais pas GÉRÉE (kind=%s) : son "
+            "stop-loss n'est toujours pas appliqué" % actions[0].kind)
+
+    def test_une_position_non_reconnue_laisse_une_trace(self):
+        """Le point central. Écarter en silence une position qu'on ne sait pas
+        classer, c'est décider qu'elle n'a pas besoin de stop-loss sans
+        l'avoir vérifié."""
+        actions = self._actions([self._pos("CONTRAT-INCONNU-42")])
+        self.assertTrue(
+            actions,
+            "une position non reconnue disparaît sans une ligne : rien dans "
+            "decision_log.jsonl, rien sur le tableau de bord")
+        self.assertIn("CONTRAT-INCONNU-42", str(actions[0]))
+
+    def test_une_action_ordinaire_reste_geree(self):
+        """Témoin n°1 : une vraie action doit rester écartée en silence, sinon
+        chaque passage journaliserait du bruit."""
+        actions = self._actions([self._pos("AAPL", asset_class="us_equity")])
+        self.assertEqual(
+            actions, [],
+            "une position actions ordinaire produit une alerte : le bruit "
+            "permanent est ce qui apprend à ignorer un journal")
+
+    def test_une_option_normale_est_toujours_fermee(self):
+        """Témoin n°2 : le chemin nominal n'a pas bougé."""
+        actions = self._actions([self._pos("SPY260831P00764000",
+                                           asset_class="us_option")])
+        self.assertTrue(actions)
+        self.assertEqual(actions[0].kind, risk_gates.ExitKind.WOULD_CLOSE)
+
 class TestSymboleOCCNonReconnu(HarnaisPlafonds, BaseExit):
     """Ajouté le 27/08. La règle « jamais deux positions sur le même
     sous-jacent » — énoncée dans le deck, le write-up et le script vidéo —
