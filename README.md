@@ -307,7 +307,7 @@ cp .env.example .env
 # Alpaca dashboard, Home page -> API Keys widget). Never the live-account keys.
 
 # 4. Run
-python3 -m unittest discover   # 132 offline tests, no credentials needed
+python3 -m unittest discover   # 137 offline tests, no credentials needed
 python test_connection.py      # confirms CLI install + credentials + network
 python agent.py --dry-run      # runs the full leakage check, no order placed
 python agent.py                # if vetted, places a real (paper) options order
@@ -352,10 +352,12 @@ python agent.py                # if vetted, places a real (paper) options order
 - `test_agent.py` — the orchestration: what happens when an order submission
   times out (the order may have landed), what a startup refusal records, and
   what the scheduled LaunchAgents are allowed to do unattended.
-- `test_integration.py` — the whole pipeline end to end, with only the
-  `alpaca_cli` boundary stubbed: strategy, hindsight guard, regime check, risk
-  gates, sizing, order submission and logging all run for real. Deterministic
-  synthetic price series, no network.
+- `test_integration.py` — both entry points end to end, with only the
+  `alpaca_cli` boundary stubbed. For `agent.py`: strategy, hindsight guard,
+  regime check, risk gates, sizing, order submission and logging all run for
+  real. For `monitor_exits.py`: the close chain, the every-run status marker,
+  and the heartbeat that keeps a persistent failure from flooding the published
+  log. Deterministic synthetic price series, no network.
 - `test_dashboard.py` — the published page's own JavaScript, extracted from
   `docs/index.html` and executed: verdict badges, the per-symbol line for every
   record shape the committed log still contains, the monitor health banner, the

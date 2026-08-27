@@ -273,5 +273,113 @@ class TestPipelineComplet(BaseIntegration):
         self.assertEqual(entrees[0]["outcome"], record["outcome"])
 
 
+class TestMoniteurDeSorties(BaseIntegration):
+    """monitor_exits.main() tourne toutes les 15 minutes sans surveillance et
+    n'avait AUCUNE couverture d'intégration. C'est pourtant la seule protection
+    d'une position ouverte : Alpaca ne supporte pas les ordres bracket sur
+    options.
+
+    Les pièces (manage_exits, _filter_for_logging, le statut de dernière
+    exécution) sont testées séparément ; leur assemblage, jamais.
+    """
+
+    def setUp(self):
+        super().setUp()
+        import monitor_exits
+        self.monitor = monitor_exits
+        self._m = (monitor_exits.MONITOR_STATUS_FILE, monitor_exits.DEDUP_FILE)
+        monitor_exits.MONITOR_STATUS_FILE = self.tmp / "monitor_last_run.json"
+        monitor_exits.DEDUP_FILE = self.tmp / "dedup.json"
+        self._argv = list(sys.argv)
+
+    def tearDown(self):
+        self.monitor.MONITOR_STATUS_FILE, self.monitor.DEDUP_FILE = self._m
+        sys.argv = self._argv
+        super().tearDown()
+
+    def lancer_moniteur(self, dry_run=False):
+        sys.argv = ["monitor_exits.py"] + (["--dry-run"] if dry_run else [])
+        sortie = io.StringIO()
+        with contextlib.redirect_stdout(sortie):
+            self.monitor.main()
+        return sortie.getvalue()
+
+    def statut(self):
+        return json.loads(
+            self.monitor.MONITOR_STATUS_FILE.read_text(encoding="utf-8"))
+
+    def _position(self, symbole, plpc):
+        return {"symbol": symbole, "asset_class": "us_option",
+                "cost_basis": "500.0", "unrealized_plpc": plpc, "qty": "1"}
+
+    def test_une_position_sous_le_stop_est_fermee_et_journalisee(self):
+        self.positions = [self._position("SPY260904C00500000", "-0.55")]
+        fermees = []
+        alpaca_cli.close_position = lambda s: fermees.append(s)
+        self.lancer_moniteur()
+        self.assertEqual(fermees, ["SPY260904C00500000"])
+        self.assertEqual(self.statut()["outcome"], "checked")
+        entrees = self.journal()
+        self.assertTrue(entrees, "une vraie fermeture n'a laissé aucune trace "
+                                 "dans la preuve publiée")
+        self.assertEqual(entrees[-1]["run_type"], "exit_monitor")
+
+    def test_une_position_dans_les_clous_ne_pollue_pas_le_journal(self):
+        """Le moniteur tourne ~26 fois par jour de bourse. Journaliser chaque
+        « je ne fais rien » noierait les vraies décisions dans la fenêtre des
+        30 derniers enregistrements que le tableau de bord affiche."""
+        self.positions = [self._position("SPY260904C00500000", "-0.10")]
+        self.lancer_moniteur()
+        self.assertEqual(self.journal(), [],
+                         "un passage de routine a écrit dans decision_log.jsonl")
+        self.assertEqual(self.statut()["outcome"], "checked",
+                         "le statut de dernière exécution doit être écrit à "
+                         "CHAQUE passage, lui — c'est ce qui distingue « page "
+                         "périmée » de « moniteur mort »")
+
+    def test_un_essai_a_blanc_ne_ferme_rien(self):
+        self.positions = [self._position("SPY260904C00500000", "-0.55")]
+        fermees = []
+        alpaca_cli.close_position = lambda s: fermees.append(s)
+        self.lancer_moniteur(dry_run=True)
+        self.assertEqual(fermees, [], "un --dry-run a fermé une vraie position")
+
+    def test_une_panne_repetee_n_est_journalisee_qu_une_fois_par_heure(self):
+        """Le battement de cœur, vu depuis le processus entier : une panne
+        persistante est signalée la première fois, puis étouffée jusqu'à ce que
+        HEARTBEAT_SECONDS soit écoulé — sinon 26 entrées identiques par jour
+        chasseraient la décision quotidienne de l'agent hors de la fenêtre."""
+        self.positions = [self._position("SPY260904C00500000", "-0.55")]
+
+        def casse(symbole):
+            raise alpaca_cli.AlpacaCLIError("panne persistante")
+
+        alpaca_cli.close_position = casse
+        for _ in range(3):
+            self.lancer_moniteur()
+        self.assertEqual(len(self.journal()), 1,
+                         "la même panne a été journalisée à chaque passage : "
+                         "le battement de cœur ne fonctionne pas")
+
+    def test_une_panne_qui_se_resout_puis_revient_est_re_signalee(self):
+        """« Une signature qui cesse d'apparaître est retirée de l'état » —
+        sinon un horodatage périmé la ferait taire pour toujours."""
+        self.positions = [self._position("SPY260904C00500000", "-0.55")]
+        alpaca_cli.close_position = lambda s: (_ for _ in ()).throw(
+            alpaca_cli.AlpacaCLIError("panne A"))
+        self.lancer_moniteur()
+        self.assertEqual(len(self.journal()), 1)
+
+        self.positions = []                      # la panne disparaît
+        self.lancer_moniteur()
+        self.assertEqual(len(self.journal()), 1, "rien de neuf à journaliser")
+
+        self.positions = [self._position("SPY260904C00500000", "-0.55")]
+        self.lancer_moniteur()
+        self.assertEqual(len(self.journal()), 2,
+                         "la panne est revenue et reste étouffée par un "
+                         "horodatage périmé")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
