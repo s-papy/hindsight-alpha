@@ -166,10 +166,47 @@ def controle_env_hackathon_scelle() -> None:
     else:
         bloque(".gitignore", "ABSENT — .env.hackathon ne serait protégé par rien.")
 
+    # AJOUTE le 27/08/2026 : dire quand on ne peut PAS conclure.
+    #
+    # Les deux appels git de ce controle ne regardaient que `.stdout`, jamais le
+    # code de retour. Or `git ls-files` hors d'un depot sort en 128 avec un
+    # stdout VIDE (mesure) -- soit exactement ce que rend un depot propre. Une
+    # commande qui ECHOUE devenait donc « aucun fichier suivi, tout va bien ».
+    #
+    # Et `git log --all --full-history` sur un clone SUPERFICIEL ne voit qu'un
+    # commit (mesure : 1 contre 66 sur ce depot). Un secret present dans
+    # l'historique plus ancien ne serait pas trouve, sans un mot. Le workflow CI
+    # fixe deja fetch-depth: 0 pour cette raison precise, et son propre
+    # commentaire admet la limite -- « teste une fois avant de pousser, jamais
+    # apres ». Rien ne verifiait que ce reglage reste. Maintenant si.
+    #
+    # Aucun des deux ne BLOQUE : ne pas pouvoir verifier n'est pas la preuve
+    # d'une fuite. Mais c'est DIT, au lieu d'etre compte comme un succes.
     try:
-        suivis = subprocess.run(
+        proc_suivis = subprocess.run(
             ["git", "ls-files"], cwd=RACINE, capture_output=True, text=True, timeout=15
-        ).stdout.splitlines()
+        )
+        suivis = proc_suivis.stdout.splitlines()
+        if proc_suivis.returncode != 0:
+            alerte(
+                "git",
+                "`git ls-files` a echoue (code %d : %s) -- impossible de verifier que "
+                "le fichier scelle n'est pas suivi. Un stdout vide est indistinguable "
+                "d'un depot propre, donc ce controle n'a rien prouve ici."
+                % (proc_suivis.returncode, (proc_suivis.stderr or "").strip()[:120]),
+            )
+        superficiel = subprocess.run(
+            ["git", "rev-parse", "--is-shallow-repository"],
+            cwd=RACINE, capture_output=True, text=True, timeout=15,
+        )
+        if superficiel.stdout.strip() == "true":
+            alerte(
+                "git",
+                "depot SUPERFICIEL (clone --depth) -- `git log --all --full-history` "
+                "ne voit qu'une partie de l'historique, donc le controle "
+                "« secret jamais commite » est AVEUGLE ici. En CI, actions/checkout "
+                "doit garder fetch-depth: 0.",
+            )
     except Exception as exc:
         alerte("git", "impossible de lister les fichiers suivis (%s)" % exc)
         return

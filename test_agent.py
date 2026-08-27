@@ -457,5 +457,109 @@ class TestGardeFouMordVraiment(unittest.TestCase):
                       "garde_fou.py n'a rien dit")
 
 
+GIT = shutil.which("git")
+
+
+@unittest.skipUnless(GIT, "git absent — contrôles de dépôt sautés")
+class TestGardeFouDitQuandIlEstAveugle(unittest.TestCase):
+    """Le contrôle du fichier scellé s'appuie sur deux commandes git. Aucune
+    des deux ne regardait son code de retour.
+
+    Mesuré le 27/08 : hors d'un dépôt, `git ls-files` sort en 128 avec un
+    stdout VIDE — soit exactement ce que rend un dépôt propre. Une commande qui
+    ÉCHOUE était donc lue comme « aucun fichier suivi, tout va bien ».
+
+    Et `git log --all --full-history` sur un clone superficiel ne voit qu'un
+    commit (mesuré : 1 contre 66). Le workflow CI fixe fetch-depth: 0 pour
+    cette raison, et son propre commentaire admet la limite — « testé une fois
+    avant de pousser, jamais après ». Rien ne vérifiait que le réglage reste.
+
+    Ni l'un ni l'autre ne BLOQUE : ne pas pouvoir vérifier n'est pas la preuve
+    d'une fuite. Mais c'est dit, au lieu d'être compté comme un succès.
+    """
+
+    RACINE = Path(__file__).resolve().parent
+
+    def _sortie_dans(self, dossier):
+        shutil.copy(self.RACINE / "garde_fou.py", dossier / "garde_fou.py")
+        proc = subprocess.run([sys.executable, "garde_fou.py"], cwd=str(dossier),
+                              capture_output=True, text=True, timeout=120)
+        return proc.stdout + proc.stderr
+
+    def _git(self, dossier, *args):
+        subprocess.run([GIT, *args], cwd=str(dossier), capture_output=True,
+                       text=True, timeout=30, check=True)
+
+    def test_hors_depot_le_controle_avoue_n_avoir_rien_prouve(self):
+        d = Path(tempfile.mkdtemp(prefix="hindsight-horsgit-"))
+        try:
+            sortie = self._sortie_dans(d)
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+        self.assertIn("ls-files` a echoue", sortie,
+                      "git a échoué et le contrôle n'a rien dit : un stdout "
+                      "vide était lu comme « aucun fichier suivi »")
+        self.assertIn("n'a rien prouve", sortie)
+
+    def test_un_clone_superficiel_est_signale_comme_aveugle(self):
+        base = Path(tempfile.mkdtemp(prefix="hindsight-shallow-"))
+        origine, clone = base / "origine", base / "clone"
+        try:
+            origine.mkdir()
+            self._git(origine, "init", "-q")
+            self._git(origine, "config", "user.email", "t@t")
+            self._git(origine, "config", "user.name", "t")
+            for i in range(2):
+                (origine / ("f%d.txt" % i)).write_text("x", encoding="utf-8")
+                self._git(origine, "add", "-A")
+                self._git(origine, "commit", "-qm", "c%d" % i)
+            subprocess.run([GIT, "clone", "--depth", "1", "-q",
+                            "file://" + str(origine), str(clone)],
+                           capture_output=True, text=True, timeout=60, check=True)
+            profondeur = subprocess.run(
+                [GIT, "rev-parse", "--is-shallow-repository"], cwd=str(clone),
+                capture_output=True, text=True, timeout=30).stdout.strip()
+            self.assertEqual(profondeur, "true",
+                             "prérequis : le clone doit bien être superficiel")
+            sortie = self._sortie_dans(clone)
+        finally:
+            shutil.rmtree(base, ignore_errors=True)
+        self.assertIn("SUPERFICIEL", sortie,
+                      "le contrôle d'historique est aveugle sur un clone "
+                      "superficiel et ne le signale pas")
+
+    def _est_un_depot_complet(self):
+        """Ce dossier est-il un dépôt git non superficiel ?
+
+        La question n'est pas rhétorique : ce test a d'abord été écrit en le
+        SUPPOSANT, et il est tombé sur une reproduction de l'environnement CI
+        obtenue par extraction d'archive — qui n'est pas un dépôt. Le vrai CI en
+        est un (actions/checkout), donc il serait passé là-bas ; mais un test
+        qui rougit selon la façon dont on a obtenu les fichiers n'apprend rien.
+        On saute quand la prémisse n'est pas réunie, au lieu d'affirmer."""
+        dedans = subprocess.run([GIT, "rev-parse", "--is-inside-work-tree"],
+                                cwd=str(self.RACINE), capture_output=True,
+                                text=True, timeout=30)
+        if dedans.returncode != 0 or dedans.stdout.strip() != "true":
+            return False
+        superficiel = subprocess.run([GIT, "rev-parse", "--is-shallow-repository"],
+                                     cwd=str(self.RACINE), capture_output=True,
+                                     text=True, timeout=30)
+        return superficiel.stdout.strip() == "false"
+
+    def test_un_depot_complet_ne_declenche_aucun_de_ces_deux_avertissements(self):
+        """Contrôle : sans lui, avertir TOUJOURS passerait les deux tests
+        ci-dessus."""
+        if not self._est_un_depot_complet():
+            self.skipTest("ce dossier n'est pas un dépôt git complet — les deux "
+                          "avertissements y sont attendus, pas anormaux")
+        proc = subprocess.run([sys.executable, "garde_fou.py"],
+                              cwd=str(self.RACINE), capture_output=True,
+                              text=True, timeout=120)
+        sortie = proc.stdout + proc.stderr
+        self.assertNotIn("SUPERFICIEL", sortie)
+        self.assertNotIn("ls-files` a echoue", sortie)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
