@@ -623,6 +623,13 @@ function outcomeBadge(d) {
   if (d.dry_run && d.outcome === 'error') {
     return '<span class="badge badge-yellow">dry-run: error</span>';
   }
+  // AJOUTE 27/08, meme correctif. Un badge vert « traded » est une
+  // AFFIRMATION : l'ordre est parti et tout va bien. Quand l'armement du
+  // garde anti-doublon a echoue, la seconde moitie est fausse -- et c'est
+  // precisement le run apres lequel il ne faut PAS relancer a l'aveugle.
+  if (Array.isArray(d.trades) && d.trades.some(t => t && t.record_order_submitted_failed)) {
+    return '<span class="badge badge-red">duplicate-order guard NOT armed — check positions</span>';
+  }
   const map = {
     order_submitted: ['badge-green', 'traded'],
     no_edge: ['badge-muted', 'no edge'],
@@ -692,10 +699,31 @@ function renderTrade(d) {
   // committed, never rewritten, so old rows keep the plain-string shape
   // forever -- both have to render, not just the new one.
   const lines = (d.exit_actions || []).map(a => `↩ ${esc(typeof a === "string" ? a : (a && a.text) || JSON.stringify(a))}`);
+  // AJOUTE 27/08. `record_order_submitted_failed` etait ecrit par agent.py
+  // (lignes ~483 et ~528) et n'apparaissait NULLE PART sur cette page --
+  // trouve en croisant les champs ecrits sur un trade avec ceux lus ici.
+  //
+  // Ce que ce champ signifie : l'ordre est PARTI chez Alpaca, mais
+  // risk_gates.record_order_submitted() a echoue, donc state.json ignore que
+  // ce sous-jacent porte une position. Le garde-fou « jamais deux positions
+  // sur le meme sous-jacent » -- que les livrables de ce projet enoncent --
+  // n'est PAS arme, et un second lancement le meme jour peut doubler la
+  // position.
+  //
+  // agent.py fait sa part : il attrape, previent, consigne. Mais son `print`
+  // ne va qu'au log launchd, gitignore, que personne ne regarde -- exactement
+  // l'argument que ce depot tient lui-meme a propos de monitor_exits.log. Le
+  // champ arrivait bien dans data.json ; il mourait au rendu.
+  const avertirDoublon = (t) => t.record_order_submitted_failed
+    ? ` ⚠ DUPLICATE-ORDER GUARD NOT ARMED (${esc(t.record_order_submitted_failed)})`
+      + ` — state.json does not know this symbol has a position;`
+      + ` check open positions before re-running today`
+    : '';
   if (Array.isArray(d.trades) && d.trades.length) {
     for (const t of d.trades) {
       if (t.order_id) {
-        lines.push(`${esc(t.symbol)} ${esc(t.direction || '')} · qty ${esc(t.qty || '?')} · order ${esc(t.order_id)}`);
+        lines.push(`${esc(t.symbol)} ${esc(t.direction || '')} · qty ${esc(t.qty || '?')} · order ${esc(t.order_id)}`
+                   + avertirDoublon(t));
       } else {
         // order_status_unknown ajoute le 27/08 en meme temps que le badge rouge
         // du meme nom plus haut. Sans cette branche, la ligne tombait dans le
@@ -710,7 +738,8 @@ function renderTrade(d) {
           : t.outcome === 'no_contract_found' ? 'no contract found'
           : t.outcome === 'error' ? (t.error || 'error')
           : (t.outcome || 'not submitted');
-        lines.push(`${esc(t.symbol)} ${esc(t.direction || '')} (${esc(why)})`);
+        lines.push(`${esc(t.symbol)} ${esc(t.direction || '')} (${esc(why)})`
+                   + avertirDoublon(t));
       }
     }
   } else if (Array.isArray(d.tradeable_symbols) && d.tradeable_symbols.length) {

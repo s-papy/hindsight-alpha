@@ -377,6 +377,85 @@ class TestBanniereDeSante(BaseRendu):
                                  "un vrai passage sain n'est plus vert : %s" % r["texte"])
                 self.assertIn(attendu, r["texte"])
 
+
+class TestGardeAntiDoublonNonArme(BaseRendu):
+    """Ajouté le 27/08, trouvé en croisant les champs qu'agent.py écrit sur un
+    trade avec ceux que la page lit : `record_order_submitted_failed` était
+    écrit et n'apparaissait NULLE PART dans docs/index.html.
+
+    Ce que ce champ signifie : l'ordre est parti chez Alpaca, mais
+    `risk_gates.record_order_submitted()` a échoué — donc state.json ne sait
+    pas que ce sous-jacent a une position. Le garde-fou « jamais deux
+    positions sur le même sous-jacent », que ce projet énonce dans ses
+    livrables, N'EST PAS ARMÉ. Un second lancement le même jour peut doubler
+    la position.
+
+    agent.py fait le travail : il attrape l'échec, prévient, et le consigne
+    dans l'enregistrement. Le `print` ne va qu'au log launchd — gitignoré, que
+    personne ne regarde, exactement l'argument que ce dépôt tient lui-même à
+    propos de monitor_exits.log. Le champ arrivait bien dans data.json ; la
+    page ne le lisait pas. Même famille que les trois défauts corrigés le même
+    jour : l'action est protégée, l'anomalie est consignée, et la trace meurt
+    au rendu."""
+
+    ARME = ("{trades:[{symbol:'SPY', direction:'long', qty:3, order_id:'abc123',"
+            " outcome:'order_submitted'}]}")
+    NON_ARME = ("{trades:[{symbol:'SPY', direction:'long', qty:3, order_id:'abc123',"
+                " outcome:'order_submitted',"
+                " record_order_submitted_failed:'StateLockUnavailable: verrou indisponible'}]}")
+
+    def _ligne(self, record_js):
+        r = self.executer("_resultats.l = renderTrade(%s);" % record_js)
+        import re as _re
+        return _re.sub(r"<[^>]*>", " ", r["l"])
+
+    def test_un_garde_non_arme_ne_rend_pas_la_meme_ligne_qu_un_garde_arme(self):
+        """Le test le plus simple, et celui qui aurait suffi : les deux
+        situations produisaient une sortie identique au caractère près."""
+        self.assertNotEqual(self._ligne(self.ARME), self._ligne(self.NON_ARME),
+                            "un ordre dont le garde anti-doublon n'a pas pu "
+                            "être armé s'affiche exactement comme un ordre "
+                            "normal")
+
+    def test_la_ligne_dit_ce_qu_il_faut_verifier(self):
+        """Signaler ne suffit pas : un lecteur doit savoir quoi faire. Le
+        risque concret est un second lancement le même jour."""
+        ligne = self._ligne(self.NON_ARME)
+        self.assertIn("duplicate", ligne.lower())
+        self.assertIn("re-running", ligne.lower())
+
+    def test_le_cumul_timeout_plus_garde_non_arme_dit_les_deux(self):
+        """Le pire cas atteignable, et il est réel : le CLI dépasse ses 30 s,
+        agent.py arme le garde par précaution — et cet armement échoue à son
+        tour (agent.py ligne ~483). L'ordre est peut-être passé ET rien ne
+        protège du doublon. La page ne disait que la première moitié."""
+        ligne = self._ligne("""{trades:[{symbol:'SPY', direction:'long',
+            outcome:'order_status_unknown', error:'TimeoutExpired: 30s',
+            record_order_submitted_failed:'StateLockUnavailable: verrou'}]}""")
+        self.assertIn("MAY HAVE BEEN SUBMITTED", ligne,
+                      "prérequis : le message de timeout est conservé")
+        self.assertIn("duplicate", ligne.lower(),
+                      "la moitié « garde non armé » du cumul disparaît")
+
+    def test_le_badge_ne_certifie_pas_un_run_dont_le_garde_a_lache(self):
+        """Un badge vert « traded » est une affirmation : tout s'est bien
+        passé. Ici ce n'est pas vrai."""
+        r = self.executer("_resultats.b = outcomeBadge(%s);" % self.NON_ARME.replace(
+            "{trades:", "{outcome:'order_submitted', trades:"))
+        self.assertNotIn("badge-green", r["b"],
+                         "run certifié vert alors que le garde anti-doublon "
+                         "n'est pas armé : %s" % r["b"])
+
+    def test_un_ordre_normal_reste_vert_et_sobre(self):
+        """Pendant obligatoire."""
+        ligne = self._ligne(self.ARME)
+        self.assertNotIn("duplicate", ligne.lower(),
+                         "un ordre normal porte un avertissement qui ne le "
+                         "concerne pas — le cri perd son sens s'il est constant")
+        r = self.executer("_resultats.b = outcomeBadge(%s);" % self.ARME.replace(
+            "{trades:", "{outcome:'order_submitted', trades:"))
+        self.assertIn("badge-green", r["b"])
+
 class TestCompteurDeFuites(BaseRendu):
     """Le chiffre le plus mis en avant de la page : combien de fuites de
     hindsight_guard ont été attrapées. Il compte sur un préfixe EXACT."""

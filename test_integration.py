@@ -1878,6 +1878,85 @@ class TestVocabulairePartageAvecLaPage(unittest.TestCase):
             "rendre — ils tombent sur le repli `badge-muted`, gris discret, "
             "quelle que soit leur gravité : %s" % ", ".join(orphelins))
 
+    # Champs écrits sur un trade que la page ne rend volontairement PAS.
+    # Liste explicite et non vide par principe : le but de ce test n'est pas
+    # que tout soit affiché, c'est qu'aucun champ ne cesse de l'être par
+    # OUBLI. Y ajouter une entrée est une décision qu'on écrit ; ne rien
+    # écrire n'en était pas une.
+    NON_RENDUS_VOLONTAIREMENT = {
+        # Le symbole du contrat d'option retenu (ex. SPY260831P00764000).
+        # Informatif, mais aucune conséquence de sûreté à ne pas l'afficher :
+        # la ligne porte déjà le sous-jacent, le sens, la quantité et l'id
+        # d'ordre, qui suffisent à retrouver le contrat chez Alpaca.
+        "contract",
+    }
+
+    def test_chaque_champ_ecrit_sur_un_trade_est_rendu_ou_ecarte_sciemment(self):
+        """Trouvé par ce croisement même : `record_order_submitted_failed`
+        était écrit par agent.py et n'apparaissait nulle part sur la page.
+        Il signifie que l'ordre est parti mais que le garde-fou anti-doublon
+        n'a pas pu être armé — le seul état après lequel il ne faut surtout
+        pas relancer à l'aveugle. Il rendait exactement la même ligne qu'un
+        ordre normal.
+
+        L'extraction gère `AnnAssign` (`trade_record: dict = {...}`), qui est
+        la forme réelle de la construction ligne 400. Les trois versions
+        précédentes de ce genre d'extracteur, écrites dans la même journée,
+        la rataient — et rapportaient `symbol` et `direction` comme jamais
+        écrits, ce qui était faux. L'instrument se vérifie ci-dessous."""
+        import ast, re
+        chemin = self.RACINE / "agent.py"
+        arbre = ast.parse(chemin.read_text(encoding="utf-8"), "agent.py")
+        cles = {}
+
+        def poser(k, ligne):
+            if isinstance(k, ast.Constant):
+                cles.setdefault(k.value, ligne)
+
+        for n in ast.walk(arbre):
+            if (isinstance(n, ast.AnnAssign) and isinstance(n.target, ast.Name)
+                    and n.target.id == "trade_record"
+                    and isinstance(n.value, ast.Dict)):
+                for k in n.value.keys:
+                    poser(k, n.lineno)
+            if isinstance(n, ast.Assign):
+                for c in n.targets:
+                    if (isinstance(c, ast.Name) and c.id == "trade_record"
+                            and isinstance(n.value, ast.Dict)):
+                        for k in n.value.keys:
+                            poser(k, n.lineno)
+                    if (isinstance(c, ast.Subscript) and isinstance(c.value, ast.Name)
+                            and c.value.id == "trade_record"):
+                        poser(c.slice, n.lineno)
+
+        # Contrôle d'instrument : `symbol` n'est écrit QUE par l'AnnAssign de
+        # la ligne 400. S'il disparaît, l'extracteur est redevenu lossy et ce
+        # test ne vérifie plus grand-chose, en restant vert.
+        self.assertIn("symbol", cles,
+                      "l'extracteur ne voit plus `trade_record: dict = {...}` "
+                      "(AnnAssign) : le test est devenu creux sans le dire")
+
+        page = (self.RACINE / "docs" / "index.html").read_text(encoding="utf-8")
+        lus = set(re.findall(r"\bt\.([a-z_]+)", page))
+        muets = ["%s (agent.py:%d)" % (k, l) for k, l in sorted(cles.items())
+                 if k not in lus and k not in self.NON_RENDUS_VOLONTAIREMENT]
+        self.assertEqual(
+            muets, [],
+            "champ(s) écrits sur un trade que docs/index.html ne lit jamais : "
+            "%s — ils arrivent dans data.json et meurent au rendu. Les rendre, "
+            "ou les inscrire dans NON_RENDUS_VOLONTAIREMENT avec la raison."
+            % ", ".join(muets))
+
+    def test_la_liste_des_ecartes_ne_couvre_pas_des_champs_disparus(self):
+        """Une liste d'exceptions qui vieillit devient un trou. Si un champ
+        écarté n'est plus écrit du tout, l'entrée doit partir — sinon elle
+        couvrirait un jour un homonyme sans que personne ne l'ait voulu."""
+        source = (self.RACINE / "agent.py").read_text(encoding="utf-8")
+        for champ in self.NON_RENDUS_VOLONTAIREMENT:
+            self.assertIn('trade_record["%s"]' % champ, source,
+                          "%s est écarté du rendu mais n'est plus écrit par "
+                          "agent.py : l'exception a survécu au champ" % champ)
+
     def test_chaque_issue_de_sortie_est_traitee_par_le_badge(self):
         """Second versant du même pont. risk_gates.ExitKind décide de ce qui
         est arrivé à UNE position ; depuis le correctif du 27/08, c'est cette
