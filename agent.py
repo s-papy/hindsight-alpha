@@ -251,6 +251,23 @@ def main() -> None:
             record["outcome"] = "error"
             record["error"] = f"SystemExit: {sortie.code}"
         raise
+    except KeyboardInterrupt:
+        # AJOUTE le 27/08/2026, en meme temps que le meme correctif dans
+        # monitor_exits.py -- trouve en croisant le vocabulaire d'`outcome`
+        # cote Python avec ce que docs/index.html sait rendre.
+        #
+        # KeyboardInterrupt derive de BaseException : ni le `except SystemExit`
+        # au-dessus ni le `except Exception` en dessous ne la rattrapent. Le
+        # `finally` journalisait donc un enregistrement avec l'outcome de
+        # naissance "unknown" et `error` a None -- une entree qui ne dit rien,
+        # rendue en gris discret sur le tableau de bord public, a cote de
+        # vraies decisions.
+        #
+        # Un Ctrl-C pendant une evaluation n'est pas un non-evenement : le run
+        # s'est arrete au milieu, entre l'evaluation des symboles et la
+        # soumission eventuelle. Le dire est le minimum.
+        record["outcome"] = "interrupted"
+        raise
     except Exception as e:
         record["outcome"] = "error"
         record["error"] = f"{type(e).__name__}: {e}"

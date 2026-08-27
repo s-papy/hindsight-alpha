@@ -823,6 +823,29 @@ class TestRunInterrompu(unittest.TestCase):
             "qu'elle n'a jamais su nommer, et l'affichait en vert")
         self.assertEqual(statut.get("outcome"), "interrupted")
 
+    def test_agent_py_nomme_aussi_son_interruption(self):
+        """Le même défaut existait dans les DEUX points d'entrée — trouvé en
+        croisant le vocabulaire d'`outcome` avec ce que la page sait rendre,
+        pas en relisant agent.py. Là-bas la conséquence est moins grave (pas
+        de bannière de santé à repeindre), mais un Ctrl-C au milieu d'une
+        évaluation écrivait quand même une entrée publique qui ne dit rien :
+        outcome 'unknown', error None."""
+        import agent
+        vrai_run = agent._run
+        agent._run = lambda *a, **k: (_ for _ in ()).throw(KeyboardInterrupt())
+        sys.argv = ["agent.py", "--symbols", "SPY", "--dry-run"]
+        try:
+            with contextlib.redirect_stdout(io.StringIO()):
+                with self.assertRaises(KeyboardInterrupt):
+                    agent.main()
+        finally:
+            agent._run = vrai_run
+        lignes = [l for l in self.mods[1].LOG_FILE.read_text(
+            encoding="utf-8").splitlines() if l.strip()]
+        self.assertEqual(json.loads(lignes[-1]).get("outcome"), "interrupted",
+                         "un Ctrl-C sur agent.py est journalisé sous le "
+                         "fourre-tout 'unknown'")
+
     def test_l_interruption_laisse_une_trace_durable(self):
         """Le fichier de statut est écrasé au run suivant. Si le seul endroit
         où l'interruption apparaît est ce fichier, elle disparaît quinze

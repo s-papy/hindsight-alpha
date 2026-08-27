@@ -100,6 +100,102 @@ class TestBadgeDeVerdict(BaseRendu):
         self.assertIn("zoubidou", r["x"])
 
 
+
+class TestBadgeDuMoniteurDeSorties(BaseRendu):
+    """Ajouté le 27/08, après reproduction sous node.
+
+    outcomeBadge() décidait sur `outcome === 'checked'` seul. Or
+    manage_exits() rattrape les échecs PAR POSITION en interne — c'est
+    délibéré, pour qu'une position en panne n'empêche pas de traiter les
+    autres — et `record["outcome"]` reste donc `'checked'` même quand une
+    clôture a échoué. Le badge annonçait « position closed », en VERT, pour
+    une position toujours ouverte au-delà de son stop-loss.
+
+    C'est l'événement précis que tout ce sous-système existe pour attraper.
+    Le correctif du 24/08 a fait en sorte qu'il soit JOURNALISÉ ; il ne
+    s'était jamais rendu jusqu'à l'affichage. Le tableau de bord affirmait
+    activement le contraire de la réalité, à l'endroit exact où un juge
+    regarde.
+
+    La sévérité se lit désormais sur `exit_actions[].kind` — la donnée
+    structurée que risk_gates.py produit déjà — et non sur un `outcome`
+    global qui ne peut pas la porter."""
+
+    def _badge(self, record_js):
+        r = self.executer("_resultats.b = outcomeBadge(%s);" % record_js)
+        b = r["b"]
+        import re as _re
+        m = _re.search(r"badge-(\w+)", b)
+        return (m.group(1) if m else None), _re.sub(r"<[^>]*>", "", b)
+
+    def test_une_cloture_echouee_n_est_pas_annoncee_comme_reussie(self):
+        couleur, texte = self._badge("""{
+            run_type:'exit_monitor', outcome:'checked', dry_run:false,
+            exit_actions:[{symbol:'SPY260831P00764000', kind:'error',
+                           pnl_pct:-0.71, error:'AlpacaCLIError: 403'}]}""")
+        self.assertNotEqual(couleur, "green",
+                            "une clôture ÉCHOUÉE s'affiche en vert « %s » "
+                            "alors que la position est toujours ouverte" % texte)
+        self.assertNotIn("position closed", texte)
+
+    def test_un_pnl_illisible_n_est_pas_annonce_comme_une_cloture(self):
+        """UNREADABLE veut dire qu'on ignore si le stop est franchi. C'est
+        une absence d'information, pas une clôture."""
+        couleur, texte = self._badge("""{
+            run_type:'exit_monitor', outcome:'checked', dry_run:false,
+            exit_actions:[{symbol:'GLD260831C00300000', kind:'unreadable'}]}""")
+        self.assertNotEqual(couleur, "green", texte)
+        self.assertNotIn("position closed", texte)
+
+    def test_un_echec_au_milieu_de_reussites_reste_visible(self):
+        """Le cas qui compte vraiment : manage_exits traite plusieurs
+        positions, deux ferment proprement, une échoue. Faire la moyenne ou
+        prendre la première reviendrait à cacher la seule qui demande une
+        action humaine."""
+        couleur, texte = self._badge("""{
+            run_type:'exit_monitor', outcome:'checked', dry_run:false,
+            exit_actions:[{symbol:'A', kind:'closed', pnl_pct:0.9},
+                          {symbol:'B', kind:'error', error:'AlpacaCLIError: 403'},
+                          {symbol:'C', kind:'closed', pnl_pct:-0.5}]}""")
+        self.assertNotEqual(couleur, "green",
+                            "un échec noyé dans deux réussites disparaît : %s" % texte)
+
+    def test_une_vraie_cloture_reste_verte(self):
+        """Pendant obligatoire : si tout devient rouge, plus rien n'est lu."""
+        couleur, texte = self._badge("""{
+            run_type:'exit_monitor', outcome:'checked', dry_run:false,
+            exit_actions:[{symbol:'A', kind:'closed', pnl_pct:-0.52}]}""")
+        self.assertEqual(couleur, "green", texte)
+        self.assertIn("closed", texte)
+
+    def test_un_essai_a_blanc_reste_distinct_d_une_vraie_cloture(self):
+        couleur, texte = self._badge("""{
+            run_type:'exit_monitor', outcome:'checked', dry_run:true,
+            exit_actions:[{symbol:'A', kind:'would_close', pnl_pct:-0.52}]}""")
+        self.assertEqual(couleur, "yellow", texte)
+        self.assertIn("would close", texte)
+
+    def test_un_run_interrompu_ne_passe_pas_pour_une_broutille(self):
+        """`interrupted` est né du correctif du même jour dans
+        monitor_exits.py, et n'avait pas de correspondance ici — il tombait
+        donc sur le repli `badge-muted`, gris discret. C'est le même défaut
+        de forme que celui qui avait affiché `order_status_unknown` en gris :
+        un état qui réclame de l'attention, rendu dans la couleur qui dit
+        « rien à signaler »."""
+        couleur, texte = self._badge(
+            "{run_type:'exit_monitor', outcome:'interrupted', dry_run:false}")
+        self.assertNotEqual(couleur, "muted",
+                            "un run interrompu s'affiche en gris discret : %s"
+                            % texte)
+
+    def test_un_enregistrement_sans_exit_actions_ne_se_declare_pas_cloture(self):
+        """Rétrocompatibilité : les entrées publiées avant que
+        `exit_actions` existe (24/08) n'ont pas de quoi trancher. Ne pas
+        savoir doit donner du gris, pas un vert « position closed »."""
+        couleur, texte = self._badge(
+            "{run_type:'exit_monitor', outcome:'checked', dry_run:false}")
+        self.assertNotEqual(couleur, "green", texte)
+
 class TestLigneParSymbole(BaseRendu):
     """decision_log.jsonl est committé et JAMAIS réécrit : les anciennes formes
     d'enregistrement restent dans le fichier pour toujours et doivent continuer

@@ -1775,5 +1775,130 @@ class TestCompatibiliteFuture(unittest.TestCase):
                          % ", ".join(fautifs))
 
 
+
+class TestVocabulairePartageAvecLaPage(unittest.TestCase):
+    """Ajouté le 27/08. Python invente les valeurs d'`outcome` ; le JavaScript
+    de docs/index.html décide de la COULEUR de chacune. Rien ne reliait les
+    deux, et la page n'a qu'un repli : `badge-muted`, gris discret.
+
+    Ce n'est pas une inquiétude théorique — la dérive s'est produite trois
+    fois, dont deux fois le jour même où ce test a été écrit :
+      · `order_status_unknown` (ajouté le 27/08) s'affichait en gris, la
+        sévérité exactement inverse de ce que la situation demande ;
+      · `interrupted`, né du correctif de ce jour dans monitor_exits.py,
+        tombait au même endroit une heure après avoir été créé ;
+      · `unknown`, le défaut de naissance des deux modules, n'a jamais eu
+        d'entrée du tout.
+
+    Le repli gris est le pire cas possible pour ce genre de dérive : la page
+    ne casse pas, n'avertit pas, et rend « rien à signaler » pour un état que
+    personne n'a encore pris la peine de qualifier."""
+
+    RACINE = Path(__file__).resolve().parent
+    MODULES = ("agent.py", "monitor_exits.py")
+
+    # `"outcome"` est le NOM de la clé, jamais une valeur — il est ramassé par
+    # le balayage de `record.get("outcome", "unknown")`. Seule exception, et
+    # elle est nommée : une exception muette rendrait ce test vide sans qu'on
+    # puisse le voir.
+    PAS_UNE_VALEUR = {"outcome"}
+
+    def _outcomes_ecrits_par_python(self):
+        """Toute chaîne littérale pouvant atterrir dans un champ `outcome`.
+
+        La PREMIÈRE version de cette extraction ne regardait que les
+        affectations à une constante. Elle ratait
+        `record["outcome"] = trade_outcomes.pop() if ... else "mixed"` — donc
+        `mixed`, et toutes les valeurs propagées depuis les décisions par
+        symbole. Un test de couverture bâti sur un instrument lossy annonce
+        une couverture qu'il n'a pas ; test_l_extracteur_n_est_pas_lossy
+        ci-dessous existe pour que cette régression-là soit visible.
+
+        On balaie donc TOUTE l'expression affectée, ce qui sur-collecte
+        légèrement. C'est le bon sens de l'erreur : sur-collecter réclame une
+        entrée JS de plus, jamais une de moins."""
+        import ast
+        trouves = {}
+        for nom in self.MODULES:
+            chemin = self.RACINE / nom
+            arbre = ast.parse(chemin.read_text(encoding="utf-8"), nom)
+
+            def recolter(noeud, ligne):
+                for c in ast.walk(noeud):
+                    if (isinstance(c, ast.Constant) and isinstance(c.value, str)
+                            and c.value not in self.PAS_UNE_VALEUR):
+                        trouves.setdefault(c.value, "%s:%d" % (nom, ligne))
+
+            for n in ast.walk(arbre):
+                if isinstance(n, ast.Assign):
+                    for cible in n.targets:
+                        if (isinstance(cible, ast.Subscript)
+                                and isinstance(cible.slice, ast.Constant)
+                                and cible.slice.value == "outcome"):
+                            recolter(n.value, n.lineno)
+                elif isinstance(n, ast.Dict):
+                    for k, v in zip(n.keys, n.values):
+                        if isinstance(k, ast.Constant) and k.value == "outcome":
+                            recolter(v, n.lineno)
+                elif isinstance(n, ast.Compare):
+                    if "'outcome'" in ast.dump(n.left):
+                        for c in n.comparators:
+                            recolter(c, n.lineno)
+        return trouves
+
+    def _ce_que_la_page_sait_rendre(self):
+        import re
+        page = (self.RACINE / "docs" / "index.html").read_text(encoding="utf-8")
+        bloc = page[page.index("const map = {"):]
+        bloc = bloc[:bloc.index("};")]
+        table = set(re.findall(r"^\s+(\w+):\s*\[", bloc, re.M))
+        branches = set(re.findall(r"outcome === '(\w+)'", page))
+        return table, branches
+
+    def test_l_extracteur_n_est_pas_lossy(self):
+        """Contrôle de l'instrument, pas du code. `mixed` n'est jamais écrit
+        littéralement : il naît d'un `IfExp`. S'il disparaît de l'extraction,
+        c'est que le test principal a cessé de voir une famille entière de
+        valeurs — et il continuerait à passer, vert, en ne vérifiant rien."""
+        trouves = self._outcomes_ecrits_par_python()
+        self.assertIn("mixed", trouves,
+                      "l'extracteur ne voit plus les outcomes affectés par "
+                      "autre chose qu'une constante : le test principal est "
+                      "devenu vide sans le dire")
+        self.assertIn("order_status_unknown", trouves)
+
+    def test_chaque_outcome_ecrit_par_python_a_une_couleur_choisie(self):
+        trouves = self._outcomes_ecrits_par_python()
+        table, branches = self._ce_que_la_page_sait_rendre()
+        orphelins = ["%s (%s)" % (v, ou) for v, ou in sorted(trouves.items())
+                     if v not in table and v not in branches]
+        self.assertEqual(
+            orphelins, [],
+            "outcome(s) écrits par Python que docs/index.html ne sait pas "
+            "rendre — ils tombent sur le repli `badge-muted`, gris discret, "
+            "quelle que soit leur gravité : %s" % ", ".join(orphelins))
+
+    def test_chaque_issue_de_sortie_est_traitee_par_le_badge(self):
+        """Second versant du même pont. risk_gates.ExitKind décide de ce qui
+        est arrivé à UNE position ; depuis le correctif du 27/08, c'est cette
+        valeur — et non l'`outcome` global — qui donne sa sévérité au badge
+        du moniteur. Un `ExitKind` ajouté sans toucher à la page retomberait
+        en silence dans la branche finale, celle qui ne tranche pas."""
+        import risk_gates
+        page = (self.RACINE / "docs" / "index.html").read_text(encoding="utf-8")
+        debut = page.index("if (d.run_type === 'exit_monitor') {")
+        branche = page[debut:page.index("const map = {", debut)]
+        manquants = [k.value for k in risk_gates.ExitKind
+                     if ("'%s'" % k.value) not in branche]
+        # HOLDING est le seul cas volontairement absent : il n'atteint jamais
+        # le journal (voir _merite_le_journal / is_routine), donc aucun badge
+        # ne peut le rendre. Nommé plutôt que toléré en silence.
+        manquants = [m for m in manquants if m != "holding"]
+        self.assertEqual(
+            manquants, [],
+            "ExitKind non traité par outcomeBadge : %s — la position "
+            "correspondante serait rendue sans que sa gravité soit lue"
+            % ", ".join(manquants))
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

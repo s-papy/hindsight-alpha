@@ -567,10 +567,48 @@ function outcomeBadge(d) {
   // records were falling through to a generic muted "checked" badge with
   // an empty Trade cell and no verdicts -- technically not broken, but
   // uninformative exactly where a judge would want to see WHAT closed.
-  if (d.run_type === 'exit_monitor' && d.outcome === 'checked') {
-    return d.dry_run
-      ? '<span class="badge badge-yellow">would close (dry-run)</span>'
-      : '<span class="badge badge-green">position closed</span>';
+  // CORRIGE 27/08, reproduit sous node. Cette branche decidait sur le seul
+  // `outcome === 'checked'`. Or manage_exits() rattrape les echecs PAR
+  // POSITION en interne -- c'est delibere, pour qu'une position en panne
+  // n'empeche pas de traiter les autres -- donc `record["outcome"]` reste
+  // 'checked' MEME QUAND UNE CLOTURE A ECHOUE. Mesure :
+  //
+  //   kind 'closed'     -> 🟢 position closed   (juste)
+  //   kind 'error'      -> 🟢 position closed   (FAUX : toujours ouverte)
+  //   kind 'unreadable' -> 🟢 position closed   (FAUX : on ignore le P&L)
+  //
+  // Une position au-dela de son stop-loss, qu'on n'a PAS pu fermer, etait
+  // annoncee au public comme fermee. C'est l'evenement precis que tout ce
+  // sous-systeme existe pour attraper : le correctif du 24/08 a fait en
+  // sorte qu'il soit JOURNALISE, mais s'est arrete au journal et n'a jamais
+  // atteint le rendu. Le tableau de bord affirmait activement le contraire
+  // de la realite, la ou un juge regarde.
+  //
+  // La severite se lit desormais sur exit_actions[].kind -- la donnee
+  // structuree que risk_gates.py produit deja depuis le 24/08 -- et non sur
+  // un `outcome` global qui, par construction, ne peut pas la porter.
+  if (d.run_type === 'exit_monitor') {
+    const kinds = (d.exit_actions || []).map(a => a && a.kind);
+    if (kinds.indexOf('error') !== -1) {
+      // La tentative de cloture a leve. La position est TOUJOURS OUVERTE.
+      return '<span class="badge badge-red">close FAILED — position still open</span>';
+    }
+    if (kinds.indexOf('unreadable') !== -1) {
+      // Absence d'information, pas une cloture : on ignore si le stop est
+      // franchi. Jaune plutot que rouge -- la position n'est pas forcement
+      // en danger, mais on ne peut pas l'affirmer.
+      return '<span class="badge badge-yellow">P&amp;L unreadable — left open</span>';
+    }
+    if (kinds.indexOf('closed') !== -1) {
+      return '<span class="badge badge-green">position closed</span>';
+    }
+    if (kinds.indexOf('would_close') !== -1) {
+      return '<span class="badge badge-yellow">would close (dry-run)</span>';
+    }
+    // Aucun `kind` exploitable : soit une entree publiee avant que
+    // exit_actions existe (24/08), soit un outcome qui n'est pas 'checked'.
+    // On ne tranche pas -- la table ci-dessous s'en charge, et son repli est
+    // gris. Ne pas savoir ne donne jamais un vert « position closed ».
   }
   // AJOUTE 26/08 -- meme defaut de forme que la banniere de sante corrigee le
   // meme jour: la page ne distinguait pas un ESSAI A BLANC rate d'une panne de
@@ -609,6 +647,18 @@ function outcomeBadge(d) {
     // trade's own line below the badge (renderTrade()) for what actually
     // happened per symbol -- this badge just says the summary isn't a
     // single story.
+    // Ajoute le 27/08, en meme temps que `except KeyboardInterrupt` dans
+    // monitor_exits.py : sans cette entree, un run interrompu tombait sur le
+    // repli `badge-muted` juste en dessous -- gris discret pour un passage
+    // qui n'a verifie AUCUNE position. Meme defaut de forme que
+    // `order_status_unknown` affiche en gris quelques heures plus tot.
+    interrupted: ['badge-yellow', 'run interrupted — no position checked'],
+    // Le defaut de naissance de `record` dans les deux modules. Il survit
+    // au bloc finally quand AUCUN des trois `except` n'a rattrape -- une
+    // BaseException exotique, ou un sys.exit(0) depuis une profondeur
+    // inattendue. Sans entree ici il tombait sur le repli gris : « rien a
+    // signaler » pour un run dont personne ne sait ce qu'il a fait.
+    unknown: ['badge-yellow', 'outcome not recorded — run did not report'],
     mixed: ['badge-muted', 'mixed outcomes — see trades below'],
   };
   const [cls, label] = map[d.outcome] || ['badge-muted', esc(d.outcome || 'unknown')];
