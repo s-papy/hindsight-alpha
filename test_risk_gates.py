@@ -642,6 +642,50 @@ class TestHindsightGuard(unittest.TestCase):
     # sondant aux bords plutôt qu'en relisant sa logique centrale.
     # ------------------------------------------------------------------
 
+    def test_le_titre_n_affirme_pas_une_cause_qu_il_n_a_pas_mesuree(self):
+        """`hindsight_benchmark.py` a montré que le titre sur-affirmait.
+
+        Il annonçait comme un FAIT que la sélection « depends on data outside
+        the in-sample window ». Or le bruit d'estimation seul produit la même
+        signature — le gagnant change quand on retire le holdout :
+
+            candidats réellement équivalents, aucune fuite  -> 45.2%
+            aucun edge du tout, aucune fuite                -> 38.0%
+
+        Même raisonnement que l'extraction de `NO EDGE`, poussé d'un cran : ce
+        module ne peut pas nommer une fuite là où il a seulement mesuré une
+        instabilité."""
+        from hindsight_guard import check_selection_leakage
+        r = check_selection_leakage(
+            ["A", "B"],
+            lambda c, w: ({"A": 1.0, "B": 0.9}[c] if w == "full"
+                          else {"A": 0.9, "B": 1.0}[c]),
+            threshold=0.3)
+        resume = r.summary()
+        self.assertNotIn("this selection depends on data outside", resume,
+                         "le titre affirme encore une cause qu'il n'a pas "
+                         "mesurée : %r" % resume[:120])
+        self.assertIn("INSTABILITY", resume,
+                      "le résumé ne nomme pas ce qui est réellement mesuré")
+        self.assertIn("noise", resume,
+                      "le résumé ne nomme pas la cause alternative — sans elle, "
+                      "« instabilité » se relit comme un synonyme de fuite")
+
+    def test_le_refus_lui_meme_ne_bouge_pas(self):
+        """TÉMOIN, et c'est le point : recalibrer une explication ne doit rien
+        changer à la décision. Sans lui, adoucir le texte au point de ne plus
+        refuser passerait le test ci-dessus."""
+        from hindsight_guard import check_selection_leakage
+        r = check_selection_leakage(
+            ["A", "B"],
+            lambda c, w: ({"A": 1.0, "B": 0.9}[c] if w == "full"
+                          else {"A": 0.9, "B": 1.0}[c]),
+            threshold=0.3)
+        self.assertFalse(r.agrees, "le refus a disparu avec la reformulation")
+        self.assertEqual(r.verdict_label(), "LEAK DETECTED",
+                         "l'étiquette de verdict a changé — elle est consommée "
+                         "par la page et par agent.py")
+
     def test_le_verdict_ne_depend_pas_de_l_ordre_des_candidats(self):
         """LE défaut sérieux. `max()` rend le PREMIER élément atteignant le
         maximum, donc une égalité en tête faisait dépendre le gagnant de

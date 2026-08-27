@@ -183,7 +183,26 @@ class LeakageReport:
                 "window either. There is simply nothing here worth selecting."
             )
         else:
-            lines.append("LEAK DETECTED: this selection depends on data outside the in-sample window.")
+            # CORRIGE le 27/08/2026, apres `hindsight_benchmark.py`.
+            #
+            # Ce titre affirmait comme un FAIT que la selection « depend de
+            # donnees hors de la fenetre in-sample ». Le banc montre que la
+            # meme signature -- le gagnant change quand on retire le holdout --
+            # est produite par le seul bruit d'estimation :
+            #
+            #   candidats REELLEMENT equivalents, aucune fuite  -> 45.2%
+            #   aucun edge du tout, aucune fuite                -> 38.0%
+            #
+            # Le REFUS reste juste dans tous les cas : une selection instable
+            # ne merite pas qu'on trade dessus, quelle qu'en soit la cause. Ce
+            # qui ne tenait pas, c'est la CAUSE annoncee. Meme raisonnement que
+            # l'extraction de « NO EDGE » ci-dessus, pousse d'un cran : ce
+            # module ne peut pas se permettre de nommer une fuite la ou il a
+            # seulement mesure une instabilite.
+            lines.append(
+                "LEAK DETECTED: the winning candidate changes when the "
+                "unknowable-at-the-time data is removed."
+            )
             lines.append(
                 f"  full-window winner:      {self.full_winner!r}  "
                 f"(score {self.full_scores[self.full_winner]:.4f})"
@@ -206,6 +225,15 @@ class LeakageReport:
                 # est casse. La vraie cause du refus est ailleurs : la fenetre
                 # pleine ne DEPARTAGE pas les candidats, et l'un des ex aequo
                 # perd en in-sample.
+                lines.append(
+                    "  -> this is evidence of selection INSTABILITY. Leakage is "
+                    "its most interesting cause, not its only one: estimation "
+                    "noise alone yields the same signature ~45% of the time "
+                    "when two candidates are genuinely equivalent (measured, "
+                    "see HINDSIGHT_BENCHMARK.md). The refusal stands either "
+                    "way; what does not follow is 'this depends on future "
+                    "data'."
+                )
                 perdants = [c for c in self.full_winners
                             if c not in self.in_sample_winners]
                 if len(self.full_winners) > 1:
