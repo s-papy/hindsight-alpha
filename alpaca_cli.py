@@ -254,6 +254,12 @@ def list_positions() -> List[dict]:
 # truncates before reaching spot (the failure verified on 24/08).
 STRIKE_BAND_PCT = 0.05
 
+# La taille de page demandee a /v2/options/contracts. Constante nommee depuis
+# le 27/08 : elle etait ecrite en dur dans l'URL, et la detection de troncature
+# ajoutee le meme jour doit comparer au MEME nombre. Deux 100 independants,
+# c'est un jour ou l'un des deux bouge seul.
+CONTRACTS_PAGE_LIMIT = 100
+
 # CORRIGE le 27/08/2026. Ces motifs n'acceptaient que la forme COMPACTE.
 # Or la specification OCC definit un symbole de 21 caracteres dont la racine
 # est COMPLETEE PAR DES ESPACES a six caracteres : « SPY   260831P00764000 ».
@@ -529,12 +535,55 @@ def find_near_the_money_contract(
     query = (
         f"/v2/options/contracts?underlying_symbols={underlying}&status=active"
         f"&type={contract_type}&expiration_date_gte={gte}&expiration_date_lte={lte}"
-        f"&strike_price_gte={lo}&strike_price_lte={hi}&limit=100"
+        f"&strike_price_gte={lo}&strike_price_lte={hi}&limit={CONTRACTS_PAGE_LIMIT}"
     )
     data = run(["api", "GET", query])
     contracts = data.get("option_contracts", []) if isinstance(data, dict) else []
     if not contracts:
         return None
+
+    # AJOUTE le 27/08/2026. La bande a +/-5% (ci-dessus, 24/08) a REDUIT la
+    # troncature de page sans la fermer, et l'arithmetique le montre :
+    #
+    #   bande +/-5% sur SPY a 762.98 = 76 points de strikes
+    #   76 strikes x 6 echeances (lun/mer/ven sur 7-21 jours) = 462 contrats
+    #   tronque a 100, tri par strike CROISSANT -> la page s'arrete vers 740,
+    #   et le spot n'y est PAS
+    #
+    # Reproduit sur une page ainsi construite : la fonction rendait un contrat
+    # 22 points DANS LA MONNAIE (~2215 $ d'intrinseque) presente comme le plus
+    # proche de la monnaie, sans un mot. C'est la panne exacte du 24/08, par le
+    # meme mecanisme, a une echelle plus fine.
+    #
+    # PORTEE HONNETE : je n'ai pas pu verifier contre l'API reelle si SPY a
+    # effectivement des strikes au dollar et six echeances dans cette fenetre.
+    # Ceci ne prouve donc pas que le cas etait actif -- ca ferme un trou de
+    # detection pour une panne deja subie une fois.
+    #
+    # Le test est en DEUX parties, et la seconde evite un refus permanent :
+    # une page PLEINE peut parfaitement encadrer le spot (peu d'echeances,
+    # strikes serres), et le tri par strike garantit alors que le plus proche
+    # y est. On ne refuse que si la page est pleine ET n'atteint pas le spot.
+    # Une page COURTE n'a pas ete tronquee : si aucun strike n'atteint le spot,
+    # c'est le marche qui est ainsi, et le plus proche est vraiment le plus
+    # proche.
+    if len(contracts) >= CONTRACTS_PAGE_LIMIT:
+        strikes = [float(c["strike_price"]) for c in contracts
+                   if c.get("strike_price") is not None]
+        if strikes and not (min(strikes) <= spot <= max(strikes)):
+            print(
+                "  WARNING: /v2/options/contracts a rendu %d resultats (la page "
+                "entiere) pour %s, strikes %.2f a %.2f, alors que le spot est a "
+                "%.2f. La reponse est triee par strike CROISSANT : elle a donc "
+                "ete TRONQUEE avant d'atteindre la monnaie, et « le plus proche "
+                "du spot » ne veut plus rien dire sur cet echantillon. Aucun "
+                "contrat retenu. Corriger en resserrant STRIKE_BAND_PCT (%.2f "
+                "aujourd'hui) ou en reduisant la fenetre d'echeances (%d-%d "
+                "jours)."
+                % (len(contracts), underlying, min(strikes), max(strikes), spot,
+                   STRIKE_BAND_PCT, min_days_out, max_days_out)
+            )
+            return None
 
     # AJOUTE le 27/08/2026. Cette cle ne regardait QUE le strike. La requete
     # ci-dessus couvre 7 a 21 jours, et un sous-jacent liquide comme SPY a des

@@ -1772,6 +1772,87 @@ class TestChoixDuContrat(unittest.TestCase):
         self.assertIsNone(self._choisir([]))
 
 
+
+    # ------------------------------------------------------------------
+    # Ajoutés le 27/08 : la troncature de page, que la bande ±5% a réduite
+    # sans la fermer.
+    # ------------------------------------------------------------------
+
+    # Noms distincts de bout en bout : la classe definit deja SPOT,
+    # _contrats() et surtout _choisir(). Mes helpers l'ecrasaient, donc
+    # SES tests s'executaient avec MON spot -- deux rouges qui n'avaient
+    # rien a voir avec le code de production.
+    SPOT_TRONQUE = 762.98
+
+    def _page_api(self, nb, depart=None, echeances=6, pas=1.0):
+        """Une réponse d'API triée par strike CROISSANT, comme la vraie."""
+        strike = depart if depart is not None else round(self.SPOT_TRONQUE * 0.95, 2)
+        page = []
+        for i in range(nb):
+            page.append({"symbol": "SPY2609%02dC%08d" % (2 + i % echeances,
+                                                          int(strike * 1000)),
+                         "strike_price": "%.2f" % strike,
+                         "expiration_date": "2026-09-%02d" % (2 + i % echeances)})
+            if i % echeances == echeances - 1:
+                strike += pas
+        return page
+
+    def _choisir_sur_page(self, page):
+        from unittest import mock
+        with mock.patch.object(alpaca_cli, "run",
+                               lambda a: {"option_contracts": page}):
+            return alpaca_cli.find_near_the_money_contract("SPY", +1,
+                                                           spot=self.SPOT_TRONQUE)
+
+    def test_une_page_tronquee_avant_le_spot_ne_rend_pas_un_contrat_au_hasard(self):
+        """L'API pagine à 100 résultats triés par strike CROISSANT. Le
+        correctif du 24/08 a borné les strikes à ±5% du spot, ce qui suffit
+        quand les strikes sont espacés de 5 $ — mais pas au dollar :
+
+            bande ±5% sur SPY à 762.98 = 76 points
+            76 strikes x 6 échéances (lun/mer/ven sur 7-21 j) = 462 contrats
+            tronqué à 100 -> la page s'arrête à ~740, le spot n'y est PAS
+
+        Mesuré sur une page ainsi construite : la fonction rendait un contrat
+        22 points DANS LA MONNAIE (~2215 $ d'intrinsèque) comme un choix
+        « at the money », sans un mot.
+
+        PORTÉE HONNÊTE : je n'ai pas pu vérifier contre l'API réelle si SPY
+        a effectivement des strikes au dollar et six échéances dans cette
+        fenêtre — le commentaire du 24/08 dit la correction vérifiée en
+        conditions réelles. Ce test ne prouve donc pas que le cas est actif ;
+        il prouve qu'AUCUNE détection n'existait s'il l'était, pour une panne
+        que ce projet a déjà subie une fois."""
+        page = self._page_api(100)
+        strikes = [float(c["strike_price"]) for c in page]
+        self.assertLess(max(strikes), self.SPOT_TRONQUE, "prérequis : spot hors page")
+        self.assertIsNone(
+            self._choisir_sur_page(page),
+            "une page tronquée AVANT le spot rend quand même un contrat, "
+            "présenté comme le plus proche de la monnaie")
+
+    def test_une_page_pleine_qui_encadre_le_spot_reste_exploitable(self):
+        """Témoin indispensable : refuser dès que la page est pleine
+        interdirait de trader les sous-jacents les plus liquides. Si le spot
+        est DANS l'intervalle rendu, le plus proche y est aussi — le tri par
+        strike le garantit."""
+        page = self._page_api(100, depart=self.SPOT_TRONQUE - 8, echeances=2, pas=0.5)
+        strikes = [float(c["strike_price"]) for c in page]
+        self.assertLess(min(strikes), self.SPOT_TRONQUE)
+        self.assertGreater(max(strikes), self.SPOT_TRONQUE)
+        self.assertIsNotNone(self._choisir_sur_page(page),
+                             "une page pleine encadrant le spot est refusée à tort")
+
+    def test_une_page_courte_sans_le_spot_reste_exploitable(self):
+        """L'autre moitié du témoin, et elle compte autant : une page COURTE
+        n'a pas été tronquée. Si aucun strike n'atteint le spot, c'est le
+        marché qui est ainsi, pas la pagination — et le plus proche est
+        vraiment le plus proche. Refuser ici confondrait « je n'ai pas tout
+        vu » avec « il n'y a rien de mieux »."""
+        page = self._page_api(12)
+        self.assertIsNotNone(self._choisir_sur_page(page),
+                             "une page non tronquée est refusée à tort")
+
 class TestBasculeDeCompte(BaseExit):
     """Passer de `.env` du compte de dev au compte dédié du hackathon est une
     étape PRÉVUE. state.json est un fichier unique sans conscience du compte :
