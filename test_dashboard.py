@@ -211,5 +211,85 @@ class TestCompteurDeFuites(BaseRendu):
         self.assertEqual(r["affiche"], "none")
 
 
+class TestEchappement(BaseRendu):
+    """Tout ce qui vient de data.json était interpolé BRUT dans innerHTML.
+
+    Chaîne tracée de bout en bout le 27/08 :
+
+      1. alpaca_cli.run(), quand la sortie du CLI n'est pas du JSON, lève avec
+         « first 500 chars of output: {stdout[:500]} » — la sortie BRUTE ;
+      2. un portail captif, un proxy ou une page d'erreur de passerelle renvoie
+         du HTML. C'est le cas réaliste d'un portable qui change de réseau,
+         précisément ce montage ;
+      3. agent.py met ce texte dans trade_record["error"] ;
+      4. il part dans decision_log.jsonl — la preuve PUBLIÉE, jamais réécrite ;
+      5. publish_dashboard.py le recopie dans docs/data.json ;
+      6. renderTrade() l'injectait tel quel dans innerHTML.
+
+    Au mieux la preuve est mutilée — une vraie balise comme <html> disparaît à
+    l'affichage. Au pire c'est une injection : innerHTML n'exécute pas
+    <script>, mais un <img onerror=...> si.
+    """
+
+    def test_une_page_de_portail_captif_est_echappee_et_preservee(self):
+        r = self.executer("""
+            _resultats.x = renderTrade({trades:[{symbol:"SPY", outcome:"error",
+              error:"could not parse JSON: first 500 chars of output: "
+                  + "<!DOCTYPE html><html><body>Network login required</body></html>"}]});
+        """)
+        self.assertNotIn("<html>", r["x"],
+                         "du balisage venu du réseau atteint le DOM de la page "
+                         "publique")
+        self.assertIn("&lt;html&gt;", r["x"],
+                      "le message n'est pas seulement neutralisé, il doit "
+                      "rester LISIBLE : c'est une preuve publiée")
+        self.assertIn("Network login required", r["x"])
+
+    def test_un_gestionnaire_d_evenement_est_neutralise(self):
+        r = self.executer("""
+            _resultats.x = renderTrade({trades:[{symbol:"SPY", outcome:"error",
+              error:"<img src=x onerror=alert(1)>"}]});
+        """)
+        self.assertNotIn("<img", r["x"])
+        self.assertIn("&lt;img", r["x"])
+
+    def test_les_verdicts_par_symbole_sont_echappes_aussi(self):
+        r = self.executer("""
+            const el = document.getElementById('decisions-container');
+            renderDecisions([{timestamp:"2026-08-27T00:00:00Z", outcome:"no_edge",
+              verdicts:[{symbol:"<b>SPY", tradeable:false, reason:"<i>oops"}]}]);
+            _resultats.x = el.innerHTML;
+        """)
+        self.assertNotIn("<b>SPY", r["x"])
+        self.assertNotIn("<i>oops", r["x"])
+        self.assertIn("&lt;b&gt;SPY", r["x"])
+
+    def test_les_positions_et_le_compte_sont_echappes(self):
+        r = self.executer("""
+            const p = document.getElementById('positions-container');
+            renderPositions([{symbol:"<b>X", asset_class:"<i>opt", qty:"1",
+                              cost_basis:"1", unrealized_plpc:"0.1"}]);
+            _resultats.pos = p.innerHTML;
+            const a = document.getElementById('account-cards');
+            renderAccount({account_number:"<b>PA1", status:"<i>ACTIVE"});
+            _resultats.compte = a.innerHTML;
+        """)
+        for cle in ("pos", "compte"):
+            self.assertNotIn("<b>", r[cle])
+            self.assertNotIn("<i>", r[cle])
+
+    def test_un_message_ordinaire_reste_lisible(self):
+        """Contrôle : sans lui, échapper trop (ou tout vider) passerait les
+        tests ci-dessus."""
+        r = self.executer("""
+            _resultats.x = renderTrade({trades:[{symbol:"SPY",
+              direction:"bullish (call)", outcome:"error",
+              error:"TimeoutExpired: command timed out after 30s"}]});
+        """)
+        self.assertIn("SPY", r["x"])
+        self.assertIn("bullish (call)", r["x"])
+        self.assertIn("TimeoutExpired: command timed out after 30s", r["x"])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

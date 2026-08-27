@@ -250,6 +250,39 @@ async function loadDashboard() {
   }
 }
 
+function esc(v) {
+  // AJOUTE le 27/08/2026. Tout ce qui vient de data.json etait interpole
+  // BRUT dans innerHTML. Chaine tracee de bout en bout :
+  //
+  //   1. alpaca_cli.run(), quand la sortie du CLI n'est pas du JSON, leve
+  //      avec « first 500 chars of output: {stdout[:500]} » -- la sortie
+  //      BRUTE ;
+  //   2. un portail captif, un proxy ou une page d'erreur de passerelle
+  //      renvoie du HTML. C'est le cas realiste d'un portable qui change de
+  //      reseau, precisement ce montage ;
+  //   3. agent.py met ce texte dans trade_record["error"] ;
+  //   4. il part dans decision_log.jsonl -- la preuve PUBLIEE, jamais
+  //      reecrite ;
+  //   5. publish_dashboard.py le recopie dans docs/data.json ;
+  //   6. renderTrade() l'injectait tel quel dans innerHTML.
+  //
+  // Du balisage venu d'un intermediaire reseau pouvait donc atteindre le DOM
+  // de la page de soumission. Au mieux le message est mange (une vraie balise
+  // comme <html> disparait a l'affichage, donc la preuve est mutilee), au pire
+  // c'est une injection -- innerHTML n'execute pas <script>, mais un
+  // <img onerror=...> si.
+  //
+  // On echappe DONC toute valeur issue des donnees. Les fragments de balisage
+  // que ce fichier compose lui-meme (classes CSS, <td>, <li>) ne passent pas
+  // par ici : ils ne viennent pas des donnees.
+  return String(v === undefined || v === null ? '' : v)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 function fmtMoney(v) {
   if (v === undefined || v === null) return '—';
   const n = typeof v === 'string' ? parseFloat(v) : v;
@@ -261,11 +294,11 @@ function renderAccount(account) {
   const el = document.getElementById('account-cards');
   if (!account) { el.innerHTML = '<div class="empty">No account data yet</div>'; return; }
   const cards = [
-    ['Account ID', account.account_number || account.id || '—'],
+    ['Account ID', esc(account.account_number || account.id || '—')],
     ['Equity', fmtMoney(account.equity)],
     ['Cash', fmtMoney(account.cash)],
     ['Buying Power', fmtMoney(account.buying_power)],
-    ['Status', account.status || '—'],
+    ['Status', esc(account.status || '—')],
   ];
   el.innerHTML = cards.map(([label, value]) =>
     `<div class="card"><div class="label">${label}</div><div class="value">${value}</div></div>`
@@ -283,9 +316,9 @@ function renderPositions(positions) {
     const plClass = isNaN(plpc) ? 'badge-muted' : (plpc >= 0 ? 'badge-green' : 'badge-red');
     const plLabel = isNaN(plpc) ? '—' : (plpc >= 0 ? '+' : '') + (plpc * 100).toFixed(1) + '%';
     return `<tr>
-      <td>${p.symbol || '—'}</td>
-      <td>${p.asset_class || '—'}</td>
-      <td>${p.qty || '—'}</td>
+      <td>${esc(p.symbol || '—')}</td>
+      <td>${esc(p.asset_class || '—')}</td>
+      <td>${esc(p.qty || '—')}</td>
       <td>${fmtMoney(p.cost_basis)}</td>
       <td><span class="badge ${plClass}">${plLabel}</span></td>
     </tr>`;
@@ -535,7 +568,7 @@ function outcomeBadge(d) {
     // single story.
     mixed: ['badge-muted', 'mixed outcomes — see trades below'],
   };
-  const [cls, label] = map[d.outcome] || ['badge-muted', d.outcome || 'unknown'];
+  const [cls, label] = map[d.outcome] || ['badge-muted', esc(d.outcome || 'unknown')];
   return `<span class="badge ${cls}">${label}</span>`;
 }
 
@@ -565,11 +598,11 @@ function renderTrade(d) {
   // (kind, pnl_pct, ...) nothing here needs yet. decision_log.jsonl is
   // committed, never rewritten, so old rows keep the plain-string shape
   // forever -- both have to render, not just the new one.
-  const lines = (d.exit_actions || []).map(a => `↩ ${typeof a === "string" ? a : (a && a.text) || JSON.stringify(a)}`);
+  const lines = (d.exit_actions || []).map(a => `↩ ${esc(typeof a === "string" ? a : (a && a.text) || JSON.stringify(a))}`);
   if (Array.isArray(d.trades) && d.trades.length) {
     for (const t of d.trades) {
       if (t.order_id) {
-        lines.push(`${t.symbol} ${t.direction || ''} · qty ${t.qty || '?'} · order ${t.order_id}`);
+        lines.push(`${esc(t.symbol)} ${esc(t.direction || '')} · qty ${esc(t.qty || '?')} · order ${esc(t.order_id)}`);
       } else {
         // order_status_unknown ajoute le 27/08 en meme temps que le badge rouge
         // du meme nom plus haut. Sans cette branche, la ligne tombait dans le
@@ -584,15 +617,15 @@ function renderTrade(d) {
           : t.outcome === 'no_contract_found' ? 'no contract found'
           : t.outcome === 'error' ? (t.error || 'error')
           : (t.outcome || 'not submitted');
-        lines.push(`${t.symbol} ${t.direction || ''} (${why})`);
+        lines.push(`${esc(t.symbol)} ${esc(t.direction || '')} (${esc(why)})`);
       }
     }
   } else if (Array.isArray(d.tradeable_symbols) && d.tradeable_symbols.length) {
-    lines.push(`${d.tradeable_symbols.join(', ')} (dry-run: would attempt entry)`);
+    lines.push(`${esc(d.tradeable_symbols.join(', '))} (dry-run: would attempt entry)`);
   } else if (d.order_id) {
-    lines.push(`${d.chosen_symbol || ''} ${d.direction || ''} · qty ${d.qty || '?'} · order ${d.order_id}`);
+    lines.push(`${esc(d.chosen_symbol || '')} ${esc(d.direction || '')} · qty ${esc(d.qty || '?')} · order ${esc(d.order_id)}`);
   } else if (d.chosen_symbol) {
-    lines.push(`${d.chosen_symbol} ${d.direction || ''} (not submitted)`);
+    lines.push(`${esc(d.chosen_symbol)} ${esc(d.direction || '')} (not submitted)`);
   }
   return lines.length ? lines.join('<br>') : '—';
 }
@@ -619,7 +652,7 @@ function renderDecisions(decisions) {
       const isLeak = typeof v.reason === 'string' && v.reason.startsWith('hindsight_guard:');
       const cls = isLeak ? ' class="verdict-leak"' : '';
       const marker = isLeak ? '🛡️' : (v.tradeable ? '✅' : '—');
-      return `<li${cls}>${v.symbol}: ${marker} ${v.reason}</li>`;
+      return `<li${cls}>${esc(v.symbol)}: ${marker} ${esc(v.reason)}</li>`;
     }).join('');
     const trade = renderTrade(d);
     return `<tr>
