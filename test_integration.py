@@ -1009,5 +1009,101 @@ class TestFenetresCitees(unittest.TestCase):
                               "%s cite ces fenêtres et n'est pas signalé" % attendu)
 
 
+class TestReadmeEtPlistsSAccordent(unittest.TestCase):
+    """Le README documente EN GRAS : « This is a deliberate change to a rule
+    this project used to hold » — la publication du tableau de bord est
+    automatique, la règle précédente est amendée là plutôt qu'ignorée.
+
+    Le 27/08, j'ai retiré `--git-push` du plist en m'appuyant sur la docstring
+    de publish_dashboard.py — que ce paragraphe déclare justement périmée. Une
+    décision réfléchie et documentée annulée en croyant corriger un oubli,
+    parce que RIEN ne reliait le README aux plists.
+
+    Ces tests portent sur le COMPORTEMENT du contrôle : ils restent valides
+    quelle que soit la façon dont le désaccord est tranché.
+    """
+
+    PLIST = ('<?xml version="1.0"?>\n<plist version="1.0"><dict>\n'
+             '  <key>ProgramArguments</key>\n  <array>\n'
+             '    <string>/usr/bin/python3</string>\n'
+             '    <string>/x/publish_dashboard.py</string>\n'
+             '%s'
+             '  </array>\n</dict></plist>\n')
+
+    def _alertes(self, readme, options=()):
+        import garde_fou
+        d = Path(tempfile.mkdtemp(prefix="hindsight-plists-"))
+        (d / "launchagents").mkdir()
+        lignes = "".join("    <string>%s</string>\n" % o for o in options)
+        (d / "launchagents" / "com.hindsightalpha.publish-dashboard.plist"
+         ).write_text(self.PLIST % lignes, encoding="utf-8")
+        (d / "README.md").write_text(readme, encoding="utf-8")
+        vraie = garde_fou.RACINE
+        avant = len(garde_fou.alertes)
+        garde_fou.RACINE = str(d)
+        try:
+            garde_fou.controle_readme_decrit_les_agents()
+            return [a[1] for a in garde_fou.alertes[avant:]]
+        finally:
+            garde_fou.RACINE = vraie
+            del garde_fou.alertes[avant:]
+            shutil.rmtree(d, ignore_errors=True)
+
+    NOMME = ("`launchagents/com.hindsightalpha.publish-dashboard.plist` runs\n"
+             "`publish_dashboard.py %s` every 30 minutes.\n")
+
+    def test_le_readme_promet_une_option_que_le_plist_n_a_pas(self):
+        """L'erreur exacte du 27/08."""
+        alertes = self._alertes(self.NOMME % "--git-push", options=())
+        self.assertTrue(alertes, "le README décrit un comportement que le "
+                                 "plist ne produit plus, et rien ne le dit")
+        self.assertIn("--git-push", alertes[0])
+
+    def test_le_plist_fait_une_chose_que_le_readme_ne_dit_pas(self):
+        """L'autre sens compte autant : un comportement automatique non
+        documenté est un comportement que personne n'a décidé."""
+        alertes = self._alertes(self.NOMME % "", options=("--git-push",))
+        self.assertTrue(alertes)
+        self.assertIn("--git-push", alertes[0])
+
+    def test_quand_les_deux_s_accordent_rien_ne_se_declenche(self):
+        """Contrôle : sans lui, alerter TOUJOURS passerait les deux tests
+        ci-dessus."""
+        self.assertEqual(
+            self._alertes(self.NOMME % "--git-push", options=("--git-push",)),
+            [])
+
+    def test_une_option_seulement_en_commentaire_ne_compte_pas_comme_active(self):
+        """Le plist porte la RAISON du retrait en commentaire XML. Compter cette
+        mention comme une option active masquerait précisément le désaccord."""
+        import garde_fou
+        d = Path(tempfile.mkdtemp(prefix="hindsight-plists-"))
+        try:
+            (d / "launchagents").mkdir()
+            (d / "launchagents" / "com.hindsightalpha.publish-dashboard.plist"
+             ).write_text(self.PLIST % "    <!-- retire : <string>--git-push</string> -->\n",
+                          encoding="utf-8")
+            (d / "README.md").write_text(self.NOMME % "--git-push", encoding="utf-8")
+            vraie, avant = garde_fou.RACINE, len(garde_fou.alertes)
+            garde_fou.RACINE = str(d)
+            try:
+                garde_fou.controle_readme_decrit_les_agents()
+                alertes = [a[1] for a in garde_fou.alertes[avant:]]
+            finally:
+                garde_fou.RACINE = vraie
+                del garde_fou.alertes[avant:]
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+        self.assertTrue(alertes, "une option seulement citée en commentaire est "
+                                 "comptée comme active : le désaccord disparaît")
+
+    def test_un_agent_que_le_readme_ne_nomme_pas_est_ignore(self):
+        """Tous les plists n'ont pas vocation à être décrits."""
+        self.assertEqual(
+            self._alertes("Ce README ne parle d'aucun agent.\n",
+                          options=("--git-push",)),
+            [])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

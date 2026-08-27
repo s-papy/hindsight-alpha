@@ -1478,6 +1478,84 @@ def controle_verrou_dit_hebdomadaire() -> None:
         )
 
 
+def controle_readme_decrit_les_agents() -> None:
+    """Le README decrit-il ce que les plists font REELLEMENT ?
+
+    AJOUTE le 27/08/2026, apres une erreur que ce controle aurait empechee.
+
+    Le README documente, en gras : « This is a deliberate change to a rule this
+    project used to hold. » -- la publication du tableau de bord est automatique
+    (`publish_dashboard.py --git-push`), la regle precedente est AMENDEE la
+    plutot qu'ignoree, et le raisonnement est ecrit noir sur blanc : la page est
+    l'URL de soumission, une regle qui la laisse perimee protegeait la mauvaise
+    chose.
+
+    Le meme jour, j'ai retire `--git-push` du plist en m'appuyant sur la
+    docstring de publish_dashboard.py -- que ce paragraphe declare justement
+    perimee. Une decision reflechie et documentee annulee en croyant corriger un
+    oubli, parce que RIEN ne reliait le README aux plists.
+
+    Ce controle relie les deux, dans les DEUX sens : une option que le README
+    attribue a un agent doit exister dans son plist, et une option active dans
+    un plist doit apparaitre dans ce que le README en dit.
+
+    ALERTE et non blocage : il ne tranche pas quelle version a raison. Il rend
+    le desaccord visible, pour que la personne qui a pris la decision decide.
+    """
+    dossier = os.path.join(RACINE, "launchagents")
+    chemin_readme = os.path.join(RACINE, "README.md")
+    if not os.path.isdir(dossier) or not os.path.exists(chemin_readme):
+        return
+    texte = open(chemin_readme, encoding="utf-8", errors="replace").read()
+
+    for nom in sorted(os.listdir(dossier)):
+        if not nom.endswith(".plist"):
+            continue
+        contenu = open(os.path.join(dossier, nom),
+                       encoding="utf-8", errors="replace").read()
+        pos = texte.find(nom)
+        if pos == -1:
+            continue  # le README ne nomme pas cet agent : rien a croiser
+
+        # Les options en `--xxx` reellement passees par le plist. Une ligne
+        # commentee (a l'interieur d'un <!-- --> XML) n'en est pas une : on ne
+        # garde que les <string> seuls sur leur ligne.
+        actives = set()
+        for ligne in contenu.splitlines():
+            nu = ligne.strip()
+            if nu.startswith("<!--") or nu.startswith("--"):
+                continue
+            m = re.fullmatch(r"<string>(--[\w-]+)</string>", nu)
+            if m:
+                actives.add(m.group(1))
+
+        # Ce que le README attribue a CET agent : les options citees dans les
+        # 300 caracteres qui suivent son nom.
+        voisinage = texte[pos:pos + 300]
+        citees = set(re.findall(r"(--[\w-]+)", voisinage))
+
+        promises_absentes = sorted(citees - actives)
+        actives_non_dites = sorted(actives - citees)
+
+        if promises_absentes:
+            alerte(
+                "README.md",
+                "decrit %s comme lance avec %s, mais le plist ne passe pas "
+                "cette option. Le README documente peut-etre une decision "
+                "deliberee que le plist a perdue -- ou l'inverse. Les deux ne "
+                "peuvent pas avoir raison."
+                % (nom, ", ".join(promises_absentes)),
+            )
+        if actives_non_dites:
+            alerte(
+                nom,
+                "passe %s, que le README ne mentionne pas la ou il decrit cet "
+                "agent. Un comportement automatique non documente est un "
+                "comportement que personne n'a decide."
+                % ", ".join(actives_non_dites),
+            )
+
+
 def main() -> int:
     print("=" * 74)
     print("GARDE-FOU — hindsight-alpha — %s" % datetime.now().strftime("%d/%m/%Y %H:%M"))
@@ -1498,6 +1576,7 @@ def main() -> int:
         controle_dependances_scellees,
         controle_hooks_actifs,
         controle_verrou_dit_hebdomadaire,
+        controle_readme_decrit_les_agents,
     )
     for controle in CONTROLES:
         controle()
