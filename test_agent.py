@@ -301,5 +301,70 @@ class TestRefusAuDemarrage(unittest.TestCase):
                             "une sortie de code 0 est maquillée en erreur")
 
 
+class TestAgentsPlanifies(unittest.TestCase):
+    """Les plists de launchagents/ sont du code livré : ils décident de ce que
+    la machine fait toute seule, sans personne devant l'écran.
+
+    Trouvé le 27/08 : com.hindsightalpha.publish-dashboard.plist passait
+    `--git-push`, soit un `git push` automatique jusqu'à 75 fois par jour.
+    publish_dashboard.py dit pourtant l'inverse dans son propre docstring —
+    « pushing to the public repo [...] needs an explicit decision each time,
+    not a silent default in a script ». Et `git push` pousse TOUTE la branche,
+    donc tout commit en cours part avec.
+    """
+
+    RACINE = Path(__file__).resolve().parent
+
+    def _plists(self):
+        dossier = self.RACINE / "launchagents"
+        fichiers = sorted(dossier.glob("*.plist"))
+        self.assertTrue(fichiers, "aucun plist trouvé dans launchagents/")
+        return fichiers
+
+    def test_aucun_agent_ne_pousse_automatiquement(self):
+        fautifs = []
+        for f in self._plists():
+            for ligne in f.read_text(encoding="utf-8").splitlines():
+                nu = ligne.strip()
+                if nu.startswith("<!--") or nu.startswith("--"):
+                    continue          # une mention en commentaire est la trace
+                                      # du retrait, pas un argument actif
+                if "<string>--git-push</string>" == nu:
+                    fautifs.append(f.name)
+        self.assertEqual(fautifs, [],
+                         "un agent planifié passe --git-push : la machine "
+                         "publierait sur le dépôt public sans décision "
+                         "humaine, contre la règle écrite dans "
+                         "publish_dashboard.py")
+
+    def test_la_regle_est_toujours_ecrite_dans_le_module(self):
+        """Si quelqu'un retire cette phrase du docstring, le test ci-dessus
+        continue de passer mais ne défend plus rien de déclaré. On verrouille
+        les deux ensemble."""
+        source = (self.RACINE / "publish_dashboard.py").read_text(encoding="utf-8")
+        self.assertIn("needs an explicit decision each time", source)
+
+    def test_les_agents_qui_lancent_nos_scripts_fixent_leur_repertoire(self):
+        """publish_dashboard.git_publish() utilise des chemins RELATIFS et ne
+        passe pas de cwd à subprocess : sans WorkingDirectory, git opérerait
+        sur le dépôt du répertoire courant, quel qu'il soit.
+
+        La règle ne vaut QUE pour les plists qui lancent un script de ce
+        dépôt. market-hours-awake lance /usr/bin/caffeinate avec des arguments
+        entièrement absolus et n'a aucun répertoire de travail à fixer —
+        l'exiger de lui serait une assertion qui dépasse sa cible, et un test
+        qui dépasse sa cible finit par être assoupli plutôt que corrigé."""
+        for f in self._plists():
+            contenu = f.read_text(encoding="utf-8")
+            if ".py</string>" not in contenu:
+                continue
+            with self.subTest(plist=f.name):
+                # assertTrue et non assertIn : assertIn imprimerait le plist
+                # entier dans le rapport d'échec.
+                self.assertTrue(
+                    "<key>WorkingDirectory</key>" in contenu,
+                    "%s lance un script du dépôt sans fixer WorkingDirectory" % f.name)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

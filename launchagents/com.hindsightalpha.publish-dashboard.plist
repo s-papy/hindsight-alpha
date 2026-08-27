@@ -13,7 +13,24 @@
 	<array>
 		<string>/usr/bin/python3</string>
 		<string>/Users/s-pap/hindsight-alpha/publish_dashboard.py</string>
-		<string>--git-push</string>
+	<!-- RETIRE le 27/08/2026. Ce plist passait --git-push, donc `git push`
+	     automatique jusqu'a 75 fois par jour. Trois raisons de l'enlever :
+
+	     1. publish_dashboard.py dit textuellement l'inverse dans son propre
+	        docstring : « --git-push is opt-in and separate on purpose [...]
+	        pushing to the public repo is a step this project's own rules say
+	        needs an explicit decision each time, not a silent default in a
+	        script. » Le plist contredisait la regle ecrite du module.
+	     2. `git push` pousse TOUTE la branche, pas seulement docs/data.json --
+	        donc tout commit en cours, revu ou non, part avec.
+	     3. Spap a dit le 27/08 vouloir faire ses pushes lui-meme.
+
+	     L'agent continue d'ecrire docs/data.json localement, ce qui est sur a
+	     lancer sans surveillance. Pour reactiver la publication automatique,
+	     remettre <string>--git-push</string> ci-dessous et recharger l'agent.
+	     La banniere de sante du tableau de bord sait deja distinguer « page
+	     perimee » de « moniteur mort », donc un instantane non publie
+	     s'affiche honnetement au lieu d'accuser le moniteur. -->
 	</array>
 	<key>StandardErrorPath</key>
 	<string>/Users/s-pap/hindsight-alpha/publish_dashboard.log</string>
