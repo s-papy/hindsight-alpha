@@ -767,6 +767,48 @@ class TestLivrablesCroisesAvecLaSource(unittest.TestCase):
         self.assertIn("NOMBRE DE TRANSACTIONS", sortie)
         self.assertNotEqual(code, 0)
 
+    def test_le_nombre_de_fuites_annonce_par_le_deck_est_croise(self):
+        """« 1 leak caught » est le chiffre phare du deck — celui qu'un juge
+        retient. Le contrôle existait et fonctionnait, mais n'avait aucun test.
+
+        Ce test mute la SOURCE plutôt que le livrable : on retire les marqueurs
+        de fuite de BACKTEST_RESULTS.md, et le deck qui annonce toujours « 1 »
+        doit être refusé. C'est aussi le seul croisement qui atteint le deck :
+        son texte extrait d'un .pptx n'a pas de tableau Markdown, donc le
+        contrôle par symbole ne s'y applique pas — par construction, pas par
+        oubli."""
+        d = Path(tempfile.mkdtemp(prefix="hindsight-leaks-"))
+        try:
+            for nom in self.FICHIERS:
+                source = self.RACINE / nom
+                if not source.exists():
+                    self.skipTest("%s absent" % nom)
+                shutil.copy(source, d / nom)
+            deck = self.RACINE / "submission" / "Hindsight_Alpha_Deck.pptx"
+            if not deck.exists():
+                self.skipTest("deck absent")
+            (d / "submission").mkdir(exist_ok=True)
+            shutil.copy(deck, d / "submission" / "Hindsight_Alpha_Deck.pptx")
+
+            chemin = d / "BACKTEST_RESULTS.md"
+            avant = chemin.read_text(encoding="utf-8")
+            apres = re.sub(r"LEAK DETECTED[^\n]*", "OK: no leak",
+                           avant.replace("**LEAK**", "yes"))
+            self.assertNotEqual(avant, apres,
+                                "aucun marqueur de fuite dans la source : ce "
+                                "test ne vérifie plus rien")
+            chemin.write_text(apres, encoding="utf-8")
+
+            proc = subprocess.run([sys.executable, "garde_fou.py"], cwd=str(d),
+                                  capture_output=True, text=True, timeout=120)
+            sortie = proc.stdout + proc.stderr
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+        self.assertIn("NOMBRE DE LEAKS", sortie,
+                      "le deck annonce un nombre de fuites que la source ne "
+                      "confirme pas, et rien ne le dit")
+        self.assertIn("Deck", sortie)
+
     def test_les_deux_champs_deja_couverts_le_restent(self):
         """Anti-régression : élargir un contrôle ne doit pas en casser une
         partie qui marchait."""
