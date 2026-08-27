@@ -14,6 +14,29 @@
 # Cette CI est la couche qui ne dépend d'aucune des deux : elle tourne sur
 # GitHub même, sur le vrai contenu poussé, visible comme coche verte/rouge
 # sur chaque commit et PR — y compris pour un juge qui parcourt le repo.
+#
+# CE QU'ELLE NE COUVRE PAS, corrigé le 27/08 après reproduction : le trou n°2
+# ci-dessus était surestimé pour les IDENTIFIANTS, et précisément pour eux.
+# controle_aucun_identifiant_dans_les_fichiers_publies() cherche par VALEUR
+# EXACTE — un bon choix, aucun faux positif possible — mais il lui faut des
+# valeurs à comparer, prises dans l'environnement ou dans les fichiers
+# d'environnement locaux. Ici il n'y en a aucune. Mesuré sur un même dépôt
+# portant une même fausse clé au format Alpaca, committée :
+#
+#     valeurs connues -> 🔴 BLOQUANT, « révoque cette clé »
+#     aucune valeur   -> 🟡, aucune mention des identifiants
+#
+# Donc une clé poussée via `--no-verify` NE serait PAS rattrapée ici. Ce
+# fichier affirmait le contraire ; le contrôle, lui, documentait son
+# inertie en CI. Les deux ne pouvaient pas avoir raison.
+#
+# Le contrôle ANNONCE désormais qu'il n'a rien vérifié, au lieu de se taire :
+# le log de ce job dit explicitement « ce contrôle n'a RIEN vérifié », pour
+# qu'une coche verte ne se lise jamais comme « aucun identifiant publié ».
+# La protection réelle contre ce cas reste le hook local, sur la machine qui
+# détient les clés. Un scan par MOTIF (façon gitleaks) le couvrirait ici, au
+# prix de faux positifs que ce projet a délibérément refusés jusque-là — c'est
+# un arbitrage à faire, pas un oubli.
 name: garde-fou
 
 on:

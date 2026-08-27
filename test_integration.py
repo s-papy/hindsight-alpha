@@ -1174,6 +1174,90 @@ class TestAucunIdentifiantPublie(unittest.TestCase):
     CLE = "CLEFACTICEPOURLETEST1234567890"
     SECRET = "SECRETFACTICEPOURLETEST0987654321"
 
+    def test_le_controle_dit_quand_il_n_a_rien_a_chercher(self):
+        """Ajouté le 27/08, après reproduction dans un clone jetable.
+
+        Ce contrôle cherche par VALEUR EXACTE — un choix juste, qui lui évite
+        tout faux positif. Mais sans valeur à chercher, il ne cherche RIEN, et
+        il ne le disait pas. Mesuré sur un même dépôt portant une même fausse
+        clé au format Alpaca, committée :
+
+            valeurs connues dans l'environnement -> 🔴 BLOQUANT, révoque-la
+            aucune valeur connue                 -> 🟡, silence complet
+
+        Le contrôle est excellent une fois armé. Il était muet sur le fait de
+        ne pas l'être — dans le seul contrôle BLOQUANT du script, celui qui
+        garde le seul défaut irréversible que ce projet puisse produire.
+
+        Le cas n'est pas théorique : c'est l'état de la CI, et celui de tout
+        clone fait sur une autre machine. Le workflow GitHub se présentait
+        justement comme « la couche qui ne dépend d'aucune des deux » et
+        censée rattraper un `git commit --no-verify` ; pour les identifiants,
+        elle ne le peut pas. Les deux documents ne pouvaient pas avoir raison.
+
+        contrôle_journal fait déjà exactement ça pour PLAN_SPRINT.md absent :
+        « ce contrôle n'a RIEN vérifié ici ». On aligne."""
+        import garde_fou
+        garde_fou.alertes.clear()
+        garde_fou.blocages.clear()
+        vieux = {n: os.environ.pop(n, None)
+                 for n in ("ALPACA_API_KEY", "ALPACA_SECRET_KEY", "ALPACA_ACCOUNT_ID")}
+        vraie_racine = garde_fou.RACINE
+        try:
+            # Une racine sans fichier d'environnement : le contrôle n'a alors
+            # aucune valeur, ni depuis l'environnement ni depuis le disque.
+            garde_fou.RACINE = tempfile.mkdtemp(prefix="hindsight-sansenv-")
+            garde_fou.controle_aucun_identifiant_dans_les_fichiers_publies()
+            dits = " ".join(m for _, m in garde_fou.alertes)
+            self.assertTrue(
+                garde_fou.alertes,
+                "le contrôle n'a AUCUNE valeur à chercher et ne dit rien : un "
+                "lecteur du log conclut qu'il a vérifié et n'a rien trouvé")
+            self.assertIn("RIEN", dits.upper(),
+                          "l'alerte ne dit pas qu'aucune vérification n'a eu "
+                          "lieu : %s" % dits)
+            self.assertFalse(garde_fou.blocages,
+                             "ne pas pouvoir vérifier ne doit pas BLOQUER un "
+                             "clone légitime — l'alerte suffit")
+        finally:
+            shutil.rmtree(garde_fou.RACINE, ignore_errors=True)
+            garde_fou.RACINE = vraie_racine
+            for n, v in vieux.items():
+                if v is not None:
+                    os.environ[n] = v
+            garde_fou.alertes.clear()
+            garde_fou.blocages.clear()
+
+    def test_le_controle_arme_bloque_toujours(self):
+        """Pendant obligatoire : l'aveu d'impuissance ne doit pas remplacer le
+        travail. Avec une valeur à chercher et un fichier suivi qui la
+        contient, le verdict reste BLOQUANT."""
+        import garde_fou, subprocess
+        garde_fou.alertes.clear()
+        garde_fou.blocages.clear()
+        vieux = os.environ.get("ALPACA_API_KEY")
+        depot = tempfile.mkdtemp(prefix="hindsight-arme-")
+        vraie_racine = garde_fou.RACINE
+        try:
+            subprocess.run(["git", "init", "-q", depot], check=True)
+            Path(depot, "fuite.py").write_text(
+                'CLE = "%s"\n' % self.CLE, encoding="utf-8")
+            subprocess.run(["git", "-C", depot, "add", "-A"], check=True)
+            os.environ["ALPACA_API_KEY"] = self.CLE
+            garde_fou.RACINE = depot
+            garde_fou.controle_aucun_identifiant_dans_les_fichiers_publies()
+            self.assertTrue(garde_fou.blocages,
+                            "une clé dans un fichier suivi ne bloque plus")
+        finally:
+            shutil.rmtree(depot, ignore_errors=True)
+            garde_fou.RACINE = vraie_racine
+            if vieux is None:
+                os.environ.pop("ALPACA_API_KEY", None)
+            else:
+                os.environ["ALPACA_API_KEY"] = vieux
+            garde_fou.alertes.clear()
+            garde_fou.blocages.clear()
+
     # ── couche 1 : caviardage a l'ecriture ────────────────────────────────
     def _journalise(self, record, cle=None, secret=None):
         import decision_log

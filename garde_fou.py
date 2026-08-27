@@ -1678,6 +1678,39 @@ def controle_aucun_identifiant_dans_les_fichiers_publies() -> None:
             if cle in NOMS and _ressemble_a_un_identifiant(cle, val):
                 trouvees[cle] = val
     if not trouvees:
+        # AJOUTE le 27/08/2026, apres reproduction dans un clone jetable.
+        #
+        # La recherche par VALEUR EXACTE est un bon choix : aucun faux positif
+        # possible. Mais SANS valeur a chercher, ce controle ne cherche RIEN --
+        # et il ne le disait pas. Mesure sur un meme depot portant une meme
+        # fausse cle au format Alpaca, committee :
+        #
+        #     valeurs connues -> 🔴 BLOQUANT, « revoque cette cle »
+        #     aucune valeur   -> 🟡, silence complet sur les identifiants
+        #
+        # Excellent une fois arme, muet sur le fait de ne pas l'etre -- dans le
+        # SEUL controle bloquant de ce script, celui qui garde le seul defaut
+        # irreversible que ce projet puisse produire.
+        #
+        # Le cas n'est pas theorique : c'est l'etat de la CI, et celui de tout
+        # clone fait sur une autre machine. Le workflow GitHub se presentait
+        # justement comme la couche censee rattraper un `git commit
+        # --no-verify` ; pour les identifiants elle ne le peut pas, et son
+        # commentaire a ete corrige le meme jour. Les deux ne pouvaient pas
+        # avoir raison.
+        #
+        # ALERTE et non blocage : un clone legitime sans identifiants n'a rien
+        # fait de mal. Mais un lecteur du log doit savoir que ce controle-la
+        # n'a pas tourne. Meme forme que controle_journal() pour PLAN_SPRINT.md
+        # absent : « ce controle n'a RIEN verifie ici ».
+        alerte("identifiants",
+               "AUCUNE valeur d'identifiant connue sur cette machine, donc ce "
+               "controle n'a RIEN verifie. Il cherche par valeur exacte (aucun "
+               "faux positif possible) et n'a rien a comparer ici : une cle "
+               "posee dans un fichier suivi passerait sans un mot. C'est l'etat "
+               "normal en CI et sur un clone ; il est effectif la ou il compte, "
+               "sur la machine qui detient les cles. Ne pas lire ce vert comme "
+               "« aucun identifiant publie ».")
         return
     valeurs = sorted(trouvees.items())
 
