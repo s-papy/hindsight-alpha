@@ -1105,6 +1105,9 @@ class TestReadmeEtPlistsSAccordent(unittest.TestCase):
             [])
 
 
+GIT = shutil.which("git")
+
+
 class TestAucunIdentifiantPublie(unittest.TestCase):
     """decision_log.jsonl et docs/data.json ne sont PAS gitignorés : ce sont les
     preuves publiées, et depuis le rétablissement de la publication automatique
@@ -1209,6 +1212,118 @@ class TestAucunIdentifiantPublie(unittest.TestCase):
     def test_une_cle_dans_data_json_bloque_aussi(self):
         sortie = self._verdict(contenu_data='{"x":"%s"}' % self.SECRET)
         self.assertIn("CONTIENT LA VALEUR DE ALPACA_SECRET_KEY", sortie)
+
+    def _depot_git(self, fichiers):
+        """Un vrai depot git, parce que le controle balaie `git ls-files`."""
+        import garde_fou
+        d = Path(tempfile.mkdtemp(prefix="hindsight-suivis-"))
+        shutil.copy(Path(garde_fou.__file__).resolve().parent / "garde_fou.py",
+                    d / "garde_fou.py")
+        (d / ("." + "env")).write_text(
+            "ALPACA_API_KEY=%s\nALPACA_SECRET_KEY=%s\nALPACA_ACCOUNT_ID=%s\n"
+            % (self.CLE, self.SECRET, self.COMPTE), encoding="utf-8")
+        for nom, contenu in fichiers.items():
+            (d / nom).write_text(contenu, encoding="utf-8")
+        for args in (["init", "-q", "."], ["add", "-A"]):
+            subprocess.run([GIT] + args, cwd=str(d), capture_output=True,
+                           timeout=30)
+        proc = subprocess.run([sys.executable, "garde_fou.py"], cwd=str(d),
+                              capture_output=True, text=True, timeout=120)
+        shutil.rmtree(d, ignore_errors=True)
+        return proc.stdout + proc.stderr
+
+    COMPTE = "PAFACTICE12345"
+
+    @unittest.skipUnless(shutil.which("git"), "git absent")
+    def test_une_cle_dans_un_fichier_source_suivi_bloque(self):
+        """La première version du contrôle ne regardait que decision_log.jsonl
+        et docs/data.json. Une clé posée dans un .py — le cas qu'il existe pour
+        attraper — lui aurait échappé."""
+        sortie = self._depot_git({"agent.py": "# debug: %s\n" % self.CLE})
+        self.assertIn("CONTIENT LA VALEUR DE ALPACA_API_KEY", sortie)
+        self.assertIn("agent.py", sortie)
+
+    @unittest.skipUnless(shutil.which("git"), "git absent")
+    def test_un_numero_de_compte_alerte_sans_bloquer(self):
+        """Deux sévérités : un numéro de compte n'autorise aucune action sans
+        les clés, et le tableau de bord publie déjà celui du compte courant.
+        Crier au même volume que pour une clé apprendrait à ignorer les deux."""
+        sortie = self._depot_git({"notes.md": "compte %s\n" % self.COMPTE})
+        self.assertIn("contient la valeur de ALPACA_ACCOUNT_ID", sortie)
+        self.assertNotIn("CONTIENT LA VALEUR DE ALPACA_ACCOUNT_ID", sortie,
+                         "un numéro de compte bloque comme une clé")
+
+    @unittest.skipUnless(shutil.which("git"), "git absent")
+    def test_un_fichier_NON_suivi_n_est_pas_signale(self):
+        """Un brouillon local qui ne partira jamais sur le dépôt n'a pas à
+        bloquer un commit. Sans ce contrôle, le balayage crierait sur des
+        fichiers de travail et on apprendrait à l'ignorer."""
+        import garde_fou
+        d = Path(tempfile.mkdtemp(prefix="hindsight-nonsuivi-"))
+        try:
+            shutil.copy(Path(garde_fou.__file__).resolve().parent / "garde_fou.py",
+                        d / "garde_fou.py")
+            (d / ("." + "env")).write_text("ALPACA_API_KEY=%s\n" % self.CLE,
+                                           encoding="utf-8")
+            subprocess.run([GIT, "init", "-q", "."], cwd=str(d),
+                           capture_output=True, timeout=30)
+            subprocess.run([GIT, "add", "garde_fou.py"], cwd=str(d),
+                           capture_output=True, timeout=30)
+            # ecrit APRES le `git add` : jamais suivi
+            (d / "brouillon.txt").write_text("cle=%s\n" % self.CLE,
+                                             encoding="utf-8")
+            proc = subprocess.run([sys.executable, "garde_fou.py"], cwd=str(d),
+                                  capture_output=True, text=True, timeout=120)
+            sortie = proc.stdout + proc.stderr
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+        self.assertNotIn("brouillon.txt", sortie)
+
+    @unittest.skipUnless(shutil.which("git"), "git absent")
+    def test_un_identifiant_factice_ne_declenche_rien(self):
+        """Trouvé par la reproduction de l'environnement CI, juste après avoir
+        élargi le contrôle à tous les fichiers suivis.
+
+        Les fichiers de test posent eux-mêmes des identifiants factices
+        (« cle-de-test », « secret-de-test »). Quand garde_fou tourne avec ces
+        valeurs dans l'environnement — ce que fait la suite — il les retrouvait
+        dans les sources et BLOQUAIT. Un contrôle qui crie sur des valeurs bidon
+        apprend à être ignoré, et c'est le pire sort pour celui-ci."""
+        import garde_fou
+        d = Path(tempfile.mkdtemp(prefix="hindsight-factice-"))
+        try:
+            shutil.copy(Path(garde_fou.__file__).resolve().parent / "garde_fou.py",
+                        d / "garde_fou.py")
+            (d / ("." + "env")).write_text(
+                "ALPACA_API_KEY=cle-de-test\nALPACA_SECRET_KEY=secret-de-test\n",
+                encoding="utf-8")
+            (d / "notes.md").write_text(
+                "les tests utilisent cle-de-test et secret-de-test\n",
+                encoding="utf-8")
+            for args in (["init", "-q", "."], ["add", "-A"]):
+                subprocess.run([GIT] + args, cwd=str(d), capture_output=True,
+                               timeout=30)
+            proc = subprocess.run([sys.executable, "garde_fou.py"], cwd=str(d),
+                                  capture_output=True, text=True, timeout=120)
+            sortie = proc.stdout + proc.stderr
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+        self.assertNotIn("CONTIENT LA VALEUR", sortie,
+                         "un identifiant factice fait bloquer le garde-fou")
+
+    def test_un_numero_de_compte_reel_reste_detecte_malgre_le_filtre(self):
+        """Le filtre anti-remplissage a d'abord utilisé un seuil UNIQUE à 16
+        caractères. Il laissait passer les clés (20 et 40) mais rejetait le
+        numéro de compte, qui n'en fait que 12 : la détection du numéro avait
+        disparu sans bruit. Trois formats ne se filtrent pas avec un seul
+        nombre."""
+        import garde_fou
+        source = (Path(garde_fou.__file__).resolve().parent
+                  / "garde_fou.py").read_text(encoding="utf-8")
+        self.assertIn("ALPACA_ACCOUNT_ID", source)
+        self.assertIn("nom == \"ALPACA_ACCOUNT_ID\"", source,
+                      "le filtre ne distingue plus le numéro de compte des "
+                      "clés : un seuil unique le rejetterait")
 
     def test_des_fichiers_propres_ne_declenchent_rien(self):
         """Contrôle : sans lui, bloquer TOUJOURS passerait les deux tests

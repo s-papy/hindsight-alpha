@@ -1596,10 +1596,37 @@ def controle_aucun_identifiant_dans_les_fichiers_publies() -> None:
     # endroit qui compte. Un controle qu'on ne verifie pas est un controle qui
     # rassure sans proteger. On lit donc les fichiers directement.
     NOMS = ("ALPACA_API_KEY", "ALPACA_SECRET_KEY", "ALPACA_ACCOUNT_ID")
+
+    def _ressemble_a_un_identifiant(nom: str, v: str) -> bool:
+        """Un vrai identifiant Alpaca, pas un remplissage.
+
+        RESSERRE le 27/08, trouve par la reproduction de l'environnement CI
+        juste apres avoir elargi ce controle a tous les fichiers suivis. Les
+        fichiers de test posent eux-memes des identifiants factices
+        (« cle-de-test », « secret-de-test ») ; quand garde_fou tourne avec ces
+        valeurs dans l'environnement -- ce que fait la suite -- il les retrouve
+        dans les sources et BLOQUE. Un controle qui crie sur des valeurs bidon
+        apprend a etre ignore, et c'est le pire sort pour celui-ci.
+
+        Les vraies valeurs Alpaca sont alphanumeriques et longues (cle : 20
+        caracteres, secret : 40, numero de compte : « PA » + alphanumerique,
+        12 caracteres). Un remplissage lisible par un humain ne l'est pas.
+
+        Le seuil est PAR NOM, corrige aussitot ecrit : un seuil unique a 16
+        laissait passer les cles mais rejetait le numero de compte, qui n'en
+        fait que 12 -- la detection du numero avait donc disparu sans bruit.
+        Trois formats differents ne se filtrent pas avec un seul nombre."""
+        if not re.fullmatch(r"[A-Za-z0-9_-]+", v):
+            return False
+        if nom == "ALPACA_ACCOUNT_ID":
+            # Forme Alpaca : « PA » suivi d'alphanumerique majuscule.
+            return len(v) >= 10 and re.fullmatch(r"[A-Z0-9]+", v) is not None
+        return len(v) >= 16 and sum(c.isalnum() for c in v) >= 12
+
     trouvees = {}
     for nom in NOMS:
         v = os.environ.get(nom) or ""
-        if len(v) >= 8:
+        if _ressemble_a_un_identifiant(nom, v):
             trouvees[nom] = v
     for fichier in ('.env', '.env.hackathon'):
         chemin = os.path.join(RACINE, fichier)
@@ -1616,15 +1643,48 @@ def controle_aucun_identifiant_dans_les_fichiers_publies() -> None:
             cle, _, val = ligne.partition("=")
             cle = cle.strip()
             val = val.strip().strip("'").strip('"')
-            if cle in NOMS and len(val) >= 8:
+            if cle in NOMS and _ressemble_a_un_identifiant(cle, val):
                 trouvees[cle] = val
     if not trouvees:
         return
     valeurs = sorted(trouvees.items())
 
+    # ELARGI le 27/08 : la premiere version ne regardait que decision_log.jsonl
+    # et docs/data.json. Mesure sur les 38 fichiers suivis par git : aucune cle
+    # ni secret nulle part -- rassurant -- mais le NUMERO DE COMPTE du hackathon
+    # apparait dans trois fichiers source committes (CLAUDE.md, ce script,
+    # test_connection.py). Le controle ne les regardait pas.
+    #
+    # Ce n'est pas grave pour un numero de compte : il n'autorise aucune action
+    # sans les cles, et le tableau de bord publie deja celui du compte courant.
+    # Ce qui l'est, c'est que le controle aurait ete AVEUGLE a une vraie cle
+    # posee dans un .py -- exactement le cas qu'il existe pour attraper.
+    #
+    # On balaie donc TOUT ce que git suit, avec deux severites :
+    #   - une CLE ou un SECRET dans un fichier suivi -> BLOQUE. Irreversible
+    #     une fois pousse.
+    #   - le NUMERO DE COMPTE -> alerte. C'est un identifiant, pas un pouvoir,
+    #     et sa presence peut etre un choix assume ; on le dit sans crier.
+    CRITIQUES = {"ALPACA_API_KEY", "ALPACA_SECRET_KEY"}
+    try:
+        suivis = subprocess.run(
+            ["git", "ls-files"], cwd=RACINE, capture_output=True, text=True,
+            timeout=20,
+        )
+        fichiers = suivis.stdout.split("\n") if suivis.returncode == 0 else []
+    except Exception as err:
+        alerte("git", "impossible de lister les fichiers suivis (%s) -- la "
+                      "recherche d'identifiants n'a porte que sur les deux "
+                      "fichiers publies." % err)
+        fichiers = []
+    fichiers = [f for f in fichiers if f.strip()]
     for rel in ("decision_log.jsonl", os.path.join("docs", "data.json")):
+        if rel not in fichiers:
+            fichiers.append(rel)
+
+    for rel in fichiers:
         chemin = os.path.join(RACINE, rel)
-        if not os.path.exists(chemin):
+        if not os.path.isfile(chemin):
             continue
         try:
             texte = open(chemin, encoding="utf-8", errors="replace").read()
@@ -1633,13 +1693,23 @@ def controle_aucun_identifiant_dans_les_fichiers_publies() -> None:
                         "identifiant ne s'y trouve." % err)
             continue
         for nom, valeur in valeurs:
-            if valeur in texte:
+            if valeur not in texte:
+                continue
+            if nom in CRITIQUES:
                 bloque(
                     rel,
-                    "CONTIENT LA VALEUR DE %s. Ce fichier est committe et pousse "
-                    "sur le depot PUBLIC. Ne pas committer, ne pas pousser : "
-                    "retirer la ligne, puis REVOQUER cette cle chez Alpaca -- si "
+                    "CONTIENT LA VALEUR DE %s. Ce fichier est SUIVI PAR GIT et "
+                    "part sur le depot PUBLIC. Ne pas committer, ne pas pousser : "
+                    "retirer la valeur, puis REVOQUER cette cle chez Alpaca -- si "
                     "elle est deja partie, elle est publique pour toujours." % nom,
+                )
+            else:
+                alerte(
+                    rel,
+                    "contient la valeur de %s. Un numero de compte n'autorise "
+                    "aucune action sans les cles, et le tableau de bord publie "
+                    "deja celui du compte courant -- c'est peut-etre un choix "
+                    "assume. Signale pour que ce soit un choix, pas un oubli." % nom,
                 )
 
 
