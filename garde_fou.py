@@ -152,6 +152,37 @@ def controle_journal() -> None:
 # son contenu. Donc le contrôle mécanique porte sur DEUX choses vérifiables
 # sans jamais lire le fichier lui-même : (a) il ne doit JAMAIS être suivi
 # par git, (b) .gitignore doit continuer à le couvrir.
+def _message_premier_scelle(registre_existait: bool, empreinte: str) -> str:
+    """Message de la branche « pas d'empreinte connue » d'un scellé.
+
+    AJOUTE le 27/08/2026. Cette branche disait toujours « première lecture —
+    empreinte enregistrée, sera comparée au prochain run ». Vrai sur la machine
+    de travail. Faux, et trompeur, partout ailleurs.
+
+    Mesure : le registre .garde_fou_scelles.json est dans .gitignore, donc
+    ABSENT de tout clone frais. Chaque run de CI part d'un clone frais. Le
+    scellé y prend donc systematiquement cette branche, ecrit un registre
+    ephemere, et ne compare RIEN -- verifie en clonant ce depot et en lancant
+    garde_fou.py : « premiere lecture » au premier passage, plus rien au
+    second. Un scellé qui ne compare rien affichait le meme 🟡 rassurant qu'un
+    scellé qui a compare et trouve le fichier intact.
+
+    controle_journal() fait deja la bonne chose pour le journal absent d'un
+    clone (« Ce controle n'a RIEN verifie ici »). Meme traitement ici.
+    """
+    if registre_existait:
+        return ("🆕 première lecture de ce fichier — empreinte enregistrée (%s…). "
+                "Sera comparée au prochain run." % empreinte[:12])
+    return (
+        "🆕 AUCUN REGISTRE D'EMPREINTES sur cette machine — les scellés sont un "
+        "état LOCAL, jamais committé (.gitignore). Ce contrôle n'a donc RIEN "
+        "vérifié ici : c'est le cas de chaque run de CI, qui part d'un clone "
+        "neuf. Empreinte %s… enregistrée pour ce run, mais elle disparaîtra "
+        "avec lui. Le scellé reste effectif sur la machine où garde_fou.py "
+        "tourne régulièrement." % empreinte[:12]
+    )
+
+
 def controle_env_hackathon_scelle() -> None:
     motif_gitignore = os.path.join(RACINE, ".gitignore")
     if os.path.exists(motif_gitignore):
@@ -254,6 +285,7 @@ def controle_env_hackathon_scelle() -> None:
     if os.path.exists(fichier_scelle):
         empreinte_actuelle = hashlib.sha256(open(fichier_scelle, "rb").read()).hexdigest()
         registre = os.path.join(RACINE, ".garde_fou_scelles.json")
+        registre_existait = os.path.exists(registre)
         connues = {}
         if os.path.exists(registre):
             try:
@@ -264,11 +296,8 @@ def controle_env_hackathon_scelle() -> None:
         if empreinte_connue is None:
             connues[".env.hackathon"] = empreinte_actuelle
             open(registre, "w", encoding="utf-8").write(json.dumps(connues, indent=2))
-            alerte(
-                ".env.hackathon",
-                "🆕 première lecture — empreinte enregistrée (%s…). Sera comparée "
-                "au prochain run." % empreinte_actuelle[:12],
-            )
+            alerte(".env.hackathon", _message_premier_scelle(
+                registre_existait, empreinte_actuelle))
         elif empreinte_connue != empreinte_actuelle:
             bloque(
                 ".env.hackathon",
@@ -817,16 +846,51 @@ def controle_source_de_verite() -> None:
         # Univers actuel : toute liste de 4 tickers séparés par des virgules,
         # sauf si "PREVIOUS" apparaît juste avant (même exemption que le
         # contrôle 4, née du même faux positif slide 5 le 25/08).
-        if univers_actuel and len(univers_actuel) == 4:
-            for m in re.finditer(
-                r"\b([A-Z]{2,4})\s*,\s*([A-Z]{2,4})\s*,\s*([A-Z]{2,4})\s*,\s*([A-Z]{2,4})\b", texte
-            ):
+        # GENERALISE le 27/08/2026. Ce bloc etait garde par
+        # `len(univers_actuel) == 4` et cherchait un motif a exactement QUATRE
+        # groupes. Mesure, en mutant DEFAULT_UNIVERSE dans une copie du depot :
+        #
+        #     4 symboles (differents) -> le controle proteste   🟢
+        #     3 symboles              -> SILENCE                🔴
+        #     5 symboles              -> SILENCE                🔴
+        #
+        # Le controle ne fonctionnait donc que pour la taille d'univers du jour.
+        # Il disparaissait au moment precis ou il sert : quand l'univers change,
+        # c'est-a-dire quand les livrables deviennent faux. Pire encore dans le
+        # sens inverse -- code passe a cinq symboles, README en listant encore
+        # quatre : le motif aurait cherche des quintuplets et n'aurait pas vu le
+        # quadruplet perime.
+        #
+        # On cherche donc TOUTE suite de tickers separes par des virgules, de
+        # deux a six, et on compare les ENSEMBLES. La liste `connus` inclut
+        # l'univers courant, pour qu'un ticker nouvellement adopte ne fasse pas
+        # sauter la verification en silence.
+        if univers_actuel:
+            connus = set(univers_actuel) | {"SPY", "GLD", "XLK", "XLV", "QQQ", "IWM"}
+            for m in re.finditer(r"\b[A-Z]{2,5}(?:\s*,\s*[A-Z]{2,5}){1,5}\b", texte):
                 voisinage = texte[max(0, m.start() - 40):m.start()]
                 if re.search(r"PREVIOUS", voisinage, re.I):
                     continue
-                trouve = list(m.groups())
-                connus = {"SPY", "GLD", "XLK", "XLV", "QQQ", "IWM"}  # tickers réels du projet, pas n'importe quel mot en majuscules
+                trouve = [t.strip() for t in m.group(0).split(",")]
+                # Tous doivent etre des tickers du projet : sinon c'est une
+                # enumeration quelconque en majuscules, pas l'univers.
                 if not all(t in connus for t in trouve):
+                    continue
+                # RESSERRE le 27/08, apres avoir mesure la premiere version :
+                # comparer toute suite de tickers a l'univers produisait TROIS
+                # FAUX POSITIFS sur le depot sain, parce que la prose mentionne
+                # legitimement des sous-ensembles (« SPY, GLD and XLV pass
+                # clean »). Un controle qui crie sur du texte correct est pire
+                # que celui qui se taisait : on apprend a l'ignorer.
+                #
+                # Le signal reel n'est pas « cette liste differe de l'univers »,
+                # c'est « cette liste cite un ticker qui N'EST PLUS dans
+                # l'univers », ou « cette liste est aussi longue que l'univers
+                # sans lui correspondre ». Une mention partielle de tickers tous
+                # actuels reste du texte correct.
+                perimes = [t for t in trouve if t not in univers_actuel]
+                aussi_longue = len(trouve) >= len(univers_actuel)
+                if not perimes and not aussi_longue:
                     continue
                 if sorted(trouve) != sorted(univers_actuel):
                     bloque(
@@ -861,6 +925,24 @@ def controle_source_de_verite() -> None:
                         "%s dans %s." % (nom, nombre.group(1), _fmt(attendu),
                                           dict(SEUILS_RISQUE).get(nom, "?")),
                     )
+
+        # AJOUTE le 27/08. La regle ci-dessus attrape un ticker PERIME cite dans
+        # un livrable. Elle n'attrape pas le cas miroir : l'univers a GRANDI et
+        # le livrable ne parle toujours que des anciens. Aucune liste n'y est
+        # alors fausse -- il en manque une partie, ce qu'aucune comparaison de
+        # listes ne peut voir. Un symbole de l'univers cite NULLE PART est le
+        # signal exploitable. Alerte et non blocage : un script video n'a pas
+        # vocation a nommer chaque symbole.
+        if univers_actuel:
+            absents = [t for t in univers_actuel
+                       if not re.search(r"\b%s\b" % re.escape(t), texte)]
+            if absents:
+                alerte(
+                    rel,
+                    "ne mentionne nulle part %s, pourtant dans DEFAULT_UNIVERSE "
+                    "(agent.py) — le livrable a-t-il suivi l'ajout ?"
+                    % ", ".join(absents),
+                )
 
         for m in re.finditer(r"Sharpe\s+([\d.]+)", texte, re.I):
             valeur = round(float(m.group(1)), 2)
@@ -1017,6 +1099,7 @@ def controle_dependances_scellees() -> None:
         return
     empreinte_actuelle = hashlib.sha256(open(chemin, "rb").read()).hexdigest()
     registre = os.path.join(RACINE, ".garde_fou_scelles.json")
+    registre_existait = os.path.exists(registre)
     connues = {}
     if os.path.exists(registre):
         try:
@@ -1027,11 +1110,8 @@ def controle_dependances_scellees() -> None:
     if empreinte_connue is None:
         connues["requirements.txt"] = empreinte_actuelle
         open(registre, "w", encoding="utf-8").write(json.dumps(connues, indent=2))
-        alerte(
-            "requirements.txt",
-            "🆕 première lecture — empreinte enregistrée (%s…). Sera comparée "
-            "au prochain run." % empreinte_actuelle[:12],
-        )
+        alerte("requirements.txt", _message_premier_scelle(
+            registre_existait, empreinte_actuelle))
     elif empreinte_connue != empreinte_actuelle:
         connues["requirements.txt"] = empreinte_actuelle
         open(registre, "w", encoding="utf-8").write(json.dumps(connues, indent=2))

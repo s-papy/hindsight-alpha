@@ -561,5 +561,88 @@ class TestGardeFouDitQuandIlEstAveugle(unittest.TestCase):
         self.assertNotIn("ls-files` a echoue", sortie)
 
 
+class TestCroisementDeLUnivers(unittest.TestCase):
+    """Le contrôle 5 vérifie que les livrables nomment le MÊME univers que
+    DEFAULT_UNIVERSE dans agent.py.
+
+    Trouvé le 27/08 : il était gardé par `len(univers_actuel) == 4` et cherchait
+    un motif à exactement quatre groupes. Mesuré en mutant DEFAULT_UNIVERSE :
+
+        4 symboles (différents) -> le contrôle proteste
+        3 symboles              -> SILENCE
+        5 symboles              -> SILENCE
+
+    Il ne fonctionnait donc que pour la taille d'univers du jour, et
+    disparaissait au moment précis où il sert : quand l'univers change,
+    c'est-à-dire quand les livrables deviennent faux.
+    """
+
+    RACINE = Path(__file__).resolve().parent
+    # BACKTEST_RESULTS.md est indispensable : sans lui le contrôle 5 sort
+    # immédiatement (« introuvable ou illisible — contrôle 5 sans effet ») et le
+    # test ne vérifierait rien. Trouvé en écrivant ce test : les trois mutations
+    # passaient sans être détectées, non pas parce que le contrôle est faible,
+    # mais parce qu'il ne s'exécutait pas du tout.
+    FICHIERS = ("garde_fou.py", "agent.py", "README.md",
+                "BACKTEST_RESULTS.md", "STRATEGY_COMPARISON.md")
+
+    def _dossier(self, univers=None):
+        d = Path(tempfile.mkdtemp(prefix="hindsight-univers-"))
+        for nom in self.FICHIERS:
+            source = self.RACINE / nom
+            if not source.exists():
+                self.skipTest("%s absent — le contrôle 5 ne s'exécuterait pas" % nom)
+            shutil.copy(source, d / nom)
+        script = self.RACINE / "submission" / "Video_Script.md"
+        if script.exists():
+            (d / "submission").mkdir(exist_ok=True)
+            shutil.copy(script, d / "submission" / "Video_Script.md")
+        if univers is not None:
+            chemin = d / "agent.py"
+            avant = chemin.read_text(encoding="utf-8")
+            apres = re.sub(r"^DEFAULT_UNIVERSE = \[[^\]]*\]",
+                           "DEFAULT_UNIVERSE = [%s]" % ", ".join('"%s"' % t for t in univers),
+                           avant, count=1, flags=re.M)
+            self.assertNotEqual(avant, apres,
+                                "la mutation de DEFAULT_UNIVERSE n'a rien changé : "
+                                "agent.py a changé de forme et ce test ne vérifie plus rien")
+            chemin.write_text(apres, encoding="utf-8")
+        return d
+
+    def _sortie(self, dossier):
+        proc = subprocess.run([sys.executable, "garde_fou.py"], cwd=str(dossier),
+                              capture_output=True, text=True, timeout=120)
+        shutil.rmtree(dossier, ignore_errors=True)
+        return proc.stdout + proc.stderr
+
+    def _detecte(self, sortie):
+        return "UNIVERS" in sortie or "mentionne nulle part" in sortie
+
+    def test_un_univers_inchange_ne_declenche_rien(self):
+        """Contrôle : c'est LUI qui a fait retirer la première version du
+        correctif. Généraliser sans resserrer produisait trois faux positifs
+        sur le dépôt sain — la prose mentionne légitimement des
+        sous-ensembles (« SPY, GLD and XLV pass clean »). Un contrôle qui crie
+        sur du texte correct est pire que celui qui se taisait."""
+        self.assertFalse(self._detecte(self._sortie(self._dossier())),
+                         "le dépôt sain déclenche le croisement d'univers")
+
+    def test_un_univers_de_meme_taille_mais_different_est_detecte(self):
+        self.assertTrue(self._detecte(self._sortie(
+            self._dossier(["QQQ", "IWM", "TLT", "GLD"]))))
+
+    def test_un_univers_plus_petit_est_detecte(self):
+        self.assertTrue(self._detecte(self._sortie(
+            self._dossier(["SPY", "GLD", "XLK"]))),
+            "l'univers a rétréci et les livrables citent encore un symbole "
+            "qui n'y est plus : le contrôle se taisait")
+
+    def test_un_univers_plus_grand_est_detecte(self):
+        self.assertTrue(self._detecte(self._sortie(
+            self._dossier(["SPY", "GLD", "XLK", "XLV", "QQQ"]))),
+            "l'univers a grandi et aucun livrable ne mentionne le nouveau "
+            "symbole : le contrôle se taisait")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
