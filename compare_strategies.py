@@ -1,3 +1,12 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Spap - Hindsight Alpha
+# Source: https://github.com/s-papy/hindsight-alpha
+#
+# Sous licence MIT, redistribuer ce fichier -- entier ou par morceaux --
+# OBLIGE a conserver cet avis. C'est la seule contrainte de la licence, et
+# c'est la raison d'etre de ces trois lignes : un fichier copie-colle
+# emporte desormais sa provenance avec lui.
+
 """Real, side-by-side comparison of the two strategy families this repo
 contains: vol_strategy.py (HV-rank optionality, what the live agent
 actually trades) vs momentum_strategy.py (TSMOM, written earlier as a

@@ -1,3 +1,12 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Spap - Hindsight Alpha
+# Source: https://github.com/s-papy/hindsight-alpha
+#
+# Sous licence MIT, redistribuer ce fichier -- entier ou par morceaux --
+# OBLIGE a conserver cet avis. C'est la seule contrainte de la licence, et
+# c'est la raison d'etre de ces trois lignes : un fichier copie-colle
+# emporte desormais sa provenance avec lui.
+
 """Thin subprocess wrapper around Alpaca's official CLI (github.com/alpacahq/cli).
 
 Using the CLI here — instead of the alpaca-py SDK, which the first draft of

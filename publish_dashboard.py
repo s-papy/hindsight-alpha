@@ -1,3 +1,12 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Spap - Hindsight Alpha
+# Source: https://github.com/s-papy/hindsight-alpha
+#
+# Sous licence MIT, redistribuer ce fichier -- entier ou par morceaux --
+# OBLIGE a conserver cet avis. C'est la seule contrainte de la licence, et
+# c'est la raison d'etre de ces trois lignes : un fichier copie-colle
+# emporte desormais sa provenance avec lui.
+
 """Builds docs/data.json — the snapshot the hosted dashboard (docs/index.html)
 reads. Run this after (or as part of) each agent.py run.
 
@@ -65,6 +74,12 @@ def build_snapshot() -> dict:
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "team": "Hindsight Alpha",
+        # Provenance embarquee dans les DONNEES, pas seulement dans la
+        # page : si quelqu'un reprend data.json sans le HTML, l'origine
+        # part avec. Trois champs statiques, aucun pistage.
+        "source": "https://github.com/s-papy/hindsight-alpha",
+        "author": "Spap",
+        "license": "MIT",
         "account": {
             # RETIRE le 27/08 : "id": account.get("id") -- l'UUID INTERNE du
             # compte, 36 caracteres. Trouve en croisant ce que ce fichier

@@ -1,3 +1,12 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Spap - Hindsight Alpha
+# Source: https://github.com/s-papy/hindsight-alpha
+#
+# Sous licence MIT, redistribuer ce fichier -- entier ou par morceaux --
+# OBLIGE a conserver cet avis. C'est la seule contrainte de la licence, et
+# c'est la raison d'etre de ces trois lignes : un fichier copie-colle
+# emporte desormais sa provenance avec lui.
+
 """Risk gates: several concurrent positions across different underlyings (not
 stacked on the same one), a per-trade cap AND a total-exposure cap, a weekly
 drawdown lock, and take-profit/stop-loss position management.

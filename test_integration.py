@@ -1,3 +1,12 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Spap - Hindsight Alpha
+# Source: https://github.com/s-papy/hindsight-alpha
+#
+# Sous licence MIT, redistribuer ce fichier -- entier ou par morceaux --
+# OBLIGE a conserver cet avis. C'est la seule contrainte de la licence, et
+# c'est la raison d'etre de ces trois lignes : un fichier copie-colle
+# emporte desormais sa provenance avec lui.
+
 """Le pipeline entier, de bout en bout, sans réseau.
 
 Ajouté le 27/08/2026. Les 123 tests existants couvrent chaque pièce
@@ -3714,6 +3723,56 @@ class TestGelDesParametresAuKickoff(unittest.TestCase):
         valeurs = self._valeurs()
         self.assertIn("agent.strategie_live", valeurs)
         self.assertEqual(valeurs["agent.strategie_live"], "vol_strategy")
+
+
+class TestProvenanceDesFichiers(unittest.TestCase):
+    """Sous licence MIT, la seule contrainte imposée à qui reprend ce code est
+    de conserver l'avis de copyright. Encore faut-il qu'il y en ait un DANS les
+    fichiers : un module copié-collé seul n'emportait aucune attribution.
+
+    Ce test existe pour que la protection ne s'érode pas au premier fichier
+    ajouté sans en-tête."""
+
+    def test_chaque_module_porte_son_avis_de_licence(self):
+        manquants = []
+        for chemin in sorted(Path(__file__).parent.glob("*.py")):
+            tete = chemin.read_text(encoding="utf-8")[:400]
+            if "SPDX-License-Identifier: MIT" not in tete:
+                manquants.append(chemin.name)
+        self.assertEqual(manquants, [],
+                         "fichiers sans avis de licence — copiés seuls, ils "
+                         "n'emportent aucune attribution : %s"
+                         % ", ".join(manquants))
+
+    def test_l_avis_nomme_le_depot_d_origine(self):
+        """Un SPDX seul dit la licence, pas la provenance. C'est l'URL qui
+        ramène à l'original."""
+        sans_source = []
+        for chemin in sorted(Path(__file__).parent.glob("*.py")):
+            tete = chemin.read_text(encoding="utf-8")[:400]
+            if "github.com/s-papy/hindsight-alpha" not in tete:
+                sans_source.append(chemin.name)
+        self.assertEqual(sans_source, [], "en-têtes sans URL d'origine : %s"
+                         % ", ".join(sans_source))
+
+    def test_le_shebang_reste_la_premiere_ligne(self):
+        """TÉMOIN : poser l'en-tête AVANT un shebang casserait l'exécution
+        directe des scripts. Sans ce test, l'erreur passerait inaperçue —
+        `python3 fichier.py` marcherait encore, `./fichier.py` non."""
+        for chemin in sorted(Path(__file__).parent.glob("*.py")):
+            lignes = chemin.read_text(encoding="utf-8").split("\n")
+            if any(l.startswith("#!") for l in lignes[:6]):
+                self.assertTrue(lignes[0].startswith("#!"),
+                                "%s : le shebang n'est plus en première ligne"
+                                % chemin.name)
+
+    def test_la_page_publique_declare_son_url_canonique(self):
+        """Une copie hébergée ailleurs ne doit pas prendre la place de
+        l'originale dans les moteurs de recherche."""
+        page = (Path(__file__).parent / "docs" / "index.html").read_text(
+            encoding="utf-8")
+        self.assertIn('rel="canonical"', page)
+        self.assertIn("s-papy.github.io/hindsight-alpha", page)
 
 
 if __name__ == "__main__":
