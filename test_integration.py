@@ -3511,5 +3511,110 @@ class TestPlistsLivres(unittest.TestCase):
         self.assertIn("--git-push", args,
                       "l'option de publication automatique a disparu du plist")
 
+class TestRangEtVolatiliteFaceALIncertitude(unittest.TestCase):
+    """Ce que ces fonctions répondent quand elles ne PEUVENT PAS conclure.
+
+    Trois défauts de la même famille, corrigés ensemble parce qu'ils
+    s'enchaînent : `_realized_vol` renvoyait 0.0 pour « je n'ai pas pu
+    mesurer », et zéro est la volatilité la moins chère possible ; le rang
+    lisait un NaN comme « jamais aussi bon marché » ; et rien n'imposait aux
+    fenêtres candidates d'être mesurables du tout."""
+
+    def test_le_rang_refuse_une_valeur_du_jour_non_finie(self):
+        """Mesuré AVANT correctif : toute comparaison avec NaN est fausse,
+        donc `below` ne compte rien et le rang tombe à 0.0 — soit « la
+        volatilité n'a jamais été aussi bon marché », la réponse la PLUS
+        agressive possible à « je ne sais pas ».
+
+            HV du jour = NaN            rang   0.0  -> ACHÈTE
+            HV du jour = +inf           rang 100.0  -> s'abstient (côté sûr)
+        """
+        for valeur in (float("nan"), float("inf"), float("-inf")):
+            with self.subTest(valeur=valeur):
+                with self.assertRaises(ValueError) as ctx:
+                    vol_strategy._percentile_rank(valeur, [0.1, 0.2, 0.3])
+                self.assertIn("finite", str(ctx.exception))
+
+    def test_le_rang_refuse_un_historique_non_fini(self):
+        """Un SEUL NaN dans l'historique suffit : les entrées non finies sont
+        sous-comptées, jamais sur-comptées, donc le rang est biaisé vers le
+        BAS — vers l'achat.
+
+            historique entièrement NaN   rang  0.0   (témoin fini : 66.7)
+            1 NaN sur 3                  rang 33.3   (témoin fini : 66.7)
+
+        On refuse plutôt que de filtrer : filtrer rendrait un rang calculé sur
+        une base silencieusement rétrécie — la même faute, en plus discret."""
+        for historique, etiquette in (([float("nan")] * 3, "tout NaN"),
+                                      ([0.1, float("nan"), 0.3], "un seul NaN"),
+                                      ([0.1, float("inf"), 0.3], "un seul inf")):
+            with self.subTest(cas=etiquette):
+                with self.assertRaises(ValueError) as ctx:
+                    vol_strategy._percentile_rank(0.2, historique)
+                self.assertIn("non-finite", str(ctx.exception))
+
+    def test_un_historique_fini_est_classe_normalement(self):
+        """Témoin : sans lui, un rang qui refuserait TOUT passerait les deux
+        tests ci-dessus."""
+        self.assertAlmostEqual(
+            vol_strategy._percentile_rank(0.2, [0.1, 0.2, 0.3]), 200.0 / 3.0,
+            places=6)
+
+    def test_un_historique_vide_fait_toujours_s_abstenir(self):
+        """Second témoin, et une décision à préserver : un historique VIDE ne
+        permet pas de conclure, et 50.0 est au-dessus de
+        CHEAP_VOL_PERCENTILE — donc l'agent s'abstient. Ce comportement-là
+        était déjà juste ; le correctif ne devait pas le changer."""
+        self.assertEqual(vol_strategy._percentile_rank(0.2, []), 50.0)
+        self.assertGreater(50.0, vol_strategy.CHEAP_VOL_PERCENTILE,
+                           "un historique vide ne fait plus s'abstenir")
+
+    def test_la_volatilite_non_mesurable_n_est_plus_un_zero(self):
+        """Même faute que `_sharpe` avant sa correction : un « je n'ai pas pu
+        mesurer » indiscernable d'un zéro MESURÉ. Et zéro est la volatilité la
+        moins chère possible, donc le rang tombe à 0 et l'agent ACHÈTE."""
+        for rendements, etiquette in (([], "aucun rendement"),
+                                      ([0.01], "un seul rendement")):
+            with self.subTest(cas=etiquette):
+                v = vol_strategy._realized_vol(rendements)
+                self.assertTrue(math.isnan(v),
+                                "%s rend %r au lieu de NaN — un zéro qui veut "
+                                "dire « je ne sais pas » se lit comme la "
+                                "volatilité la moins chère possible" % (etiquette, v))
+
+    def test_une_volatilite_mesurable_reste_un_nombre(self):
+        """Témoin : sans lui, renvoyer NaN partout passerait le test ci-dessus."""
+        v = vol_strategy._realized_vol([0.01, -0.02])
+        self.assertTrue(math.isfinite(v) and v > 0, "volatilité mesurable = %r" % v)
+
+    def test_une_fenetre_candidate_non_mesurable_est_refusee_a_l_import(self):
+        """`_hv_series` passe à `_realized_vol` des tranches d'EXACTEMENT
+        `window` éléments. Mesuré avec window=1 :
+
+            _hv_series([...], 1) -> [0.0, 0.0, 0.0, 0.0]
+
+        soit « aucune volatilité, jamais » sur toute la série : le rang le plus
+        bas possible partout, donc l'agent achèterait partout. Inatteignable
+        aujourd'hui — les fenêtres vont de 10 à 90 — mais RIEN ne l'imposait,
+        et c'est exactement le genre de constante qu'on modifie pour
+        expérimenter."""
+        source = (Path(__file__).parent / "vol_strategy.py").read_text(
+            encoding="utf-8")
+        ancien = "CANDIDATE_HV_WINDOWS = [10, 20, 30, 60, 90]"
+        self.assertIn(ancien, source, "la constante a changé de forme")
+        espace = {"__name__": "vol_strategy_mute"}
+        with self.assertRaises(ValueError) as ctx:
+            exec(compile(source.replace(ancien,
+                                        "CANDIDATE_HV_WINDOWS = [1, 20, 30]"),
+                         "vol_strategy_mute", "exec"), espace)
+        self.assertIn("below 2", str(ctx.exception))
+
+    def test_les_fenetres_livrees_passent_ce_controle(self):
+        """Témoin : sans lui, un contrôle qui refuserait toute liste passerait
+        le test ci-dessus — et le module ne s'importerait plus du tout."""
+        self.assertTrue(all(w >= 2 for w in vol_strategy.CANDIDATE_HV_WINDOWS),
+                        vol_strategy.CANDIDATE_HV_WINDOWS)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

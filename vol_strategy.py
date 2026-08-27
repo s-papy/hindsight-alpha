@@ -47,12 +47,32 @@ decision to trade is driven by a volatility regime, not just direction.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from statistics import mean, pstdev
 from typing import List, Sequence
 
 IN_SAMPLE_HOLDOUT_DAYS = 20  # bars withheld from "in_sample" scoring
 CANDIDATE_HV_WINDOWS = [10, 20, 30, 60, 90]  # trading days used to compute realized vol
+
+# AJOUTE le 27/08/2026. `_realized_vol` ne peut rien mesurer sur moins de deux
+# rendements ; `_hv_series` lui passe des tranches de EXACTEMENT `window`
+# elements. Une fenetre < 2 rendrait donc une serie HV entierement non
+# mesurable. Mesure avec window=1 :
+#
+#     _hv_series([...], 1) -> [0.0, 0.0, 0.0, 0.0]   « aucune volatilite, jamais »
+#
+# soit le rang le plus bas possible sur toute la serie : l'agent acheterait
+# partout. Ce n'est pas atteignable aujourd'hui -- les fenetres candidates vont
+# de 10 a 90 -- mais RIEN ne l'imposait, et la liste ci-dessus est le genre de
+# constante qu'on modifie pour experimenter. On l'impose ici, a l'import.
+if any(int(_w) < 2 for _w in CANDIDATE_HV_WINDOWS):
+    raise ValueError(
+        "CANDIDATE_HV_WINDOWS holds a window below 2 (%r): realized volatility "
+        "needs at least two returns, so such a window yields no measurable "
+        "volatility at all -- which reads as 'cheapest possible' and makes the "
+        "agent buy everywhere." % (CANDIDATE_HV_WINDOWS,)
+    )
 CHEAP_VOL_PERCENTILE = 30  # enter only when HV rank falls below this
 RANK_LOOKBACK_DAYS = 252  # trailing window used to rank "today's" HV against its own history
 COST_MULTIPLIER = 1.0  # simplifying stand-in for "premium scales with vol at entry"
@@ -135,9 +155,19 @@ def _sharpe(returns: Sequence[float]) -> float:
 
 
 def _realized_vol(returns: Sequence[float]) -> float:
-    """Annualized realized volatility over the given return window."""
+    """Annualized realized volatility over the given return window, or NaN
+    when there is nothing to measure.
+
+    Rendait 0.0 jusqu'au 27/08/2026 -- meme faute que `_sharpe` avant sa
+    correction : un « je n'ai pas pu mesurer » indiscernable d'un zero
+    MESURE. Et zero est la volatilite la moins chere possible, donc le rang
+    tombe a 0 et l'agent ACHETE. Un defaut qui autorise, pas qui refuse.
+
+    NaN est sur ici parce que `_percentile_rank` refuse desormais de classer
+    une valeur non finie au lieu de la lire comme « jamais aussi bon marche ».
+    L'ordre des deux corrections compte : NaN seul aurait aggrave le defaut."""
     if len(returns) < 2:
-        return 0.0
+        return float("nan")
     return pstdev(returns) * (252 ** 0.5)
 
 
@@ -181,8 +211,49 @@ def _hv_series(returns: Sequence[float], window: int) -> List[float]:
 
 
 def _percentile_rank(value: float, history: Sequence[float]) -> float:
+    # `not history` -> 50.0 : un historique VIDE ne permet pas de conclure, et
+    # 50 est au-dessus de CHEAP_VOL_PERCENTILE, donc l'agent s'abstient. Ce
+    # choix-la etait deja le bon ; on le laisse et on l'explicite.
     if not history:
         return 50.0
+
+    # AJOUTE le 27/08/2026. Toute comparaison avec NaN est fausse, donc `below`
+    # ne compte rien : le rang tombe a 0.0, c'est-a-dire « la volatilite n'a
+    # jamais ete aussi bon marche » -- la reponse la PLUS agressive possible a
+    # « je ne sais pas ». Mesure :
+    #
+    #     HV du jour = NaN             rang   0.0  -> ACHETE
+    #     historique entierement NaN   rang   0.0  -> ACHETE
+    #     1 NaN dans l'historique      rang  33.3  (temoin fini : 66.7)
+    #     HV du jour = +inf            rang 100.0  -> s'abstient (cote sur)
+    #
+    # Meme un SEUL NaN dans l'historique fausse le rang vers le bas, donc vers
+    # l'achat : les entrees non finies sont sous-comptees, jamais sur-comptees.
+    # On refuse plutot que de les filtrer -- filtrer rendrait un rang calcule
+    # sur une base silencieusement retrecie, ce qui est la meme faute en plus
+    # discret.
+    #
+    # On leve : agent.py enveloppe chaque symbole dans un `except Exception`
+    # qui en fait un refus NOMME. Renvoyer NaN ici ferait bien abstenir
+    # (NaN < 30 est faux), mais sans dire pourquoi -- exactement le « 0.0 qui
+    # veut dire je-n-ai-pas-pu-mesurer » que ce projet traque.
+    if not math.isfinite(value):
+        raise ValueError(
+            "today's HV is %r, not a finite number -- every comparison with it "
+            "is False, so the percentile rank would come out 0.0 and read as "
+            "'volatility has never been cheaper'. Refusing to rank an "
+            "unmeasurable value." % (value,)
+        )
+    non_finis = [h for h in history if not math.isfinite(h)]
+    if non_finis:
+        raise ValueError(
+            "the ranking history holds %d non-finite value(s) out of %d "
+            "(e.g. %r) -- they can only be UNDER-counted, which biases the "
+            "rank down and the decision toward buying. Refusing to rank "
+            "against a history that cannot be compared."
+            % (len(non_finis), len(history), non_finis[0])
+        )
+
     below = sum(1 for h in history if h <= value)
     return 100.0 * below / len(history)
 
