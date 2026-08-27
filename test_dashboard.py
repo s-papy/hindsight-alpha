@@ -654,6 +654,62 @@ class TestIsolationParEnregistrement(BaseRendu):
         self.assertEqual(html.count("<tr>"), 3, html[:200])   # 2 lignes + entête
         self.assertNotIn("could not be rendered", html.lower())
 
+
+class TestIsolationParSection(BaseRendu):
+    """Le pendant, un cran au-dessus. renderDecisions est isolée par
+    enregistrement depuis le correctif précédent, mais loadDashboard()
+    enchaîne CINQ sections dans un seul try : si l'une lève, les suivantes ne
+    se rendent pas du tout.
+
+    Mesuré après le premier correctif, avec un enregistrement null :
+
+        renderLeakStat        -> TypeError
+        renderMonitorHealth   -> TypeError
+        renderPositions       -> TypeError  (sur une position nulle)
+        renderDecisions       -> ok         (déjà isolée)
+        renderAccount         -> ok
+
+    Trois sections pouvaient donc encore emporter tout ce qui vient après
+    elles dans la séquence, y compris le tableau qu'on venait de protéger."""
+
+    def _sections(self, decisions_js, positions_js="[]"):
+        return self.executer("""
+            const d = [%s];
+            _resultats.leak = (() => { try { renderLeakStat(d); return "ok"; }
+                                       catch (e) { return e.constructor.name; } })();
+            _resultats.sante = (() => { try {
+                renderMonitorHealth(d, {last_run_at:new Date().toISOString(),
+                                        outcome:"checked"}, new Date().toISOString());
+                return "ok"; } catch (e) { return e.constructor.name; } })();
+            _resultats.positions = (() => { try { renderPositions(%s); return "ok"; }
+                                            catch (e) { return e.constructor.name; } })();
+        """ % (decisions_js, positions_js))
+
+    SAIN = '{timestamp:"2026-08-31T19:37:00Z", outcome:"order_submitted", trades:[]}'
+
+    def test_aucune_section_ne_leve_sur_un_enregistrement_nul(self):
+        r = self._sections("%s, null, %s" % (self.SAIN, self.SAIN))
+        for section in ("leak", "sante"):
+            with self.subTest(section=section):
+                self.assertEqual(r[section], "ok",
+                                 "%s lève sur un enregistrement null (%s) et "
+                                 "emporte les sections suivantes"
+                                 % (section, r[section]))
+
+    def test_les_positions_survivent_a_une_entree_nulle(self):
+        r = self._sections(self.SAIN, positions_js="[null, {symbol:'X'}]")
+        self.assertEqual(r["positions"], "ok",
+                         "renderPositions lève sur une position nulle : %s"
+                         % r["positions"])
+
+    def test_les_sections_rendent_toujours_le_cas_normal(self):
+        """Témoin : durcir ne doit pas rendre les sections muettes."""
+        r = self._sections("%s, %s" % (self.SAIN, self.SAIN),
+                           positions_js="[{symbol:'SPY260911C00500000', qty:'1'}]")
+        for section in ("leak", "sante", "positions"):
+            with self.subTest(section=section):
+                self.assertEqual(r[section], "ok")
+
 class TestEchappement(BaseRendu):
     """Tout ce qui vient de data.json était interpolé BRUT dans innerHTML.
 

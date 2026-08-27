@@ -242,11 +242,37 @@ async function loadDashboard() {
     const res = await fetch('./data.json', { cache: 'no-store' });
     if (!res.ok) throw new Error('data.json not found yet — run publish_dashboard.py at least once');
     const data = await res.json();
-    renderAccount(data.account);
-    renderPositions(data.positions || []);
-    renderMonitorHealth(data.recent_decisions || [], data.monitor_status || null, data.generated_at || null);
-    renderLeakStat(data.recent_decisions || []);
-    renderDecisions(data.recent_decisions || []);
+    // AJOUTE 27/08 au soir. Ces cinq appels etaient enchaines dans le meme
+    // try : une section qui leve empechait toutes les SUIVANTES de se rendre.
+    // Mesure sur un enregistrement null -- renderLeakStat, renderMonitorHealth
+    // et renderPositions levaient encore APRES que renderDecisions eut ete
+    // isolee par enregistrement, et emportaient donc le tableau qu'on venait
+    // de proteger.
+    //
+    // Meme raisonnement que l'isolation par element appliquee partout ailleurs
+    // dans ce depot : une panne locale doit rester locale.
+    const sections = [
+      ["account", () => renderAccount(data.account)],
+      ["positions", () => renderPositions(data.positions || [])],
+      ["monitor-health-banner", () => renderMonitorHealth(
+          data.recent_decisions || [], data.monitor_status || null,
+          data.generated_at || null)],
+      ["leak-stat", () => renderLeakStat(data.recent_decisions || [])],
+      ["decisions-container", () => renderDecisions(data.recent_decisions || [])],
+    ];
+    for (const [id, rendre] of sections) {
+      try {
+        rendre();
+      } catch (err) {
+        const cible = document.getElementById(id);
+        if (cible) {
+          cible.innerHTML = `<div class="empty">This section could not be `
+            + `rendered (${esc(String(err && err.message))}). The other `
+            + `sections are unaffected, and nothing was removed from `
+            + `decision_log.jsonl.</div>`;
+        }
+      }
+    }
     document.getElementById('generated-at').textContent =
       data.generated_at ? ' Last updated: ' + new Date(data.generated_at).toLocaleString() : '';
   } catch (err) {
@@ -317,7 +343,8 @@ function renderPositions(positions) {
     el.innerHTML = '<div class="empty">No open positions right now.</div>';
     return;
   }
-  const rows = positions.map(p => {
+  // `p ||` : une position nulle faisait lever cette section entiere.
+  const rows = positions.map(p => (p || {})).map(p => {
     const plpc = parseFloat(p.unrealized_plpc);
     const plClass = isNaN(plpc) ? 'badge-muted' : (plpc >= 0 ? 'badge-green' : 'badge-red');
     const plLabel = isNaN(plpc) ? '—' : (plpc >= 0 ? '+' : '') + (plpc * 100).toFixed(1) + '%';
@@ -402,7 +429,8 @@ function renderMonitorHealth(decisions, monitorStatus, generatedAt) {
   // even though this static page isn't regenerated on every monitor tick.
   const el = document.getElementById('monitor-health-banner');
   if (!el) return;
-  const monitorEntries = decisions.filter(d => d.run_type === 'exit_monitor');
+  // `d &&` ajoute le 27/08 : un enregistrement null levait ici.
+  const monitorEntries = decisions.filter(d => d && d.run_type === 'exit_monitor');
   const STALE_MINUTES = 45; // 3x the 15-minute schedule -- tolerates one missed tick without a false alarm
 
   if (monitorStatus && monitorStatus.last_run_at) {
@@ -889,6 +917,9 @@ function renderLeakStat(decisions) {
   if (!el) return;
   let count = 0;
   for (const d of decisions) {
+    // `d &&` : un enregistrement null faisait lever le compteur de fuites,
+    // qui s'execute AVANT le tableau dans la sequence de rendu.
+    if (!d) continue;
     for (const v of (d.verdicts || [])) {
       if (typeof v.reason === 'string' && v.reason.startsWith('hindsight_guard:')) count++;
     }
