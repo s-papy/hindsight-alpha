@@ -1206,6 +1206,14 @@ def controle_source_de_verite() -> None:
              r"total\s*(premium|exposure)|au total sur toutes les positions"
              r"|across [Aa][Ll][Ll] open positions"),
             ("MAX_SECTOR_EXPOSURE_PCT", r"sector|secteur"),
+            # ETENDU le 27/08 au soir, apres avoir mesure les contextes reels
+            # dans les quatre livrables plutot que de deviner des ancres :
+            #     « 3% drawdown », « 3% from its recorded starting equity »,
+            #     « 3% depuis son equite de depart »
+            # « drawdown » distingue ce verrou de MAX_TOTAL_RISK_PCT, qui vaut
+            # AUSSI 3% mais se cite « total premium / total exposure ».
+            ("WEEKLY_LOSS_LOCK_PCT",
+             r"drawdown|starting equity|[ée]quit[ée] de d[ée]part"),
         ):
             valeur_reelle = seuils.get(nom_seuil)
             if valeur_reelle is None:
@@ -1235,6 +1243,29 @@ def controle_source_de_verite() -> None:
                         % (m.group(1), fenetre.strip()[:28], nom_seuil,
                            _fmt(attendu)),
                     )
+
+        # SEUILS ENTIERS : TENTE PUIS RETIRE le 27/08 au soir, et la trace
+        # reste ici parce que l'echec est instructif.
+        #
+        # MAX_OPEN_POSITIONS (4) et MAX_CONSECUTIVE_LOSSES (3) se citent sans
+        # signe %, donc la boucle ci-dessus ne les voit pas. J'ai essaye de les
+        # ancrer sur le mot qui suit le nombre. Mesure sur les livrables
+        # CORRECTS : 5 bloquants, tous legitimes.
+        #
+        #     « 3rd concurrent position »        -> un ORDINAL, pas un plafond
+        #     « 11 times in a row »              -> l'incident DNS du 25/08
+        #     « 2 positions on the same underlying » -> une AUTRE regle
+        #     « 2nd or 3rd position shrinks ... »-> encore des ordinaux
+        #
+        # Un pourcentage porte son unite avec lui ; un entier nu ne dit pas de
+        # quoi il parle, et la prose d'un dossier technique est pleine de
+        # petits nombres. Aucune ancre courte ne les separe proprement.
+        #
+        # Ces deux seuils restent couverts par la regle `NOM`, 4 quand le
+        # livrable cite la constante entre backticks -- ce que le README fait
+        # pour les deux. Le deck et le write-up ne les citent qu'en prose et
+        # restent donc non recoupes : c'est une LIMITE CONNUE, ecrite ici
+        # plutot que masquee par un controle qui crierait sur du juste.
 
         # AJOUTE le 27/08. La regle ci-dessus attrape un ticker PERIME cite dans
         # un livrable. Elle n'attrape pas le cas miroir : l'univers a GRANDI et
