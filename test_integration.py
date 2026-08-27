@@ -1733,9 +1733,18 @@ class TestCompatibiliteFuture(unittest.TestCase):
                     continue
                 if "encoding" in {k.arg for k in n.keywords}:
                     continue
-                # un mode binaire n'a pas d'encodage
+                # Un mode binaire n'a pas d'encodage. CORRIGE le 27/08 : la
+                # position du mode DEPEND de la forme de l'appel.
+                #   open(chemin, "rb")   -> builtin, le mode est args[1]
+                #   chemin.open("rb")    -> Path.open, le mode est args[0]
+                # Seul args[1:2] etait regarde, donc `Path.open("rb")` etait
+                # signale comme une lecture de texte sans encodage. Trouve par
+                # un FAUX POSITIF sur du code correct : les nouveaux tests de
+                # plists ouvrent en binaire parce que plistlib.load l'exige.
+                # Un controle qui crie sur du code juste s'apprend a ignorer.
+                args_de_mode = n.args[0:1] if isinstance(n.func, ast.Attribute) else n.args[1:2]
                 if any(isinstance(a, ast.Constant) and isinstance(a.value, str)
-                       and "b" in a.value for a in n.args[1:2]):
+                       and "b" in a.value for a in args_de_mode):
                     continue
                 # le verrou : flock seulement, jamais de texte
                 cible = n.args[0] if n.args else None
