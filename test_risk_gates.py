@@ -1554,5 +1554,83 @@ class TestBasculeDeCompte(BaseExit):
         self.assertEqual(rendu["consecutive_losses"], 3)
 
 
+class TestCoupeCircuit(unittest.TestCase):
+    """Le fichier HALT est la seule façon pour un humain d'arrêter l'agent sans
+    toucher au code ni aux identifiants. Son docstring dit que tout son intérêt
+    est de fonctionner « même si tout le reste de l'environnement est dégradé ».
+
+    Il utilisait Path.exists(), qui SUIT les liens symboliques. Mesuré le
+    27/08 : un lien symbolique cassé nommé HALT donnait (False, '') — l'agent
+    continuait d'ouvrir des positions alors qu'un fichier nommé HALT était posé
+    là, créé par un humain.
+
+    Pour un coupe-circuit, la bonne question n'est pas « la cible est-elle
+    lisible » mais « CE NOM EST-IL LÀ ». Et ne pas pouvoir le déterminer doit
+    se lire comme un arrêt : c'est la seule direction sûre, et elle ne bloque
+    que les ENTRÉES, jamais les sorties.
+    """
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="hindsight-halt-"))
+        self._vrai = risk_gates.HALT_FILE
+
+    def tearDown(self):
+        risk_gates.HALT_FILE = self._vrai
+        for chemin in self.tmp.rglob("*"):
+            if chemin.is_dir():
+                try:
+                    os.chmod(chemin, 0o755)
+                except OSError:
+                    pass
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _halt(self, chemin):
+        risk_gates.HALT_FILE = chemin
+        return risk_gates.is_halted()
+
+    def test_un_lien_symbolique_casse_arrete_quand_meme_l_agent(self):
+        """Le témoin : avant correctif, (False, '')."""
+        h = self.tmp / "HALT"
+        h.symlink_to(self.tmp / "cible_qui_n_existe_pas")
+        arrete, raison = self._halt(h)
+        self.assertTrue(arrete,
+                        "un fichier nommé HALT est posé là et l'agent continue "
+                        "d'ouvrir des positions")
+        self.assertIn("unreadable", raison)
+
+    def test_un_repertoire_illisible_compte_comme_une_pause(self):
+        sd = self.tmp / "verrou"
+        sd.mkdir()
+        (sd / "HALT").write_text("pause", encoding="utf-8")
+        os.chmod(sd, 0o000)
+        try:
+            if os.access(sd, os.R_OK):
+                self.skipTest("les permissions ne bloquent pas ici (root ?)")
+            arrete, raison = self._halt(sd / "HALT")
+        finally:
+            os.chmod(sd, 0o755)
+        self.assertTrue(arrete,
+                        "le coupe-circuit ne peut pas être lu et l'agent se "
+                        "considère libre de trader")
+        self.assertIn("could not be checked", raison)
+
+    def test_la_raison_ecrite_par_l_operateur_est_rendue(self):
+        h = self.tmp / "HALT"
+        h.write_text("  pause demandée à 2h du matin  ", encoding="utf-8")
+        self.assertEqual(self._halt(h), (True, "pause demandée à 2h du matin"))
+
+    def test_un_fichier_vide_arrete_avec_une_raison_par_defaut(self):
+        h = self.tmp / "HALT"
+        h.write_text("", encoding="utf-8")
+        arrete, raison = self._halt(h)
+        self.assertTrue(arrete)
+        self.assertIn("no reason given", raison)
+
+    def test_l_absence_reelle_ne_declenche_rien(self):
+        """Contrôle : sans lui, « tout compte comme une pause » passerait les
+        quatre tests ci-dessus et l'agent ne traderait plus jamais."""
+        self.assertEqual(self._halt(self.tmp / "jamais_cree"), (False, ""))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

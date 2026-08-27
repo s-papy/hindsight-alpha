@@ -637,12 +637,42 @@ def is_halted() -> tuple:
     history of.
 
     Returns (halted: bool, reason: str)."""
-    if not HALT_FILE.exists():
+    # CORRIGE le 27/08/2026. C'etait `if not HALT_FILE.exists(): return False`.
+    # `Path.exists()` SUIT les liens symboliques et rend False quand la cible
+    # manque. Mesure : un lien symbolique casse nomme HALT donnait
+    # is_halted() -> (False, '') -- l'agent continuait d'ouvrir des positions
+    # alors qu'un fichier nomme HALT etait pose la, cree par un humain.
+    #
+    # Pour un coupe-circuit, la bonne question n'est pas « la cible est-elle
+    # lisible » mais « CE NOM EST-IL LA ». os.lstat() ne suit pas les liens et
+    # repond exactement a celle-la.
+    #
+    # Et une erreur qui n'est pas ENOENT (permissions, E/S) compte desormais
+    # comme une PAUSE, avec le diagnostic dans la raison. Avant, EACCES faisait
+    # remonter un PermissionError brut depuis les entrailles de pathlib :
+    # l'agent s'arretait quand meme -- verifie -- mais par un plantage, pas par
+    # une decision, et le tableau de bord n'affichait qu'une trace. Ne pas
+    # pouvoir determiner si l'operateur a demande l'arret doit se lire comme un
+    # arret : c'est la seule direction sure, et elle ne bloque que les ENTREES,
+    # jamais les sorties (voir le docstring ci-dessus).
+    try:
+        os.lstat(HALT_FILE)
+    except FileNotFoundError:
         return False, ""
+    except OSError as err:
+        return True, (
+            "HALT file could not be checked (%s: %s) -- treating the agent as "
+            "PAUSED. A kill switch that cannot be read is not a kill switch that "
+            "is off. Exits are unaffected." % (type(err).__name__, err)
+        )
+
     try:
         content = HALT_FILE.read_text().strip()
-    except OSError:
-        content = ""
+    except OSError as err:
+        return True, (
+            "HALT file present but unreadable (%s) -- paused. Its reason text "
+            "could not be recovered." % type(err).__name__
+        )
     reason = content if content else "HALT file present (no reason given)"
     return True, reason
 
