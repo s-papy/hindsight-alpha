@@ -784,6 +784,70 @@ class ExitAction:
         return None
 
 
+def _premiere_fois_qu_on_compte_cette_sortie(option_symbol: str, est_un_gain: bool, symboles_ouverts: set) -> bool:
+    """True si la sortie de CE contrat n'a pas deja ete comptabilisee.
+
+    AJOUTE le 27/08/2026. Le compteur de pertes consecutives comptait des
+    TENTATIVES DE FERMETURE, pas des positions fermees.
+
+    close_position() soumet un ordre de cloture ; l'execution est asynchrone.
+    Entre la soumission et le fill, la position figure toujours dans
+    list_positions(). Le moniteur repasse 15 minutes plus tard, revoit le meme
+    contrat sous le seuil, le referme -- et recompte la perte.
+
+    Reproduit le 27/08, meme position a -55%, close_position reussissant a
+    chaque passage sans que la position disparaisse :
+
+        passage  fermetures  consecutive_losses
+        1        1           1
+        2        2           2
+        3        3           3   <- MAX_CONSECUTIVE_LOSSES atteint
+        5        5           5
+
+    UNE position bloquee faisait donc sauter le disjoncteur en 45 minutes, sur
+    la foi de trois pertes qui n'en etaient qu'une -- et soumettait un ordre de
+    cloture en double a chaque cycle.
+
+    Atteignable des que la cloture ne prend pas effet avant le passage suivant :
+    ordre rejete de facon asynchrone, marche qui ferme juste apres la
+    soumission, ou fill PARTIEL (la quantite baisse, la position reste ouverte
+    et toujours sous le seuil).
+
+    La memoire se purge d'elle-meme : un contrat qui n'est plus dans les
+    positions ouvertes en sort. Pas de date, donc rien a faire expirer -- et
+    une position bloquee plusieurs jours reste comptee UNE fois, pas une par
+    jour. On continue de RE-TENTER la fermeture a chaque passage (c'est le bon
+    comportement : la premiere n'a pas pris effet), on ne la recompte plus.
+
+    La memoire retient le couple (contrat, ISSUE), pas le seul contrat. Trouve
+    en re-lisant ce correctif : avec le seul symbole, une position bloquee dont
+    l'issue passerait de perte a gain verrait son gain ignore -- donc le
+    compteur de pertes consecutives ne serait PAS remis a zero, alors qu'un
+    gain est precisement ce qui doit le remettre a zero. Le cas est extreme (il
+    faut un aller-retour de plus de 100 points de pourcentage sans que la
+    cloture prenne effet), mais la version correcte ne coute qu'un dictionnaire
+    au lieu d'un ensemble."""
+    with _state_lock():
+        state = _load_state()
+        if state.get("_corrupted"):
+            # Etat illisible : on ne peut pas savoir si c'est un doublon. On
+            # compte, ce qui ferme le disjoncteur plus tot -- le cote sur. De
+            # toute facon _save_state refusera d'ecrire par-dessus.
+            return True
+        memoire = state.get("exits_counted") or {}
+        if not isinstance(memoire, dict):
+            memoire = {}          # ancienne forme (liste) ou valeur aberrante
+        # Purge : un contrat qui n'est plus ouvert n'a plus a etre memorise.
+        memoire = {k: v for k, v in memoire.items() if k in symboles_ouverts}
+        issue = "win" if est_un_gain else "loss"
+        premiere = memoire.get(option_symbol) != issue
+        if premiere:
+            memoire[option_symbol] = issue
+        state["exits_counted"] = memoire
+        _save_state(state)
+        return premiere
+
+
 def manage_exits(dry_run: bool = False) -> List[ExitAction]:
     """Checks every open option position and closes any that have hit the
     take-profit or stop-loss threshold on unrealized P&L. Called once at
@@ -820,7 +884,11 @@ def manage_exits(dry_run: bool = False) -> List[ExitAction]:
     re-reading this function immediately after fixing the same-shaped gap
     in check_gates(), not by a live failure."""
     actions: List[ExitAction] = []
-    for pos in alpaca_cli.list_positions():
+    # Materialise une fois : la liste sert AUSSI a purger la memoire des sorties
+    # deja comptees (voir _premiere_fois_qu_on_compte_cette_sortie).
+    positions = list(alpaca_cli.list_positions())
+    symboles_ouverts = {str(p.get("symbol", "")) for p in positions}
+    for pos in positions:
         asset_class = str(pos.get("asset_class", "")).lower()
         symbol = str(pos.get("symbol", ""))
         if "option" not in asset_class and not alpaca_cli._OCC_PATTERN.match(symbol):
@@ -880,14 +948,22 @@ def manage_exits(dry_run: bool = False) -> List[ExitAction]:
                         print(f"  WARNING: could not fetch account info to reconcile {symbol}'s exit "
                               f"bookkeeping against the correct account ({type(e).__name__}: {e}) -- "
                               "recording the outcome against state.json's existing account_id as-is.")
+                    deja_compte = not _premiere_fois_qu_on_compte_cette_sortie(
+                        symbol, would_close_profit, symboles_ouverts)
+                    if deja_compte:
+                        print(f"  {symbol}: cloture re-tentee (la precedente n'a pas pris effet), "
+                              "mais la sortie a deja ete comptabilisee -- le compteur de pertes "
+                              "consecutives n'est PAS re-incremente.")
                     if not would_close_profit:
                         try:
-                            consecutive_losses = _record_exit_outcome(is_win=False, account_id=account_id, equity=account_equity)
+                            if not deja_compte:
+                                consecutive_losses = _record_exit_outcome(is_win=False, account_id=account_id, equity=account_equity)
                         except Exception as e:
                             bookkeeping_error = f"{type(e).__name__}: {e}"
                     else:
                         try:
-                            _record_exit_outcome(is_win=True, account_id=account_id, equity=account_equity)
+                            if not deja_compte:
+                                _record_exit_outcome(is_win=True, account_id=account_id, equity=account_equity)
                         except Exception as e:
                             print(f"  WARNING: {symbol} closed on a win but failed to reset the "
                                   f"consecutive-loss counter ({type(e).__name__}: {e}) -- the close "

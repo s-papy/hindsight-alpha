@@ -168,22 +168,84 @@ class TestSeuils(BaseExit):
 
 
 class TestCompteurDePertes(BaseExit):
+    """CES DEUX PREMIERS TESTS VERROUILLAIENT LE BUG jusqu'au 27/08.
+
+    Ils fermaient LA MÊME position plusieurs fois de suite et attendaient
+    1, 2, 3 — c'est-à-dire exactement le défaut corrigé ce jour-là : le
+    compteur comptait des TENTATIVES DE FERMETURE, pas des positions fermées.
+    Trois pertes consécutives, ce sont trois positions, pas une refermée trois
+    fois. Corrigés pour dire ce qu'ils prétendaient vérifier.
+
+    Deuxième fois de la nuit qu'un test consciencieux verrouillait le
+    comportement fautif (voir aussi
+    test_la_vraie_fonction_de_score_AVOUE_quand_elle_ne_peut_pas_mesurer)."""
+
+    CONTRATS = ("SPY260831P00764000", "QQQ260831P00400000", "IWM260831P00200000")
+
     def test_chaque_perte_incremente_le_compteur(self):
-        self.positions = [position(plpc="-0.55")]
-        for attendu in (1, 2, 3):
+        for i, attendu in enumerate((1, 2, 3)):
+            self.positions = [position(symbol=self.CONTRATS[i], plpc="-0.55")]
             risk_gates.manage_exits(dry_run=False)
             self.assertEqual(self.etat().get("consecutive_losses"), attendu)
 
     def test_une_victoire_remet_le_compteur_a_zero(self):
-        self.positions = [position(plpc="-0.55")]
-        risk_gates.manage_exits(dry_run=False)
-        risk_gates.manage_exits(dry_run=False)
+        for i in (0, 1):
+            self.positions = [position(symbol=self.CONTRATS[i], plpc="-0.55")]
+            risk_gates.manage_exits(dry_run=False)
         self.assertEqual(self.etat().get("consecutive_losses"), 2)
 
-        self.positions = [position(plpc="0.60")]
+        self.positions = [position(symbol=self.CONTRATS[2], plpc="0.60")]
         risk_gates.manage_exits(dry_run=False)
         self.assertFalse(self.etat().get("consecutive_losses"),
                          "une prise de bénéfice n'a pas remis la série à zéro")
+
+    def test_une_position_bloquee_n_est_comptee_qu_une_fois(self):
+        """close_position() soumet un ordre ; l'exécution est asynchrone. Entre
+        la soumission et le fill, la position figure toujours dans
+        list_positions(). Mesuré avant correctif : cinq passages sur la MÊME
+        position donnaient consecutive_losses=5, donc MAX_CONSECUTIVE_LOSSES
+        (3) atteint en 45 minutes au rythme de 15 min du moniteur — sur la foi
+        de trois pertes qui n'en étaient qu'une."""
+        self.positions = [position(symbol=self.CONTRATS[0], plpc="-0.55")]
+        for _ in range(5):
+            risk_gates.manage_exits(dry_run=False)
+        self.assertEqual(self.etat().get("consecutive_losses"), 1,
+                         "une seule position bloquée a été comptée plusieurs "
+                         "fois : le disjoncteur saute sur des pertes fictives")
+
+    def test_la_fermeture_est_bien_RE_TENTEE_a_chaque_passage(self):
+        """Contrôle indispensable : ne plus recompter ne doit pas devenir ne
+        plus refermer. La première tentative n'a pas pris effet — la position
+        est toujours ouverte et toujours sous le seuil, il FAUT réessayer."""
+        self.positions = [position(symbol=self.CONTRATS[0], plpc="-0.55")]
+        for _ in range(3):
+            risk_gates.manage_exits(dry_run=False)
+        self.assertEqual(len(self.closed), 3,
+                         "la position bloquée n'est plus re-fermée : le "
+                         "correctif d'idempotence a désarmé la sortie")
+
+    def test_une_vraie_seconde_perte_compte_toujours(self):
+        """Contrôle : sans lui, « ne jamais rien compter deux fois » pourrait
+        devenir « ne plus jamais compter »."""
+        self.positions = [position(symbol=self.CONTRATS[0], plpc="-0.55")]
+        risk_gates.manage_exits(dry_run=False)
+        risk_gates.manage_exits(dry_run=False)
+        self.positions = [position(symbol=self.CONTRATS[1], plpc="-0.55")]
+        risk_gates.manage_exits(dry_run=False)
+        self.assertEqual(self.etat().get("consecutive_losses"), 2)
+
+    def test_une_issue_qui_change_est_recomptee(self):
+        """La mémoire retient le couple (contrat, ISSUE). Avec le seul contrat,
+        une position bloquée dont l'issue passe de perte à gain verrait son
+        gain ignoré — donc le compteur ne serait pas remis à zéro, alors qu'un
+        gain est précisément ce qui doit le remettre à zéro."""
+        self.positions = [position(symbol=self.CONTRATS[0], plpc="-0.55")]
+        risk_gates.manage_exits(dry_run=False)
+        risk_gates.manage_exits(dry_run=False)
+        self.assertEqual(self.etat().get("consecutive_losses"), 1)
+        self.positions = [position(symbol=self.CONTRATS[0], plpc="0.60")]
+        risk_gates.manage_exits(dry_run=False)
+        self.assertFalse(self.etat().get("consecutive_losses"))
 
     def test_dry_run_ne_compte_pas_une_perte_simulee(self):
         """Une fermeture simulée n'est pas un vrai résultat à comptabiliser."""
