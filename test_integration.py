@@ -23,6 +23,7 @@ import io
 import json
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 import types
@@ -379,6 +380,79 @@ class TestMoniteurDeSorties(BaseIntegration):
         self.assertEqual(len(self.journal()), 2,
                          "la panne est revenue et reste étouffée par un "
                          "horodatage périmé")
+
+
+class TestToutDemarre(unittest.TestCase):
+    """Le dépôt compte des modules qu'AUCUN test n'importe — backtest.py,
+    compare_strategies.py, publish_dashboard.py, test_connection.py. Une
+    faute de frappe ou un import cassé y resterait invisible jusqu'au jour où
+    quelqu'un les lance.
+
+    Ajouté le 27/08 après une journée de modifications réparties sur huit
+    fichiers : « chaque pièce testée » ne dit rien de « tout démarre encore ».
+    """
+
+    RACINE = Path(__file__).resolve().parent
+    MODULES = ("agent", "alpaca_cli", "config", "decision_log", "risk_gates",
+               "vol_strategy", "momentum_strategy", "hindsight_guard",
+               "monitor_exits", "publish_dashboard", "backtest",
+               "compare_strategies")
+    ENTREES = ("agent.py", "monitor_exits.py", "publish_dashboard.py",
+               "backtest.py", "compare_strategies.py", "garde_fou.py")
+
+    def _env(self):
+        env = dict(os.environ)
+        env.update({"ALPACA_API_KEY": "cle-de-test",
+                    "ALPACA_SECRET_KEY": "secret-de-test",
+                    "ALPACA_LIVE_TRADE": "false"})
+        return env
+
+    def test_chaque_module_s_importe(self):
+        casses = []
+        for nom in self.MODULES:
+            proc = subprocess.run(
+                [sys.executable, "-c", "import %s" % nom], cwd=str(self.RACINE),
+                capture_output=True, text=True, timeout=60, env=self._env())
+            if proc.returncode != 0:
+                derniere = (proc.stderr.strip().splitlines() or [""])[-1]
+                casses.append("%s (%s)" % (nom, derniere[:70]))
+        self.assertEqual(casses, [], "module(s) qui ne s'importent plus : %s"
+                         % "; ".join(casses))
+
+    def test_chaque_point_d_entree_demarre(self):
+        """`--help` exerce argparse ET tout le code de niveau module."""
+        casses = []
+        for script in self.ENTREES:
+            proc = subprocess.run(
+                [sys.executable, script, "--help"], cwd=str(self.RACINE),
+                capture_output=True, text=True, timeout=120, env=self._env())
+            if proc.returncode != 0:
+                derniere = (proc.stderr.strip().splitlines() or [""])[-1]
+                casses.append("%s (%s)" % (script, derniere[:70]))
+        self.assertEqual(casses, [], "point(s) d'entrée qui ne démarrent plus : %s"
+                         % "; ".join(casses))
+
+    def test_aucun_module_ne_touche_au_reseau_a_l_import(self):
+        """Importer un module ne doit rien déclencher. Sans cette garantie, un
+        appel réseau glissé au niveau module rendrait la suite dépendante d'une
+        connexion — et la CI rouge pour une raison qui n'a rien à voir."""
+        code = (
+            "import socket\n"
+            "def _interdit(*a, **k):\n"
+            "    raise AssertionError('acces reseau a l\\'import')\n"
+            "socket.socket.connect = _interdit\n"
+            "socket.create_connection = _interdit\n"
+            "import %s\n"
+        )
+        casses = []
+        for nom in self.MODULES:
+            proc = subprocess.run(
+                [sys.executable, "-c", code % nom], cwd=str(self.RACINE),
+                capture_output=True, text=True, timeout=60, env=self._env())
+            if proc.returncode != 0:
+                casses.append(nom)
+        self.assertEqual(casses, [], "module(s) touchant au réseau à l'import : "
+                         "%s" % ", ".join(casses))
 
 
 if __name__ == "__main__":
