@@ -46,8 +46,11 @@ jobs:
       # position ouverte (Alpaca ne supporte pas les ordres bracket/OCO
       # sur options). Standard library only, aucun reseau, aucun
       # identifiant : ils tournent a l'identique ici et en local.
-      - name: python3 -m unittest test_risk_gates
-        run: python3 -m unittest test_risk_gates -v
+      # `discover` plutot que de nommer test_risk_gates : le 27/08, test_agent.py
+      # a ete ajoute et la CI ne l'aurait PAS lance -- un test que la CI ignore
+      # ne protege rien. discover ramasse tout test_*.py, y compris ceux a venir.
+      - name: python3 -m unittest discover
+        run: python3 -m unittest discover -v
 
       - name: python3 garde_fou.py
         run: python3 garde_fou.py

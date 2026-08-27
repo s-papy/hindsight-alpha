@@ -307,7 +307,7 @@ cp .env.example .env
 # Alpaca dashboard, Home page -> API Keys widget). Never the live-account keys.
 
 # 4. Run
-python3 -m unittest test_risk_gates   # 55 offline tests, no credentials needed
+python3 -m unittest discover   # 61 offline tests, no credentials needed
 python test_connection.py      # confirms CLI install + credentials + network
 python agent.py --dry-run      # runs the full leakage check, no order placed
 python agent.py                # if vetted, places a real (paper) options order
@@ -349,7 +349,7 @@ python agent.py                # if vetted, places a real (paper) options order
   consecutive-loss breaker: threshold units, boundary, counter increment and
   reset, per-position isolation when one close fails, unreadable P&L. Standard
   library only, fully mocked — no network, no credentials, no order. Run with
-  `python3 -m unittest test_risk_gates -v`; also run in CI on every push.
+  `python3 -m unittest discover -v`; also run in CI on every push.
 - `test_connection.py` — run first; confirms CLI install + `.env` + network
   access all work.
 - `config.py` — loads `.env`, hard-refuses to run against anything that

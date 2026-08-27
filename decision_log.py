@@ -18,6 +18,22 @@ from typing import Any, Dict, List
 
 LOG_FILE = Path(__file__).parent / "decision_log.jsonl"
 
+# NOTE 26/08/2026 : read_log() citait plus bas un troisieme exemple du principe
+# « un mauvais enregistrement ne doit pas tout emporter » -- _total_committed()
+# comptant un cost_basis illisible comme $0 plutot que de bloquer. Cet exemple a
+# ete RETIRE parce que ce n'en etait pas un : mesure le meme jour, ce $0 ne
+# faisait pas qu'isoler une donnee illisible, il agrandissait le budget de risque
+# (les deux plafonds d'exposition reposent sur cette somme). check_gates refuse
+# desormais une entree nouvelle dans ce cas. La distinction vaut d'etre gardee
+# ici : isoler un enregistrement illisible d'un JOURNAL est benin, traiter une
+# valeur illisible comme un ZERO dans un CALCUL DE RISQUE ne l'est pas. Le meme
+# mot -- « degrader proprement » -- couvrait les deux.
+
+# L'ajout concurrent lui-meme a ete mesure le 26/08 et trouve SUR : deux
+# processus ecrivant 40 enregistrements chacun donnent 80 lignes toutes
+# lisibles, y compris a 200 Ko par enregistrement (200x la taille reelle
+# maximale observee, 1006 o). Aucun correctif n'a donc ete applique ici.
+
 
 def log_run(record: Dict[str, Any]) -> None:
     """Appends one record. Always stamps a UTC timestamp; caller supplies
@@ -78,9 +94,7 @@ def read_log(limit: int = 30) -> List[Dict[str, Any]]:
     and fixes the bad line. Same "one bad record shouldn't take down
     everything else" principle this project already applies elsewhere
     (evaluate_symbol's per-symbol isolation, the entry loop's per-symbol
-    isolation added earlier this session, _total_committed treating an
-    unreadable cost_basis as $0 instead of blocking) -- just never
-    applied here, the one place a single corrupted line could silently
+    isolation added earlier this session) -- just never applied here, the one place a single corrupted line could silently
     freeze the public dashboard for the rest of the hackathon week."""
     if not LOG_FILE.exists():
         return []

@@ -72,6 +72,7 @@ Run: python agent.py [--symbols SPY,GLD,XLK,XLV] [--dry-run]
 from __future__ import annotations
 
 import argparse
+import subprocess
 from dataclasses import dataclass
 from typing import Optional
 
@@ -358,7 +359,49 @@ def _run(args, symbols, record: dict) -> None:
                 trades.append(trade_record)
                 continue
 
-            order_id = alpaca_cli.submit_paper_option_order(contract, qty=decision.qty)
+            try:
+                order_id = alpaca_cli.submit_paper_option_order(contract, qty=decision.qty)
+            except subprocess.TimeoutExpired as timeout_error:
+                # AJOUTE le 27/08/2026, en prolongeant d'UNE LIGNE le principe que
+                # le commentaire juste en dessous a pose le 24/08 : « The order
+                # EXISTS from this line on. » C'est vrai -- mais l'inverse ne l'est
+                # pas. Quand CETTE ligne-ci leve, l'ordre peut exister quand meme.
+                #
+                # alpaca_cli.run() passe timeout=30 a subprocess.run(). Un
+                # depassement de delai ne dit pas que l'ordre a echoue : il dit
+                # qu'on ne sait pas. L'ordre peut etre parti et vivre chez Alpaca
+                # pendant que le CLI tarde a rendre la main.
+                #
+                # Avant ce bloc, TimeoutExpired tombait dans le `except Exception`
+                # general plus bas, qui imprime « skipping this symbol today » et
+                # passe au suivant. Reproduit bout en bout le 27/08, deux symboles
+                # AAA puis BBB, l'ordre AAA reellement parti :
+                #   - state.json traded_today = ['BBB'] : le garde anti-doublon
+                #     n'etait PAS arme pour AAA, donc une RE-EXECUTION le meme jour
+                #     pouvait soumettre un SECOND ordre sur AAA ;
+                #   - les accumulateurs ignoraient l'argent engage, donc BBB a ete
+                #     dimensionne comme si AAA n'existait pas -- exactement le
+                #     depassement de plafond en agregat que le commentaire du 24/08
+                #     decrit, par un chemin qu'il ne couvrait pas.
+                #
+                # On traite donc l'inconnu comme un ordre PARTI. Surestimer
+                # l'exposition coute une entree manquee ; la sous-estimer coute un
+                # doublon et un plafond franchi.
+                committed_this_run_by_underlying[tradeable.symbol.upper()] = decision.committed_dollars
+                opened_this_run_underlyings.add(tradeable.symbol.upper())
+                try:
+                    risk_gates.record_order_submitted(tradeable.symbol)
+                except Exception as record_error:
+                    print(f"  WARNING: could not arm the duplicate-order guard for {tradeable.symbol} "
+                          f"({type(record_error).__name__}: {record_error}), on top of the timeout.")
+                    trade_record["record_order_submitted_failed"] = f"{type(record_error).__name__}: {record_error}"
+                print(f"  TIMEOUT submitting the order for {tradeable.symbol}: the CLI did not answer within "
+                      "30s. The order may or may not have reached Alpaca -- treating it as SUBMITTED so this "
+                      "run cannot double up. CHECK OPEN ORDERS AND POSITIONS BEFORE RE-RUNNING TODAY.")
+                trade_record["outcome"] = "order_status_unknown"
+                trade_record["error"] = f"{type(timeout_error).__name__}: {timeout_error}"
+                trades.append(trade_record)
+                continue
 
             # The order EXISTS from this line on. Everything below is
             # bookkeeping about an order that has already been placed, so
@@ -413,7 +456,13 @@ def _run(args, symbols, record: dict) -> None:
 
     record["trades"] = trades
     record["orders_submitted"] = orders_submitted
-    if orders_submitted > 0:
+    # « Je ne sais pas » prime sur « ca a marche ». Sans cette preseance, une run
+    # ou AAA part au sort inconnu et BBB reussit afficherait « order submitted »
+    # en haut du tableau de bord : le succes de BBB masquerait le seul ordre
+    # qu'il faut aller verifier a la main chez Alpaca.
+    if any(t.get("outcome") == "order_status_unknown" for t in trades):
+        record["outcome"] = "order_status_unknown"
+    elif orders_submitted > 0:
         record["outcome"] = "order_submitted"
     else:
         # Aggregate outcome across every attempt today, for the top-level

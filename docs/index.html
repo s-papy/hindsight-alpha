@@ -518,6 +518,13 @@ function outcomeBadge(d) {
     no_contract_found: ['badge-yellow', 'no contract'],
     dry_run_tradeable: ['badge-yellow', 'dry-run: would trade'],
     error: ['badge-red', 'error'],
+    // Ajoute le 27/08 : un ordre dont on ignore le sort (le CLI a depasse ses
+    // 30 s et n'a jamais rendu la main). Sans cette entree, le fallback
+    // `map[d.outcome] || ['badge-muted', ...]` juste en dessous l'aurait
+    // affiche en GRIS DISCRET -- la severite exactement inverse de ce que la
+    // situation demande, puisque c'est le seul etat qui reclame une
+    // verification manuelle chez Alpaca avant toute re-execution.
+    order_status_unknown: ['badge-red', 'order status UNKNOWN — verify manually'],
     // Added 25/08 alongside agent.py's fix to the same-day outcome
     // aggregation: a run whose attempted symbols hit DIFFERENT outcomes
     // (e.g. one had no contract found, another errored, neither blocked by
