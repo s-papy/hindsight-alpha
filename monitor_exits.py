@@ -141,6 +141,31 @@ def _write_last_run_status(record: Dict[str, object], now: datetime) -> None:
               "the dashboard's health indicator may show a stale status until this is fixed.")
 
 
+# Les seules valeurs d'`outcome` qui prouvent qu'un passage a VRAIMENT abouti.
+# Liste BLANCHE, ajoutee le 27/08 : la ligne qui decidait etait
+# `noteworthy = record["outcome"] == "error"`, une liste noire d'une seule
+# valeur. Tout ce qu'elle ne reconnaissait pas -- dont `unknown`, le defaut
+# litteral de `record` -- etait classe « sans interet » et ne laissait aucune
+# trace durable. Meme forme exactement que le defaut jumeau corrige le meme
+# jour dans la banniere de sante de docs/index.html, au meme endroit logique.
+#
+# Le defaut penche desormais du cote bruyant : un `outcome` ajoute plus tard
+# sans que cette constante soit mise a jour sera journalise, pas ignore.
+OUTCOMES_CONCLUANTS = frozenset({"checked", "market_closed"})
+
+
+def _merite_le_journal(outcome: object, surfaced: List[ExitAction]) -> bool:
+    """Ce run doit-il laisser une entree dans decision_log.jsonl ?
+
+    Oui si quelque chose de non routinier a ete vu (`surfaced`), et oui des
+    que l'issue du run n'est pas une reussite PROUVEE. Fonction nommee plutot
+    qu'expression en ligne pour une raison precise : sous sa forme initiale,
+    on ne pouvait la tester qu'en provoquant un vrai `outcome`, et les seules
+    valeurs atteignables passaient toutes de toute facon. Le test etait vide
+    sans qu'on puisse le voir."""
+    return bool(surfaced) or outcome not in OUTCOMES_CONCLUANTS
+
+
 def _filter_for_logging(
     actions: List[ExitAction], dedup_state: Dict[str, str], now: datetime
 ) -> Tuple[List[ExitAction], Dict[str, str]]:
@@ -264,6 +289,28 @@ def main() -> None:
             record["outcome"] = "error"
             record["error"] = f"SystemExit: {sortie.code}"
         raise
+    except KeyboardInterrupt:
+        # AJOUTE le 27/08/2026. KeyboardInterrupt derive de BaseException, PAS
+        # de Exception : ni le `except SystemExit` au-dessus ni le
+        # `except Exception` en dessous ne la rattrapent. Le `finally`
+        # s'executait donc en laissant `outcome` a son defaut de naissance,
+        # "unknown" -- litteralement « on ne sait pas ».
+        #
+        # Ce n'est pas cosmetique, parce que ce bloc reecrit AUSSI
+        # monitor_last_run.json avec un horodatage FRAIS, or la fraicheur est
+        # exactement le signal que la banniere de sante publique surveille.
+        # Mesure de bout en bout : moniteur programme reellement mort, quatre
+        # echecs consecutifs, banniere ROUGE ; un Ctrl-C sur un lancement
+        # manuel, et la meme banniere passe au VERT « healthy » sans que rien
+        # n'ait ete repare. La banniere existe pour rendre le silence
+        # visible ; un run interrompu le masquait.
+        #
+        # Corrige des DEUX cotes, parce que chaque moitie a son propre tort :
+        # ici le moniteur nomme l'interruption au lieu de la confondre avec
+        # un fourre-tout, et dans docs/index.html la banniere n'accorde plus
+        # le vert qu'a une liste blanche.
+        record["outcome"] = "interrupted"
+        raise
     except Exception as e:
         record["outcome"] = "error"
         record["error"] = f"{type(e).__name__}: {e}"
@@ -355,7 +402,7 @@ def main() -> None:
             # persisted, same as if this run had simply not happened.
             surfaced = [a for a in actions if not a.is_routine()]
 
-        noteworthy = record["outcome"] == "error" or bool(surfaced)
+        noteworthy = _merite_le_journal(record["outcome"], surfaced)
         if noteworthy:
             # Same resilience as agent.py's finally, and for the same reason:
             # a logging failure must not destroy the only durable trace of a

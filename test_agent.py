@@ -760,5 +760,120 @@ class TestInventaireDesControles(unittest.TestCase):
                          % (m.group(1), len(definis)))
 
 
+
+class TestRunInterrompu(unittest.TestCase):
+    """Ajouté le 27/08. `record` naît avec `outcome: "unknown"` — le sens
+    littéral de « on ne sait pas ce qui s'est passé ». Les deux `except` de
+    main() rattrapent SystemExit et Exception ; KeyboardInterrupt n'est ni
+    l'un ni l'autre (BaseException), donc le `finally` s'exécutait en
+    laissant ce défaut en place.
+
+    Ce qui rend le cas grave plutôt que théorique : monitor_last_run.json est
+    réécrit avec un horodatage FRAIS, et la fraîcheur est précisément le
+    signal que la bannière de santé publique surveille. Mesuré : moniteur
+    programmé réellement mort (4 échecs consécutifs), bannière ROUGE ; un
+    Ctrl-C sur un lancement manuel, et la même bannière passe au VERT
+    « healthy » sans que rien n'ait été réparé.
+
+    Corrigé des deux côtés — voir aussi test_dashboard.TestBanniereDeSante
+    pour la moitié JavaScript. Ici : le moniteur doit NOMMER l'interruption."""
+
+    CONCLUANTS = ("checked", "market_closed")
+
+    def setUp(self):
+        import config, decision_log, monitor_exits, risk_gates
+        self.mods = (config, decision_log, monitor_exits, risk_gates)
+        self.tmp = Path(tempfile.mkdtemp(prefix="hindsight-interrompu-"))
+        self.sauve = (monitor_exits.MONITOR_STATUS_FILE, monitor_exits.DEDUP_FILE,
+                      decision_log.LOG_FILE, config.require_credentials,
+                      risk_gates.manage_exits, sys.argv)
+        monitor_exits.MONITOR_STATUS_FILE = self.tmp / "monitor_last_run.json"
+        monitor_exits.DEDUP_FILE = self.tmp / "dedup.json"
+        decision_log.LOG_FILE = self.tmp / "decision_log.jsonl"
+        config.require_credentials = lambda: None
+        sys.argv = ["monitor_exits.py", "--skip-market-check"]
+
+    def tearDown(self):
+        config, decision_log, monitor_exits, risk_gates = self.mods
+        (monitor_exits.MONITOR_STATUS_FILE, monitor_exits.DEDUP_FILE,
+         decision_log.LOG_FILE, config.require_credentials,
+         risk_gates.manage_exits, sys.argv) = self.sauve
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _run_interrompu(self):
+        _, _, monitor_exits, risk_gates = self.mods
+        def ctrl_c(dry_run=False):
+            raise KeyboardInterrupt()
+        risk_gates.manage_exits = ctrl_c
+        with contextlib.redirect_stdout(io.StringIO()):
+            with self.assertRaises(KeyboardInterrupt):
+                monitor_exits.main()
+        return json.loads(monitor_exits.MONITOR_STATUS_FILE.read_text(
+            encoding="utf-8"))
+
+    def test_un_run_interrompu_ne_se_declare_pas_verifie(self):
+        statut = self._run_interrompu()
+        self.assertNotIn(statut.get("outcome"), self.CONCLUANTS,
+                         "un run interrompu se présente comme une "
+                         "vérification aboutie")
+        self.assertNotEqual(
+            statut.get("outcome"), "unknown",
+            "l'interruption est enregistrée sous le défaut fourre-tout "
+            "'unknown' : la bannière ne peut pas la distinguer d'un état "
+            "qu'elle n'a jamais su nommer, et l'affichait en vert")
+        self.assertEqual(statut.get("outcome"), "interrupted")
+
+    def test_l_interruption_laisse_une_trace_durable(self):
+        """Le fichier de statut est écrasé au run suivant. Si le seul endroit
+        où l'interruption apparaît est ce fichier, elle disparaît quinze
+        minutes plus tard sans que personne ne l'ait vue."""
+        _, decision_log, _, _ = self.mods
+        self._run_interrompu()
+        self.assertTrue(decision_log.LOG_FILE.exists(),
+                        "aucune entrée de journal pour un run interrompu")
+        lignes = [l for l in decision_log.LOG_FILE.read_text(
+            encoding="utf-8").splitlines() if l.strip()]
+        self.assertEqual(json.loads(lignes[-1]).get("outcome"), "interrupted")
+
+    def test_le_journal_ne_juge_plus_sur_la_seule_valeur_error(self):
+        """`noteworthy = record["outcome"] == "error"` était la MÊME liste
+        noire que celle de la bannière, au même endroit logique.
+
+        Première version de ce test : provoquer une RuntimeError et vérifier
+        qu'elle est journalisée. Elle l'était — mais elle l'était DÉJÀ avant
+        le correctif, parce que `except Exception` la traduit en "error".
+        Le test était vide et rien ne le montrait. C'est précisément pour
+        pouvoir l'écrire honnêtement que la décision est devenue une fonction
+        nommée : on lui passe une valeur INVENTÉE, que le code de production
+        ne produit pas encore, et c'est le seul moyen de prouver que le
+        défaut penche du bon côté pour l'avenir."""
+        _, _, monitor_exits, _ = self.mods
+        for invente in ("partial", "timeout", "unknown", "", None):
+            with self.subTest(outcome=invente):
+                self.assertTrue(
+                    monitor_exits._merite_le_journal(invente, []),
+                    "outcome=%r est classé sans intérêt et ne laisse aucune "
+                    "trace durable" % (invente,))
+
+    def test_les_passages_sains_restent_hors_du_journal(self):
+        """Le pendant obligatoire. Une liste blanche trop étroite journalise
+        tout, et ~26 non-événements par jour évincent en un jour et demi la
+        décision quotidienne de agent.py du tableau de bord public — le bruit
+        exact que ce filtre existe pour empêcher."""
+        _, decision_log, monitor_exits, risk_gates = self.mods
+        for sain in ("checked", "market_closed"):
+            with self.subTest(outcome=sain):
+                self.assertFalse(monitor_exits._merite_le_journal(sain, []),
+                                 "un passage sain et routinier serait journalisé")
+
+        # Et le chemin complet, pas seulement la fonction isolée.
+        risk_gates.manage_exits = lambda dry_run=False: []
+        with contextlib.redirect_stdout(io.StringIO()):
+            monitor_exits.main()
+        self.assertFalse(decision_log.LOG_FILE.exists(),
+                         "un passage routinier écrit quand même dans le "
+                         "journal public : le filtre anti-bruit ne filtre plus")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

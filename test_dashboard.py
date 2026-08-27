@@ -182,6 +182,105 @@ class TestBanniereDeSante(BaseRendu):
         self.assertIn("no run recorded", r["texte"])
 
 
+
+    # --- Ajoutés le 27/08 : la bannière était une LISTE NOIRE d'une seule
+    # valeur. Elle ne reconnaissait que `error` ; tout le reste tombait dans
+    # le `else` final, c'est-à-dire « healthy », en vert. Y compris la valeur
+    # `unknown` — le défaut littéral de monitor_exits.py, dont le sens est
+    # exactement « on ne sait pas ce qui s'est passé ».
+    #
+    # Les deux seules valeurs qui prouvent une vérification réussie sont
+    # `checked` et `market_closed`. C'est une LISTE BLANCHE, désormais, et
+    # ces tests existent pour qu'elle le reste : la seule façon de rendre du
+    # vert doit être de le mériter explicitement.
+
+    def test_un_run_dont_on_ignore_le_sort_ne_s_affiche_jamais_en_vert(self):
+        """`unknown` est ce qu'écrit un run INTERROMPU (Ctrl-C, ou toute
+        BaseException que les deux `except` de main() ne rattrapent pas — voir
+        test_integration). Aucune position n'a été vérifiée. La bannière
+        annonçait « healthy » en vert."""
+        r = self.executer(self.PRE + """
+            renderMonitorHealth([], {last_run_at: ilYA(0.01), outcome:"unknown"}, ilYA(0.01));
+            _resultats.classe = lire().className;
+            _resultats.texte  = lire().textContent;
+        """)
+        self.assertNotEqual(r["classe"], "health-green",
+                            "un run dont le sort est inconnu s'affiche en VERT "
+                            "« healthy » : %s" % r["texte"])
+        # Assertion sur le SENS, pas sur la sous-chaîne : le message correct
+        # contient « not healthy », qu'un assertNotIn("healthy") rejetterait.
+        self.assertIn("did not complete", r["texte"])
+        self.assertIn("not healthy", r["texte"])
+
+    def test_un_ctrl_c_manuel_ne_repeint_pas_en_vert_un_moniteur_mort(self):
+        """Le vrai dégât, et la raison pour laquelle ce n'est pas cosmétique.
+
+        Un run interrompu écrit `unknown` avec un horodatage FRAIS. La
+        fraîcheur étant justement le signal que cette bannière surveille, un
+        Ctrl-C sur un lancement manuel effaçait les quatre échecs consécutifs
+        du moniteur programmé — rouge avant, vert après, alors que rien
+        n'avait été réparé. La bannière existe pour rendre le silence
+        visible ; elle le masquait."""
+        r = self.executer(self.PRE + """
+            const echecs = [0.5, 1.0, 1.5, 2.0].map(h => (
+                {run_type:'exit_monitor', outcome:'error', timestamp: ilYA(h)}));
+            renderMonitorHealth(echecs, {last_run_at: ilYA(0.5), outcome:'error'}, ilYA(0.01));
+            _resultats.avant = lire().className;
+            renderMonitorHealth(echecs, {last_run_at: ilYA(0.01), outcome:'unknown'}, ilYA(0.01));
+            _resultats.apres = lire().className;
+            _resultats.texte = lire().textContent;
+        """)
+        self.assertEqual(r["avant"], "health-red", "prérequis : le moniteur est bien mort")
+        self.assertNotEqual(r["apres"], "health-green",
+                            "un Ctrl-C manuel a repeint en vert un moniteur "
+                            "toujours mort : %s" % r["texte"])
+
+    def test_une_valeur_d_outcome_inconnue_ne_vaut_pas_un_certificat_de_sante(self):
+        """Défaut sûr, et non « tout ce qui n'est pas `error` va bien ».
+
+        Ce test-ci est le seul qui protège l'AVENIR : le jour où quelqu'un
+        ajoute un `outcome` à monitor_exits.py sans toucher à cette page, la
+        valeur nouvelle doit tomber du côté prudent. La casse compte aussi —
+        `ERROR` n'est pas `error`."""
+        for valeur in ('"ERROR"', '"partial"', '"timeout"', 'null', '""', '"checked "'):
+            with self.subTest(outcome=valeur):
+                r = self.executer(self.PRE + """
+                    renderMonitorHealth([], {last_run_at: ilYA(0.01), outcome: %s}, ilYA(0.01));
+                    _resultats.classe = lire().className;
+                    _resultats.texte  = lire().textContent;
+                """ % valeur)
+                self.assertNotEqual(r["classe"], "health-green",
+                                    "outcome=%s certifie la santé du moniteur : %s"
+                                    % (valeur, r["texte"]))
+
+    def test_un_horodatage_illisible_ne_se_declare_pas_en_bonne_sante(self):
+        """La page disait mot pour mot « last check unknown time ago,
+        healthy » — elle s'auto-contredisait dans la même phrase. Ne pas
+        savoir QUAND le moniteur a tourné, c'est ne pas savoir s'il est en
+        vie."""
+        r = self.executer(self.PRE + """
+            renderMonitorHealth([], {last_run_at:"pas-une-date", outcome:"checked"}, ilYA(0.01));
+            _resultats.classe = lire().className;
+            _resultats.texte  = lire().textContent;
+        """)
+        self.assertNotEqual(r["classe"], "health-green",
+                            "horodatage illisible certifié sain : %s" % r["texte"])
+
+    def test_les_deux_seuls_temoins_sains_restent_verts(self):
+        """Le pendant obligatoire : une liste blanche trop étroite qui met
+        tout en jaune serait aussi inutile qu'un vert permanent. Un lecteur
+        qui voit du jaune en permanence cesse de le lire."""
+        for valeur, attendu in (("checked", ""), ("market_closed", "market was closed")):
+            with self.subTest(outcome=valeur):
+                r = self.executer(self.PRE + """
+                    renderMonitorHealth([], {last_run_at: ilYA(0.01), outcome:"%s"}, ilYA(0.01));
+                    _resultats.classe = lire().className;
+                    _resultats.texte  = lire().textContent;
+                """ % valeur)
+                self.assertEqual(r["classe"], "health-green",
+                                 "un vrai passage sain n'est plus vert : %s" % r["texte"])
+                self.assertIn(attendu, r["texte"])
+
 class TestCompteurDeFuites(BaseRendu):
     """Le chiffre le plus mis en avant de la page : combien de fuites de
     hindsight_guard ont été attrapées. Il compte sur un préfixe EXACT."""

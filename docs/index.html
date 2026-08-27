@@ -445,6 +445,35 @@ function renderMonitorHealth(decisions, monitorStatus, generatedAt) {
     const pageAgeMs = isNaN(snapshotMs) ? null : (Date.now() - snapshotMs);
     const pagePerimee = pageAgeMs !== null && pageAgeMs > STALE_MINUTES * 60000;
 
+    // CORRIGE 27/08 -- cette cascade etait une LISTE NOIRE d'une seule valeur.
+    // Elle ne reconnaissait que 'error' ; TOUT le reste tombait dans le `else`
+    // final, c'est-a-dire vert et le mot "healthy". Reproduit sous node :
+    // outcome 'unknown', null, '' et meme 'ERROR' (la casse ne correspond pas)
+    // rendaient tous "🟢 Exit monitor: last check ..., healthy."
+    //
+    // 'unknown' n'est pas une valeur exotique : c'est le DEFAUT litteral de
+    // monitor_exits.py (`record = {... "outcome": "unknown"}`), ecrit par le
+    // bloc finally quand ni `except SystemExit` ni `except Exception` n'ont
+    // rattrape -- un Ctrl-C sur un lancement manuel, typiquement. Son sens est
+    // exactement "on ne sait pas ce qui s'est passe", et aucune position n'a
+    // ete verifiee.
+    //
+    // Le degat n'est pas cosmetique, parce qu'un run interrompu ecrit
+    // 'unknown' avec un horodatage FRAIS -- or la fraicheur est justement le
+    // signal que cette banniere surveille. Mesure de bout en bout : moniteur
+    // programme reellement mort, 4 echecs consecutifs, banniere ROUGE ; un
+    // Ctrl-C sur un lancement manuel, et la meme banniere passe au VERT sans
+    // que rien n'ait ete repare. La banniere existe pour rendre le silence
+    // visible ; elle le masquait.
+    //
+    // Desormais une LISTE BLANCHE : seules 'checked' et 'market_closed'
+    // prouvent une verification aboutie. Le defaut penche du cote prudent, ce
+    // qui protege aussi l'avenir -- un `outcome` ajoute plus tard a
+    // monitor_exits.py sans que cette page soit touchee tombe en jaune, pas
+    // en vert. Meme raisonnement qu'`is_routine()` cote python.
+    const OUTCOMES_CONCLUANTS = ['checked', 'market_closed'];
+    const sortieConcluante = OUTCOMES_CONCLUANTS.indexOf(lastOutcome) !== -1;
+
     let cls, text;
     if (consecutiveFailures >= 3) {
       cls = 'health-red';
@@ -452,6 +481,20 @@ function renderMonitorHealth(decisions, monitorStatus, generatedAt) {
     } else if (lastOutcome === 'error') {
       cls = 'health-red';
       text = `🔴 Exit monitor: last check (${ageText}) failed.`;
+    } else if (!sortieConcluante) {
+      // Ni reussite prouvee, ni echec declare. Le plus probable : le run a ete
+      // interrompu avant d'avoir verifie quoi que ce soit.
+      cls = 'health-yellow';
+      text = `🟡 Exit monitor: the last run (${ageText}) did not complete a check `
+           + `— it reported "${lastOutcome === null || lastOutcome === undefined ? 'no outcome' : String(lastOutcome)}", `
+           + `not a finished pass. No position was verified; treat this as unknown, not healthy.`;
+    } else if (ageMs === null) {
+      // L'horodatage est illisible. La page annoncait, mot pour mot, "last
+      // check unknown time ago, healthy" -- elle se contredisait dans la meme
+      // phrase. Ne pas savoir QUAND, c'est ne pas savoir SI.
+      cls = 'health-yellow';
+      text = `🟡 Exit monitor: the last run reported success, but its timestamp is unreadable `
+           + `— there is no way to tell whether that check was minutes or days ago.`;
     } else if (pagePerimee && moniteurSainALaPublication) {
       // La page est vieille, le moniteur allait bien quand elle a ete ecrite.
       // Accuser le moniteur ici serait faux.
