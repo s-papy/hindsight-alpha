@@ -610,7 +610,38 @@ def find_near_the_money_contract(
         f"&strike_price_gte={lo}&strike_price_lte={hi}&limit={CONTRACTS_PAGE_LIMIT}"
     )
     data = run(["api", "GET", query])
-    contracts = data.get("option_contracts", []) if isinstance(data, dict) else []
+    # DURCI le 27/08/2026, trouve par un balayage AST des 24 lectures avec
+    # valeur par defaut sur une reponse externe. La ligne d'origine etait
+    # `data.get("option_contracts", []) if isinstance(data, dict) else []`,
+    # et SIX reponses differentes donnaient toutes le meme resultat -- une
+    # seule etant legitime :
+    #
+    #     {"option_contracts": []}   -> None   vrai : aucun contrat
+    #     {}                         -> None   dict vide
+    #     {"contracts": [...]}       -> None   cle renommee
+    #     []                         -> None   mauvais type
+    #     None                       -> None   reponse nulle
+    #
+    # En aval, agent.py journalise `no_contract_found` et la page affiche un
+    # badge jaune « no contract » d'apparence routiniere. Or pour SPY, GLD,
+    # XLK ou XLV, « aucun contrat d'option entre 7 et 21 jours » n'arrive
+    # JAMAIS en vrai : c'est toujours le signe qu'on n'a pas compris la
+    # reponse. Un symbole saute alors sa journee, en silence.
+    #
+    # Meme raisonnement que list_positions() et get_clock() : « je n'ai pas
+    # compris » n'est pas « il n'y a rien ». Une reponse COMPRISE annoncant
+    # zero contrat reste un resultat legitime -- confondre les deux dans
+    # l'autre sens ferait echouer des runs parfaitement normaux.
+    if not isinstance(data, dict) or not isinstance(data.get("option_contracts"), list):
+        raise AlpacaCLIError(
+            "could not read the option-contracts response for %s: expected a "
+            "dict with an 'option_contracts' list, got %s. Refusing to read "
+            "this as 'no contract exists' -- on a liquid ETF that answer is "
+            "never true, and it would silently skip this symbol for the day."
+            % (underlying,
+               sorted(data)[:6] if isinstance(data, dict) else type(data).__name__)
+        )
+    contracts = data["option_contracts"]
     if not contracts:
         return None
 

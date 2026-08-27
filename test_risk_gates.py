@@ -1907,6 +1907,69 @@ class TestQualiteDesBarres(unittest.TestCase):
 
 
 
+
+class TestReponseDesContratsIllisible(unittest.TestCase):
+    """Dernier lecteur de frontière non durci, trouvé par un balayage AST des
+    24 lectures avec valeur par défaut sur une réponse externe.
+
+        contracts = data.get("option_contracts", []) if isinstance(data, dict) else []
+
+    Mesuré : SIX réponses différentes donnent toutes le même résultat, et une
+    seule est légitime.
+
+        {"option_contracts": []}          -> None   (vrai : aucun contrat)
+        {}                                -> None   (dict vide)
+        {"contracts": [...]}              -> None   (clé renommée)
+        {"error": "rate limited"}         -> None   (corps d'erreur)
+        []                                -> None   (mauvais type)
+        None                              -> None   (réponse nulle)
+
+    En aval, agent.py journalise `no_contract_found` et la page affiche un
+    badge jaune « no contract » d'apparence routinière. Or pour SPY, GLD, XLK
+    ou XLV, « aucun contrat d'option entre 7 et 21 jours » n'arrive jamais en
+    vrai : c'est toujours le signe qu'on n'a pas compris la réponse.
+
+    Même raisonnement que list_positions() et get_clock() : « je n'ai pas
+    compris » n'est pas « il n'y a rien ». Le corps d'erreur, lui, est déjà
+    intercepté en amont par run() — il n'apparaît ici que parce que le test
+    court-circuite run()."""
+
+    def _demander(self, reponse):
+        from unittest import mock
+        with mock.patch.object(alpaca_cli, "run", lambda a: reponse):
+            return alpaca_cli.find_near_the_money_contract("SPY", +1, spot=500.0)
+
+    def test_une_reponse_incomprise_ne_veut_pas_dire_aucun_contrat(self):
+        for reponse, cas in (({}, "dict vide, clé absente"),
+                             ({"contracts": [{"strike_price": "500"}]}, "clé renommée"),
+                             ([], "liste au lieu d'un dict"),
+                             (None, "réponse nulle"),
+                             ({"option_contracts": "pas une liste"}, "valeur non-liste")):
+            with self.subTest(cas=cas):
+                with self.assertRaises(alpaca_cli.AlpacaCLIError,
+                                       msg="%s : rendu comme « aucun contrat », "
+                                           "ce qui s'affiche en badge routinier" % cas) as e:
+                    self._demander(reponse)
+                # Le symbole doit être nommé : un run visite QUATRE symboles,
+                # et un message anonyme ne dit pas lequel a échoué. Ajouté
+                # après qu'une mutation retirant le symbole soit restée verte.
+                self.assertIn("SPY", str(e.exception),
+                              "%s : le message ne nomme pas le symbole — %s"
+                              % (cas, e.exception))
+
+    def test_zero_contrat_reste_zero_contrat(self):
+        """Témoin, et il compte : une réponse COMPRISE annonçant zéro contrat
+        est un résultat légitime, pas une erreur. Confondre les deux dans
+        l'autre sens ferait échouer des runs parfaitement normaux."""
+        self.assertIsNone(self._demander({"option_contracts": []}))
+
+    def test_une_reponse_normale_choisit_toujours(self):
+        """Second témoin : le chemin nominal n'a pas bougé."""
+        page = [{"symbol": "SPY260911C00500000", "strike_price": "500.00",
+                 "expiration_date": "2026-09-11"}]
+        self.assertEqual(self._demander({"option_contracts": page}),
+                         "SPY260911C00500000")
+
 class TestLectureDeLEquite(HarnaisPlafonds, BaseExit):
     """L'équité est la base de TOUT : chaque plafond et chaque taille de
     position en est un pourcentage. Ajouté le 27/08 au soir.
