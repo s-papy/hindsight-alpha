@@ -2050,5 +2050,90 @@ class TestVocabulairePartageAvecLaPage(unittest.TestCase):
             "correspondante serait rendue sans que sa gravité soit lue"
             % ", ".join(manquants))
 
+
+class TestPlistsLivres(unittest.TestCase):
+    """Ajouté le 27/08. Trouvé en essayant simplement de lire les trois plists
+    avec plistlib : deux passent, le troisième lève « not well-formed
+    (invalid token) ». Cause : un « -- » dans un COMMENTAIRE XML, que la
+    spécification interdit — venu d'une phrase française ordinaire dans le
+    commentaire qui explique pourquoi `--git-push` est là. Écrit par moi le
+    matin même en rétablissant cette option.
+
+    Portée mesurée, pas supposée : `plutil -lint` répond OK sur les trois, et
+    launchd utilise ce même parseur (CoreFoundation), donc l'automatisation
+    tournait. Ce n'est pas une panne. Mais le dépôt LIVRE ces fichiers et le
+    README dit de les copier ; tout outil strict les refuse. Un fichier
+    « valide seulement sur mon Mac » est exactement l'hypothèse silencieuse
+    que ce projet débusque ailleurs.
+
+    Ce test double le contrôle 13 de garde_fou.py à dessein : le hook de
+    pre-commit ne lance QUE garde_fou, jamais la suite. Le contrôle est ce qui
+    protège au quotidien ; ce test est ce qui protège le contrôle."""
+
+    RACINE = Path(__file__).resolve().parent
+
+    def _plists(self):
+        dossier = self.RACINE / "launchagents"
+        fichiers = sorted(dossier.glob("*.plist")) if dossier.is_dir() else []
+        self.assertTrue(fichiers,
+                        "aucun .plist trouvé : ce test ne vérifie rien "
+                        "(contrôle d'instrument)")
+        return fichiers
+
+    def test_chaque_plist_livre_est_du_xml_strictement_valide(self):
+        import plistlib
+        for chemin in self._plists():
+            with self.subTest(plist=chemin.name):
+                try:
+                    with chemin.open("rb") as fh:
+                        plistlib.load(fh)
+                except Exception as e:
+                    self.fail("%s n'est pas du XML valide (%s: %s) — cause la "
+                              "plus fréquente : « -- » dans un commentaire "
+                              "<!-- ... -->" % (chemin.name, type(e).__name__, e))
+
+    def test_aucun_double_tiret_dans_un_commentaire_xml(self):
+        """La même faute, nommée directement plutôt que par son symptôme.
+        plistlib s'arrête à la PREMIÈRE occurrence ; celui-ci les voit
+        toutes, et dit laquelle."""
+        import re
+        for chemin in self._plists():
+            with self.subTest(plist=chemin.name):
+                texte = chemin.read_text(encoding="utf-8")
+                fautifs = [c.strip()[:60] for c in
+                           re.findall(r"<!--(.*?)-->", texte, re.S) if "--" in c]
+                self.assertEqual(
+                    fautifs, [],
+                    "%s : « -- » dans un commentaire XML, interdit par la "
+                    "spécification. Utiliser un tiret cadratin (—). "
+                    "Occurrence(s) : %s" % (chemin.name, fautifs))
+
+    def test_chaque_plist_declare_ce_dont_launchd_a_besoin(self):
+        """Un plist parfaitement bien formé mais sans Label ne se charge pas,
+        et l'erreur n'apparaît que dans les logs système — jamais là où
+        quelqu'un regarde."""
+        import plistlib
+        for chemin in self._plists():
+            with self.subTest(plist=chemin.name):
+                with chemin.open("rb") as fh:
+                    d = plistlib.load(fh)
+                for cle in ("Label", "ProgramArguments"):
+                    self.assertTrue(d.get(cle),
+                                    "%s : clé launchd « %s » absente ou vide"
+                                    % (chemin.name, cle))
+
+    def test_l_option_de_publication_automatique_est_toujours_la(self):
+        """Repère explicite. `--git-push` est une décision que l'utilisateur a
+        prise et que j'avais défaite une fois par erreur ; le correctif de
+        validité XML touche justement le commentaire qui l'entoure. Qu'un
+        nettoyage de forme emporte le fond serait la pire façon de perdre ce
+        réglage."""
+        import plistlib
+        chemin = self.RACINE / "launchagents" / "com.hindsightalpha.publish-dashboard.plist"
+        with chemin.open("rb") as fh:
+            args = plistlib.load(fh)["ProgramArguments"]
+        self.assertIn("--git-push", args,
+                      "l'option de publication automatique a disparu du plist")
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

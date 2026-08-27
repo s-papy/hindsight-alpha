@@ -1969,6 +1969,74 @@ def controle_renvois_resolvent() -> None:
             )
 
 
+def controle_plists_sont_du_xml_valide() -> None:
+    """Les plists livres sont-ils du XML que N'IMPORTE QUEL parseur accepte ?
+
+    AJOUTE le 27/08/2026. Trouve en essayant simplement de lire les trois
+    plists avec plistlib : deux passent, le troisieme leve
+    « not well-formed (invalid token): line 21, column 57 ».
+
+    La cause : un « -- » a l'interieur d'un COMMENTAIRE XML. La specification
+    XML l'interdit, sans exception. Le mien venait d'une phrase francaise
+    ordinaire (« la docstring -- que ce paragraphe declare perimee ») dans le
+    commentaire qui explique pourquoi `--git-push` est la. Ecrit par moi le
+    matin meme, en retablissant cette option.
+
+    POURQUOI CE N'EST PAS BENIN, ET POURQUOI CE N'EST PAS GRAVE NON PLUS.
+    `plutil -lint` repond OK sur les trois : le parseur d'Apple
+    (CoreFoundation) tolere la faute. launchd utilise ce meme parseur, donc le
+    job SE CHARGE et l'automatisation fonctionne -- mesure, pas suppose.
+
+    Mais le depot LIVRE ces fichiers : le README dit de les copier dans
+    ~/Library/LaunchAgents. Tout outil strict -- plistlib, xmllint, la plupart
+    des validateurs d'editeur, une CI qui verifie les plists -- les refuse.
+    Un fichier « valide seulement sur mon Mac » est precisement le genre
+    d'hypothese silencieuse que ce projet passe son temps a debusquer
+    ailleurs.
+
+    Le controle ALERTE, il ne bloque pas : l'automatisation tourne, rien n'est
+    en danger. Il refuse simplement de laisser passer un fichier livre qui
+    n'est pas ce qu'il pretend etre.
+
+    On verifie aussi les cles dont launchd a besoin. Un plist parfaitement
+    bien forme mais sans Label ne se charge pas -- et l'erreur, elle,
+    n'apparait que dans les logs systeme."""
+    import plistlib
+
+    dossier = os.path.join(RACINE, "launchagents")
+    if not os.path.isdir(dossier):
+        return
+    trouves = sorted(n for n in os.listdir(dossier) if n.endswith(".plist"))
+    if not trouves:
+        # Le dossier existe mais est vide : ce controle ne verifie alors RIEN.
+        # Le dire plutot que de rendre un vert qui ne veut rien dire.
+        alerte("launchagents/", "dossier present mais AUCUN .plist dedans -- "
+                                "ce controle n'a rien verifie.")
+        return
+
+    for nom in trouves:
+        chemin = os.path.join(dossier, nom)
+        try:
+            with open(chemin, "rb") as fh:
+                donnees = plistlib.load(fh)
+        except Exception as e:
+            alerte("launchagents/%s" % nom,
+                   "XML INVALIDE pour un parseur strict (%s: %s). `plutil -lint` "
+                   "l'accepte -- le parseur d'Apple tolere la faute, donc launchd "
+                   "charge quand meme le job -- mais ce fichier est LIVRE et le "
+                   "README dit de le copier. Cause la plus frequente : un « -- » "
+                   "a l'interieur d'un commentaire <!-- ... -->, que la "
+                   "specification XML interdit."
+                   % (type(e).__name__, e))
+            continue
+        for cle in ("Label", "ProgramArguments"):
+            if not donnees.get(cle):
+                alerte("launchagents/%s" % nom,
+                       "cle launchd « %s » absente ou vide : le job ne se "
+                       "chargera pas, et l'erreur n'apparaitra que dans les "
+                       "logs systeme." % cle)
+
+
 def main() -> int:
     print("=" * 74)
     print("GARDE-FOU — hindsight-alpha — %s" % datetime.now().strftime("%d/%m/%Y %H:%M"))
@@ -1981,6 +2049,7 @@ def main() -> int:
     # un chiffre derive de la realite, non. len(CONTROLES) est desormais la
     # seule source.
     CONTROLES = (
+        controle_plists_sont_du_xml_valide,
         controle_journal,
         controle_env_hackathon_scelle,
         controle_garde_live_trading,

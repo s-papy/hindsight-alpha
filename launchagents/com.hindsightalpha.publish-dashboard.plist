@@ -18,7 +18,7 @@
 		     EN GRAS comme « a deliberate change to a rule this project used to
 		     hold » : la page est l'URL de soumission, une regle qui la laisse
 		     perimee la plupart du temps protegeait la mauvaise chose. Je m'etais
-		     appuye sur la docstring de publish_dashboard.py -- que ce paragraphe
+		     appuye sur la docstring de publish_dashboard.py — que ce paragraphe
 		     declare justement perimee.
 		     controle_readme_decrit_les_agents() (garde_fou.py) verifie desormais
 		     que ce plist et le README ne se contredisent plus. -->
