@@ -202,8 +202,6 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    config.require_credentials()
-
     record: dict = {"run_type": "exit_monitor", "dry_run": args.dry_run, "outcome": "unknown"}
     # Bound before the try, same reason `record` is: if manage_exits() itself
     # raises (not a per-position failure -- those are already caught inside
@@ -212,6 +210,12 @@ def main() -> None:
     # on top of the real one.
     actions: List[ExitAction] = []
     try:
+        # DEPLACE ICI le 27/08/2026 : cet appel etait AVANT le try, donc un refus
+        # d'identifiants sautait le `finally` en entier -- ni statut de derniere
+        # execution, ni entree de journal. Le moniteur mourait toutes les 15
+        # minutes sans laisser la moindre trace ailleurs que dans le log launchd.
+        config.require_credentials()
+
         if not args.skip_market_check:
             clock = alpaca_cli.get_clock()
             record["market_open"] = clock.get("is_open", False)
@@ -236,6 +240,30 @@ def main() -> None:
         for action in actions:
             print(f"  {action}")
         record["outcome"] = "checked"
+    except SystemExit as sortie:
+        # AJOUTE le 27/08/2026. config.require_credentials() -- et tout autre
+        # garde de demarrage -- signale son refus avec sys.exit(), qui leve
+        # SystemExit. SystemExit derive de BaseException, PAS de Exception :
+        # le `except Exception` juste en dessous ne la rattrape donc JAMAIS.
+        #
+        # Mesure le 27/08, identifiants absents :
+        #   agent.py         -> journal ecrit avec outcome='unknown', error=None
+        #                       (un enregistrement qui ne dit rien, rendu en gris
+        #                       discret par outcomeBadge)
+        #   monitor_exits.py -> RIEN du tout : ni decision_log.jsonl, ni
+        #                       monitor_last_run.json
+        #
+        # Le second est le plus grave : le moniteur est la seule protection
+        # d'une position ouverte, il tourne toutes les 15 minutes sans
+        # surveillance, et le tableau de bord ne pouvait que constater un
+        # SILENCE QUI VIEILLIT -- sans jamais pouvoir dire pourquoi.
+        #
+        # Le code 0 (ou None) reste une sortie propre et n'est pas maquille en
+        # erreur.
+        if sortie.code not in (None, 0):
+            record["outcome"] = "error"
+            record["error"] = f"SystemExit: {sortie.code}"
+        raise
     except Exception as e:
         record["outcome"] = "error"
         record["error"] = f"{type(e).__name__}: {e}"

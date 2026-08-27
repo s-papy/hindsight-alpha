@@ -206,5 +206,100 @@ class TestOrdreAuSortInconnu(BaseAgent):
             self.assertEqual(self._trade(record, s)["outcome"], "order_submitted")
 
 
+class TestRefusAuDemarrage(unittest.TestCase):
+    """config.require_credentials() signale son refus avec sys.exit(), donc
+    lève SystemExit — une BaseException que `except Exception` NE RATTRAPE PAS.
+
+    Mesuré le 27/08, identifiants absents :
+      agent.py         -> journal écrit avec outcome='unknown', error=None,
+                          rendu en gris discret par outcomeBadge
+      monitor_exits.py -> RIEN : ni decision_log.jsonl, ni monitor_last_run.json
+
+    Le second est le plus grave. Le moniteur est la seule protection d'une
+    position ouverte, il tourne toutes les 15 minutes sans surveillance, et son
+    require_credentials() était appelé AVANT le try — donc le `finally` entier
+    était sauté. Le tableau de bord ne pouvait que constater un silence qui
+    vieillit, sans jamais pouvoir dire pourquoi.
+    """
+
+    MESSAGE = "Missing ALPACA_API_KEY / ALPACA_SECRET_KEY."
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="hindsight-demarrage-"))
+        self._log = decision_log.LOG_FILE
+        self._req = config.require_credentials
+        self._argv = list(sys.argv)
+        decision_log.LOG_FILE = self.tmp / "decision_log.jsonl"
+
+        def refuse():
+            raise SystemExit(self.MESSAGE)
+
+        config.require_credentials = refuse
+
+    def tearDown(self):
+        decision_log.LOG_FILE = self._log
+        config.require_credentials = self._req
+        sys.argv = self._argv
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _dernier_enregistrement(self):
+        self.assertTrue(decision_log.LOG_FILE.exists(),
+                        "aucune entrée de journal : l'échec est totalement muet")
+        lignes = [l for l in decision_log.LOG_FILE.read_text(
+            encoding="utf-8").splitlines() if l.strip()]
+        return json.loads(lignes[-1])
+
+    def test_agent_nomme_le_refus(self):
+        sys.argv = ["agent.py", "--symbols", "SPY"]
+        with contextlib.redirect_stdout(io.StringIO()):
+            with self.assertRaises(SystemExit):
+                agent.main()
+        rec = self._dernier_enregistrement()
+        self.assertEqual(rec.get("outcome"), "error",
+                         "un refus de démarrage est journalisé 'unknown' : "
+                         "l'entrée ne dit rien de ce qui s'est passé")
+        self.assertIn(self.MESSAGE, rec.get("error") or "")
+
+    def test_le_moniteur_ne_meurt_plus_en_silence(self):
+        import monitor_exits
+        vrai_statut = monitor_exits.MONITOR_STATUS_FILE
+        vrai_dedup = monitor_exits.DEDUP_FILE
+        monitor_exits.MONITOR_STATUS_FILE = self.tmp / "monitor_last_run.json"
+        monitor_exits.DEDUP_FILE = self.tmp / "dedup.json"
+        sys.argv = ["monitor_exits.py"]
+        try:
+            with contextlib.redirect_stdout(io.StringIO()):
+                with self.assertRaises(SystemExit):
+                    monitor_exits.main()
+            rec = self._dernier_enregistrement()
+            self.assertEqual(rec.get("outcome"), "error")
+            self.assertIn(self.MESSAGE, rec.get("error") or "")
+
+            self.assertTrue(monitor_exits.MONITOR_STATUS_FILE.exists(),
+                            "monitor_last_run.json non écrit : la bannière de "
+                            "santé attendra 45 minutes pour signaler un jaune "
+                            "vague au lieu d'un rouge immédiat")
+            statut = json.loads(monitor_exits.MONITOR_STATUS_FILE.read_text(
+                encoding="utf-8"))
+            self.assertEqual(statut.get("outcome"), "error")
+        finally:
+            monitor_exits.MONITOR_STATUS_FILE = vrai_statut
+            monitor_exits.DEDUP_FILE = vrai_dedup
+
+    def test_une_sortie_propre_n_est_pas_maquillee_en_erreur(self):
+        """Contrôle : sans lui, marquer TOUTE SystemExit comme une erreur
+        passerait les deux tests ci-dessus. `--help` sort avec le code 0."""
+        def sortie_propre():
+            raise SystemExit(0)
+        config.require_credentials = sortie_propre
+        sys.argv = ["agent.py", "--symbols", "SPY"]
+        with contextlib.redirect_stdout(io.StringIO()):
+            with self.assertRaises(SystemExit):
+                agent.main()
+        rec = self._dernier_enregistrement()
+        self.assertNotEqual(rec.get("outcome"), "error",
+                            "une sortie de code 0 est maquillée en erreur")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

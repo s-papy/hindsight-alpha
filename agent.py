@@ -182,6 +182,30 @@ def main() -> None:
     record: dict = {"dry_run": args.dry_run, "symbols": symbols, "outcome": "unknown"}
     try:
         _run(args, symbols, record)
+    except SystemExit as sortie:
+        # AJOUTE le 27/08/2026. config.require_credentials() -- et tout autre
+        # garde de demarrage -- signale son refus avec sys.exit(), qui leve
+        # SystemExit. SystemExit derive de BaseException, PAS de Exception :
+        # le `except Exception` juste en dessous ne la rattrape donc JAMAIS.
+        #
+        # Mesure le 27/08, identifiants absents :
+        #   agent.py         -> journal ecrit avec outcome='unknown', error=None
+        #                       (un enregistrement qui ne dit rien, rendu en gris
+        #                       discret par outcomeBadge)
+        #   monitor_exits.py -> RIEN du tout : ni decision_log.jsonl, ni
+        #                       monitor_last_run.json
+        #
+        # Le second est le plus grave : le moniteur est la seule protection
+        # d'une position ouverte, il tourne toutes les 15 minutes sans
+        # surveillance, et le tableau de bord ne pouvait que constater un
+        # SILENCE QUI VIEILLIT -- sans jamais pouvoir dire pourquoi.
+        #
+        # Le code 0 (ou None) reste une sortie propre et n'est pas maquille en
+        # erreur.
+        if sortie.code not in (None, 0):
+            record["outcome"] = "error"
+            record["error"] = f"SystemExit: {sortie.code}"
+        raise
     except Exception as e:
         record["outcome"] = "error"
         record["error"] = f"{type(e).__name__}: {e}"
