@@ -1957,6 +1957,77 @@ class TestVocabulairePartageAvecLaPage(unittest.TestCase):
                           "%s est écarté du rendu mais n'est plus écrit par "
                           "agent.py : l'exception a survécu au champ" % champ)
 
+    # Ce que docs/data.json a le droit de publier sous "account". Liste
+    # BLANCHE : ce fichier est suivi par git et servi publiquement par GitHub
+    # Pages, et il est rempli depuis la réponse BRUTE de l'API Alpaca. Tout
+    # champ ajouté au payload d'Alpaca, ou recopié ici sans y penser, part sur
+    # un dépôt public à la publication suivante.
+    CHAMPS_DE_COMPTE_PUBLIABLES = {
+        # L'identifiant « PA... » visible par un humain. Publié DÉLIBÉRÉMENT :
+        # c'est celui que le formulaire de soumission réclame, et le tableau
+        # de bord l'affiche pour qu'un juge vérifie que cette page correspond
+        # bien au compte déclaré. Sans lui, ce recoupement est impossible.
+        "account_number",
+        "status", "equity", "cash", "buying_power", "portfolio_value",
+    }
+
+    def test_data_json_ne_publie_que_les_champs_de_compte_choisis(self):
+        """Trouvé le 27/08 en croisant ce que build_snapshot() écrit avec ce
+        que la page lit : le champ `id` — l'UUID interne du compte, 36
+        caractères — était publié dans un fichier suivi et servi
+        publiquement, alors que la page ne le lit QUE comme repli derrière
+        `account_number`, toujours présent sur un compte réel. Il n'était
+        donc affiché à personne, jamais.
+
+        Il était déjà dans 6 commits poussés au moment de la découverte. Rien
+        ne le retire du passé sans réécrire l'historique, ce que ce projet
+        s'interdit ; ce test empêche la suite, pas le passé.
+
+        Ni l'UUID ni le numéro de compte n'autorisent quoi que ce soit sans
+        les clés — ce sont des identifiants, pas des pouvoirs. Ce qui compte
+        ici, c'est qu'un champ soit parti sans que personne ne l'ait décidé :
+        le payload d'Alpaca est recopié, et il grandira."""
+        import ast
+        arbre = ast.parse((self.RACINE / "publish_dashboard.py").read_text(
+            encoding="utf-8"), "publish_dashboard.py")
+        publies = None
+        for n in ast.walk(arbre):
+            if isinstance(n, ast.Dict):
+                for k, v in zip(n.keys, n.values):
+                    if (isinstance(k, ast.Constant) and k.value == "account"
+                            and isinstance(v, ast.Dict)):
+                        publies = {c.value for c in v.keys
+                                   if isinstance(c, ast.Constant)}
+        self.assertIsNotNone(
+            publies,
+            "le bloc \"account\" de build_snapshot() est introuvable : ce "
+            "test ne vérifie plus rien (contrôle d'instrument)")
+        surplus = sorted(publies - self.CHAMPS_DE_COMPTE_PUBLIABLES)
+        self.assertEqual(
+            surplus, [],
+            "champ(s) de compte publiés dans docs/data.json — fichier suivi "
+            "et servi publiquement — sans décision explicite : %s. Les "
+            "retirer, ou les inscrire dans CHAMPS_DE_COMPTE_PUBLIABLES avec "
+            "la raison." % ", ".join(surplus))
+
+    def test_le_fichier_publie_sur_le_disque_respecte_la_meme_liste(self):
+        """Le test ci-dessus lit le CODE. Celui-ci lit le FICHIER réellement
+        présent dans docs/, celui que GitHub Pages sert. Les deux peuvent
+        diverger : data.json n'est réécrit qu'à la publication suivante, donc
+        un champ retiré du code reste sur le disque — et en ligne — jusqu'à
+        ce que publish_dashboard.py retourne."""
+        import json
+        chemin = self.RACINE / "docs" / "data.json"
+        if not chemin.exists():
+            self.skipTest("docs/data.json absent — rien n'est publié")
+        compte = json.loads(chemin.read_text(encoding="utf-8")).get("account", {})
+        surplus = sorted(set(compte) - self.CHAMPS_DE_COMPTE_PUBLIABLES)
+        self.assertEqual(
+            surplus, [],
+            "docs/data.json contient sur le disque des champs de compte non "
+            "prévus : %s — republier le tableau de bord pour les retirer de "
+            "ce qui est servi en ligne" % ", ".join(surplus))
+
     def test_chaque_issue_de_sortie_est_traitee_par_le_badge(self):
         """Second versant du même pont. risk_gates.ExitKind décide de ce qui
         est arrivé à UNE position ; depuis le correctif du 27/08, c'est cette

@@ -66,7 +66,26 @@ def build_snapshot() -> dict:
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "team": "Hindsight Alpha",
         "account": {
-            "id": account.get("id"),
+            # RETIRE le 27/08 : "id": account.get("id") -- l'UUID INTERNE du
+            # compte, 36 caracteres. Trouve en croisant ce que ce fichier
+            # publie avec ce que docs/index.html lit : la page ne s'en sert
+            # QUE comme repli derriere account_number, toujours present sur un
+            # compte reel. Il n'etait donc affiche a personne, jamais, et
+            # partait pourtant dans un fichier suivi par git et servi
+            # publiquement par GitHub Pages a chaque publication.
+            #
+            # Il etait deja dans 6 commits pousses au moment de la
+            # decouverte. Rien ne l'en retire sans reecrire l'historique, ce
+            # que ce projet s'interdit : ce correctif arrete la suite, pas le
+            # passe. Ni cet UUID ni le numero de compte n'autorisent quoi que
+            # ce soit sans les cles -- ce sont des identifiants, pas des
+            # pouvoirs. Ce qui compte, c'est qu'un champ soit parti sans que
+            # personne ne l'ait decide : le payload d'Alpaca est recopie ici,
+            # et il grandira.
+            #
+            # risk_gates.py continue d'utiliser account["id"] pour detecter
+            # une bascule de compte -- usage INTERNE, jamais publie.
+            #
             # account_number ("PA..." on paper accounts) is the human-visible
             # identifier -- what the hackathon submission form's "Alpaca
             # account ID" field almost certainly means, per Alpaca's own docs
