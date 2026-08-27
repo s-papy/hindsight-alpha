@@ -793,6 +793,13 @@ def _lignes_tableau_symboles(texte: str) -> list[dict]:
              if re.search(r"concentration|best 5|gain from best", c, re.I)),
             None,
         )
+        # AJOUTE le 27/08 : la colonne du nombre de transactions, jamais
+        # croisee jusque-la. En-tete reel : « Trades (of ~657 bars) ».
+        idx_trades = next(
+            (j for j, c in enumerate(cellules_entete)
+             if re.search(r"\btrades?\b", c, re.I)),
+            None,
+        )
         # ligne suivante = séparateur markdown (---|---|---), on la saute.
         j = i + 2
         while j < len(lignes) and lignes[j].strip().startswith("|"):
@@ -801,7 +808,11 @@ def _lignes_tableau_symboles(texte: str) -> list[dict]:
                 ticker = re.match(r"\*{0,2}([A-Z]{2,5})\*{0,2}$", cellules[0])
                 if ticker:
                     resultats.append({
+                        "ligne_brute": lignes[j],
                         "symbole": ticker.group(1),
+                        "trades_cell": (cellules[idx_trades]
+                                        if idx_trades is not None
+                                        and idx_trades < len(cellules) else ""),
                         "win_rate_cell": cellules[idx_wr] if idx_wr is not None else "",
                         "concentration_cell": cellules[idx_conc] if idx_conc is not None else "",
                     })
@@ -1079,6 +1090,51 @@ def controle_source_de_verite() -> None:
                         "fenêtre vettée (%dj) dans BACKTEST_RESULTS.md (devrait être "
                         "%s%%)." % (m_wr.group(1), symbole, attendu["fenetre"], _fmt(attendu["win_rate"])),
                     )
+            # AJOUTE le 27/08/2026. Ce bloc comparait le TAUX DE REUSSITE et la
+            # CONCENTRATION, pas le STATUT DE FUITE. Mesure : remplacer dans le
+            # README la ligne « XLK | 90d | 🛡️ **LEAK — refused live** » par
+            # « XLK | 90d | ✅ clean » donnait un garde_fou a CODE 0.
+            #
+            # C'est la revendication centrale du projet -- « this check finds a
+            # genuine disagreement on XLK and refuses it live, every run ». Un
+            # livrable pouvait annoncer le contraire de ce que la source
+            # mecanique dit, et le controle qui existe pour empecher exactement
+            # ca ne regardait pas cette colonne.
+            brute = ligne.get("ligne_brute", "")
+            dit_fuite = bool(re.search(r"leak|refused", brute, re.I))
+            dit_propre = bool(re.search(r"\bclean\b", brute, re.I))
+            if attendu["leaked"] and dit_propre and not dit_fuite:
+                bloque(
+                    rel,
+                    "%s est annonce PROPRE dans le tableau, alors que "
+                    "BACKTEST_RESULTS.md le donne EN FUITE (fenetre vettee %dj). "
+                    "C'est la revendication centrale du projet : elle doit dire "
+                    "ce que la source mecanique dit."
+                    % (symbole, attendu["fenetre"]),
+                )
+            elif not attendu["leaked"] and dit_fuite and not dit_propre:
+                bloque(
+                    rel,
+                    "%s est annonce EN FUITE dans le tableau, alors que "
+                    "BACKTEST_RESULTS.md le donne propre (fenetre vettee %dj)."
+                    % (symbole, attendu["fenetre"]),
+                )
+
+            # AJOUTE le 27/08 : mesure, remplacer « 52 » par « 152 » pour XLV
+            # dans le README donnait un garde_fou a CODE 0. Le premier entier de
+            # la cellule est la valeur -- « 76 (not traded) » se lit bien 76.
+            m_tr = re.search(r"(\d+)", ligne.get("trades_cell", ""))
+            if m_tr and attendu.get("trade_days") is not None:
+                cite_tr = int(m_tr.group(1))
+                if cite_tr != attendu["trade_days"]:
+                    bloque(
+                        rel,
+                        "NOMBRE DE TRANSACTIONS « %d » pour %s (tableau) ne "
+                        "correspond pas a sa fenetre vettee (%dj) dans "
+                        "BACKTEST_RESULTS.md (devrait etre %d)."
+                        % (cite_tr, symbole, attendu["fenetre"], attendu["trade_days"]),
+                    )
+
             m_conc = re.search(r"([\d.]+)\s*%", ligne["concentration_cell"])
             if m_conc and attendu["concentration"] is not None:
                 cite = float(m_conc.group(1))

@@ -676,5 +676,105 @@ class TestLecteursDeCodeSource(unittest.TestCase):
         self.assertEqual(alertes, [])
 
 
+class TestLivrablesCroisesAvecLaSource(unittest.TestCase):
+    """Le contrôle 5 vérifie ligne par ligne que le tableau symbole-par-symbole
+    des livrables dit ce que BACKTEST_RESULTS.md dit.
+
+    Mesuré le 27/08 en mutant le README : sur les quatre champs de ce tableau,
+    DEUX seulement étaient croisés.
+
+        taux de réussite faussé   -> 🔴 REFUSÉ
+        concentration faussée     -> 🔴 REFUSÉ
+        nombre de transactions    -> code 0, laissé passer
+        statut de fuite inversé   -> code 0, laissé passer
+
+    Le dernier est le plus grave : le README pouvait annoncer XLK PROPRE alors
+    que la source mécanique le donne EN FUITE. C'est la revendication centrale
+    du projet — « this check finds a genuine disagreement on XLK and refuses it
+    live, every run » — et le contrôle qui existe pour l'empêcher ne regardait
+    pas cette colonne.
+    """
+
+    RACINE = Path(__file__).resolve().parent
+    FICHIERS = ("garde_fou.py", "README.md", "BACKTEST_RESULTS.md",
+                "STRATEGY_COMPARISON.md", "agent.py", "risk_gates.py",
+                "vol_strategy.py", "monitor_exits.py")
+
+    def _verdict(self, ancien=None, nouveau=None):
+        d = Path(tempfile.mkdtemp(prefix="hindsight-livrables-"))
+        try:
+            for nom in self.FICHIERS:
+                source = self.RACINE / nom
+                if not source.exists():
+                    self.skipTest("%s absent" % nom)
+                shutil.copy(source, d / nom)
+            if ancien is not None:
+                chemin = d / "README.md"
+                avant = chemin.read_text(encoding="utf-8")
+                self.assertEqual(avant.count(ancien), 1,
+                                 "la ligne mutée n'apparaît pas exactement une "
+                                 "fois : le README a changé de forme et ce test "
+                                 "ne vérifie plus rien")
+                chemin.write_text(avant.replace(ancien, nouveau), encoding="utf-8")
+            proc = subprocess.run([sys.executable, "garde_fou.py"], cwd=str(d),
+                                  capture_output=True, text=True, timeout=120)
+            return proc.returncode, proc.stdout + proc.stderr
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
+    SPY = "| SPY | 10d | ✅ clean | 102 | 45.1% | 82.6% |"
+    XLV = "| XLV | 10d | ✅ clean | 52 | 50.0% | 78.2% |"
+    XLK = ("| XLK | 90d | 🛡️ **LEAK — refused live** | 76 (not traded) "
+           "| 36.8% | 136.7% |")
+
+    # Les messages que ce contrôle produit. On assert sur EUX, pas sur le code
+    # de sortie : le dossier de test ne contient que les fichiers nécessaires au
+    # contrôle 5, donc d'autres contrôles y bloquent pour des fichiers absents,
+    # sans rapport. Trouvé en écrivant ce test — le contrôle « dépôt sain »
+    # échouait sur un code 1 qui ne disait rien de ce qu'il vérifie.
+    MESSAGES = ("annonce PROPRE", "annonce EN FUITE", "NOMBRE DE TRANSACTIONS",
+                "WIN RATE", "CONCENTRATION")
+
+    def test_le_depot_sain_ne_declenche_aucun_de_ces_messages(self):
+        """Contrôle : sans lui, un contrôle qui crie TOUJOURS passerait les
+        quatre tests ci-dessous."""
+        _, sortie = self._verdict()
+        declenches = [m for m in self.MESSAGES if m in sortie]
+        self.assertEqual(declenches, [],
+                         "le tableau du README correspond à la source mécanique "
+                         "et le contrôle proteste quand même : %s" % declenches)
+
+    def test_une_fuite_cachee_est_refusee(self):
+        """Le README annonce XLK propre ; la source mécanique dit qu'il fuit."""
+        code, sortie = self._verdict(
+            self.XLK, "| XLK | 90d | ✅ clean | 76 | 36.8% | 136.7% |")
+        self.assertIn("annonce PROPRE", sortie,
+                      "un livrable peut annoncer le contraire de la source "
+                      "mécanique sur la revendication centrale du projet")
+        self.assertNotEqual(code, 0, "le message est là mais le verdict passe")
+
+    def test_une_fuite_inventee_est_refusee_aussi(self):
+        """L'autre sens compte autant : annoncer une prise qui n'a pas eu lieu
+        gonflerait le résultat du projet."""
+        code, sortie = self._verdict(
+            self.SPY, "| SPY | 10d | 🛡️ **LEAK — refused live** | 102 | 45.1% | 82.6% |")
+        self.assertIn("annonce EN FUITE", sortie)
+        self.assertNotEqual(code, 0)
+
+    def test_un_nombre_de_transactions_fausse_est_refuse(self):
+        code, sortie = self._verdict(
+            self.XLV, "| XLV | 10d | ✅ clean | 152 | 50.0% | 78.2% |")
+        self.assertIn("NOMBRE DE TRANSACTIONS", sortie)
+        self.assertNotEqual(code, 0)
+
+    def test_les_deux_champs_deja_couverts_le_restent(self):
+        """Anti-régression : élargir un contrôle ne doit pas en casser une
+        partie qui marchait."""
+        code, sortie = self._verdict(
+            self.SPY, "| SPY | 10d | ✅ clean | 102 | 55.1% | 82.6% |")
+        self.assertIn("WIN RATE", sortie)
+        self.assertNotEqual(code, 0)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
