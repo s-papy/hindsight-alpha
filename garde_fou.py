@@ -2002,6 +2002,77 @@ def controle_renvois_resolvent() -> None:
             )
 
 
+# Ce que les autres controles LISENT, et ce qui cesse d'etre verifie sans lui.
+# Manifeste ajoute le 27/08/2026 -- voir controle_entrees_attendues_presentes().
+ENTREES_ATTENDUES = {
+    "BACKTEST_RESULTS.md":
+        "la source de verite des chiffres. Sans elle, AUCUN chiffre des "
+        "livrables n'est plus recoupe.",
+    "STRATEGY_COMPARISON.md":
+        "la comparaison des deux strategies : Sharpe in-sample, taux de "
+        "succes, statut de fuite.",
+    "README.md":
+        "l'inventaire des agents et de leurs options, et les chiffres qu'il "
+        "reprend de BACKTEST_RESULTS.md.",
+    "requirements.txt":
+        "les dependances scellees.",
+    "decision_log.jsonl":
+        "la preuve publiee : recherche d'identifiants et coherence des "
+        "decisions.",
+    "docs/data.json":
+        "l'instantane publie : champs de compte et identifiants.",
+    "submission/Hindsight_Alpha_Deck.pptx":
+        "les chiffres du deck (plages, nombre d'equipes, verdicts de fuite).",
+    "submission/Hindsight_Alpha_Writeup.docx":
+        "les chiffres du write-up d'une page.",
+    "launchagents":
+        "les plists livres : validite XML et cles launchd.",
+    "githooks":
+        "les hooks pre-commit et pre-push.",
+}
+
+
+def controle_entrees_attendues_presentes() -> None:
+    """Un fichier que les autres controles LISENT a-t-il disparu ?
+
+    AJOUTE le 27/08/2026, apres un balayage systematique : j'ai retire une a
+    une les douze entrees de ce script dans un clone jetable. UNE SEULE
+    absence sur douze etait signalee. Les onze autres passaient sans un mot --
+    le controle concerne se contentait de ne rien verifier.
+
+    CONSEQUENCE MESUREE, pas supposee, et plus mesuree que ce que je
+    craignais. Avec une borne falsifiee dans BACKTEST_RESULTS.md :
+
+        livrables en place        -> 🔴 3 bloquants
+        deck et write-up renommes -> 🔴 2 bloquants  (toujours REFUSE)
+
+    Le verdict TIENT. Ce qui disparait en silence, c'est un bloquant precis
+    sur le write-up (« CONCENTRATION 68.5-82.6% ne correspond pas ») et
+    l'alerte du deck. Le refus ne survit que parce que README.md reprend les
+    memes chiffres -- une redondance heureuse, pas une protection concue. Sur
+    un chiffre que seul le write-up porterait, il n'y aurait plus rien.
+
+    Le scenario n'est pas tire par les cheveux : renommer un livrable au
+    moment de le deposer sur lablab est la chose la plus naturelle du monde,
+    et c'est exactement le moment ou ces recoupements comptent.
+
+    ALERTE, jamais blocage. Un depot peut legitimement ne pas avoir tous ces
+    fichiers -- ce controle ne dit pas « c'est faux », il dit « ceci n'a pas
+    ete verifie ». Meme forme que l'aveu ajoute le meme jour au controle
+    d'identifiants, et que controle_journal() pour PLAN_SPRINT.md absent.
+
+    PLAN_SPRINT.md est deliberement absent du manifeste : il est gitignore, et
+    son propre controle annonce deja son absence. L'y ajouter produirait une
+    seconde alerte pour un etat parfaitement normal -- et un controle qui crie
+    sur du normal s'apprend a ignorer."""
+    manquants = [(nom, quoi) for nom, quoi in sorted(ENTREES_ATTENDUES.items())
+                 if not os.path.exists(os.path.join(RACINE, nom))]
+    for nom, quoi in manquants:
+        alerte(nom, "ABSENT — ce que plus rien ne verifie : %s Renomme, deplace "
+                    "ou supprime ? Tant qu'il manque, les controles qui le "
+                    "lisent ne disent RIEN, ni oui ni non." % quoi)
+
+
 def controle_plists_sont_du_xml_valide() -> None:
     """Les plists livres sont-ils du XML que N'IMPORTE QUEL parseur accepte ?
 
@@ -2082,6 +2153,7 @@ def main() -> int:
     # un chiffre derive de la realite, non. len(CONTROLES) est desormais la
     # seule source.
     CONTROLES = (
+        controle_entrees_attendues_presentes,
         controle_plists_sont_du_xml_valide,
         controle_journal,
         controle_env_hackathon_scelle,

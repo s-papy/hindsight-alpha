@@ -2144,6 +2144,96 @@ class TestVocabulairePartageAvecLaPage(unittest.TestCase):
             % ", ".join(manquants))
 
 
+
+class TestEntreesAttendues(unittest.TestCase):
+    """Ajouté le 27/08, après un balayage systématique : j'ai retiré une à une
+    les douze entrées de garde_fou.py dans un clone jetable. UNE SEULE absence
+    sur douze était signalée ; les onze autres passaient sans un mot.
+
+    Conséquence mesurée — et plus mesurée que ce que je craignais. Avec une
+    borne falsifiée dans BACKTEST_RESULTS.md :
+
+        livrables en place        -> 🔴 3 bloquants
+        deck et write-up renommés -> 🔴 2 bloquants (toujours REFUSÉ)
+
+    Le verdict tient. Ce qui disparaît en silence, c'est un bloquant précis
+    sur le write-up, et le refus ne survit que parce que README.md reprend les
+    mêmes chiffres — une redondance heureuse, pas une protection conçue."""
+
+    RACINE = Path(__file__).resolve().parent
+
+    def test_le_manifeste_ne_liste_que_des_fichiers_reellement_lus(self):
+        """Contrôle d'instrument. Un manifeste qui déclare des dépendances
+        imaginaires produirait des alertes sur des absences sans conséquence —
+        et un contrôle qui crie sur du normal s'apprend à ignorer. Chaque
+        entrée doit être mentionnée quelque part dans le script."""
+        import garde_fou
+        source = (self.RACINE / "garde_fou.py").read_text(encoding="utf-8")
+        for nom in garde_fou.ENTREES_ATTENDUES:
+            with self.subTest(entree=nom):
+                base = os.path.basename(nom.rstrip("/"))
+                # 1 mention = la ligne du manifeste elle-même ; il en faut plus.
+                self.assertGreater(
+                    source.count(base), 1,
+                    "%s est déclaré comme dépendance mais n'est lu par aucun "
+                    "contrôle : son absence n'aurait aucune conséquence, et "
+                    "l'alerte serait du bruit" % nom)
+
+    def test_le_manifeste_ne_contient_pas_de_fichier_gitignore(self):
+        """PLAN_SPRINT.md est gitignoré et son propre contrôle annonce déjà
+        son absence. L'ajouter ici produirait une SECONDE alerte pour un état
+        parfaitement normal sur tout clone."""
+        import garde_fou
+        gitignore = self.RACINE / ".gitignore"
+        motifs = {l.strip().rstrip("/") for l in
+                  gitignore.read_text(encoding="utf-8").splitlines()
+                  if l.strip() and not l.startswith("#")} if gitignore.exists() else set()
+        for nom in garde_fou.ENTREES_ATTENDUES:
+            with self.subTest(entree=nom):
+                self.assertNotIn(nom.rstrip("/"), motifs,
+                                 "%s est gitignoré : son absence est normale, "
+                                 "l'alerter serait du bruit permanent" % nom)
+
+    def test_une_entree_manquante_est_annoncee_avec_sa_consequence(self):
+        """Signaler ne suffit pas : l'alerte doit dire ce qui cesse d'être
+        vérifié. « fichier absent » n'aide personne à décider si c'est grave."""
+        import garde_fou
+        garde_fou.alertes.clear()
+        vraie = garde_fou.RACINE
+        try:
+            vide = tempfile.mkdtemp(prefix="hindsight-vide-")
+            garde_fou.RACINE = vide
+            garde_fou.controle_entrees_attendues_presentes()
+            self.assertEqual(len(garde_fou.alertes),
+                             len(garde_fou.ENTREES_ATTENDUES),
+                             "toutes les entrées manquent, toutes doivent être "
+                             "nommées")
+            dits = dict(garde_fou.alertes)
+            self.assertIn("submission/Hindsight_Alpha_Writeup.docx", dits)
+            message = dits["submission/Hindsight_Alpha_Writeup.docx"]
+            self.assertIn("ABSENT", message)
+            self.assertIn("chiffres", message,
+                          "l'alerte ne dit pas ce qui cesse d'être vérifié : %s"
+                          % message)
+        finally:
+            shutil.rmtree(vide, ignore_errors=True)
+            garde_fou.RACINE = vraie
+            garde_fou.alertes.clear()
+
+    def test_un_depot_intact_ne_declenche_rien(self):
+        """Pendant obligatoire, et le plus important des quatre : ce contrôle
+        tourne à chaque commit. Un seul faux positif permanent et il devient
+        du bruit que l'on apprend à sauter."""
+        import garde_fou
+        garde_fou.alertes.clear()
+        try:
+            garde_fou.controle_entrees_attendues_presentes()
+            self.assertEqual(garde_fou.alertes, [],
+                             "faux positif sur le dépôt intact : %s"
+                             % garde_fou.alertes)
+        finally:
+            garde_fou.alertes.clear()
+
 class TestPlistsLivres(unittest.TestCase):
     """Ajouté le 27/08. Trouvé en essayant simplement de lire les trois plists
     avec plistlib : deux passent, le troisième lève « not well-formed
