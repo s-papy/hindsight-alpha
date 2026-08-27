@@ -34,7 +34,7 @@
 
 **À dire :**
 
-> "Le code ne se contente pas de décider quoi trader — il limite combien. 1% de l'équité par trade, 3% au total sur toutes les positions ouvertes en même temps, 1,5% par secteur, jamais deux positions sur le même sous-jacent, jamais plus de 4 positions à la fois, et un verrou automatique si le compte perd 3% sur la semaine. [si démo HALT] Et si je dois mettre l'agent en pause en pleine semaine — un incident, un doute — je crée juste un fichier nommé HALT, comme ça [le créer]. Relance : [relancer l'agent] — il refuse toute nouvelle position, mais continue de gérer celles déjà ouvertes. Pas besoin de toucher au code ni aux identifiants."
+> "Le code ne se contente pas de décider quoi trader — il limite combien. 1% de l'équité par trade, 3% au total sur toutes les positions ouvertes en même temps, 1,5% par secteur, jamais deux positions sur le même sous-jacent, jamais plus de 4 positions à la fois, et un verrou automatique si le compte perd 3% depuis son équité de départ — mesuré depuis cette référence, sans remise à zéro chaque semaine. [si démo HALT] Et si je dois mettre l'agent en pause en pleine semaine — un incident, un doute — je crée juste un fichier nommé HALT, comme ça [le créer]. Relance : [relancer l'agent] — il refuse toute nouvelle position, mais continue de gérer celles déjà ouvertes. Pas besoin de toucher au code ni aux identifiants."
 
 ## 2:15–2:45 — Résultat honnête du backtest
 

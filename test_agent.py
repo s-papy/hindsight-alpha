@@ -336,21 +336,38 @@ class TestAgentsPlanifies(unittest.TestCase):
         self.assertTrue(fichiers, "aucun plist trouvé dans launchagents/")
         return fichiers
 
-    def test_aucun_agent_ne_pousse_automatiquement(self):
-        fautifs = []
-        for f in self._plists():
+    def test_la_publication_automatique_decidee_est_toujours_en_place(self):
+        """CE TEST DISAIT L'INVERSE le matin du 27/08 : il exigeait qu'AUCUN
+        agent ne passe --git-push, au nom de la docstring de
+        publish_dashboard.py.
+
+        Il encodait ma décision, pas celle de l'auteur. Le README documente EN
+        GRAS l'automatisation comme « a deliberate change to a rule this project
+        used to hold » — la page est l'URL de soumission, une règle qui la
+        laisse périmée protégeait la mauvaise chose — et cette docstring est
+        précisément celle que ce paragraphe déclare périmée. Spap a confirmé :
+        remettre.
+
+        L'invariant correct n'est pas « aucun push automatique », c'est « le
+        plist et le README disent la même chose ». controle_readme_decrit_les_agents()
+        le vérifie en général ; ce test épingle le cas décidé, pour que le
+        retirer à nouveau fasse tomber quelque chose au lieu de passer."""
+        publication = [f for f in self._plists() if "publish-dashboard" in f.name]
+        if not publication:
+            self.skipTest("pas de plist de publication")
+        actives = []
+        for f in publication:
             for ligne in f.read_text(encoding="utf-8").splitlines():
                 nu = ligne.strip()
                 if nu.startswith("<!--") or nu.startswith("--"):
-                    continue          # une mention en commentaire est la trace
-                                      # du retrait, pas un argument actif
-                if "<string>--git-push</string>" == nu:
-                    fautifs.append(f.name)
-        self.assertEqual(fautifs, [],
-                         "un agent planifié passe --git-push : la machine "
-                         "publierait sur le dépôt public sans décision "
-                         "humaine, contre la règle écrite dans "
-                         "publish_dashboard.py")
+                    continue      # une mention en commentaire n'est pas active
+                if nu == "<string>--git-push</string>":
+                    actives.append(f.name)
+        self.assertTrue(actives,
+                        "--git-push a été retiré du plist de publication. Le "
+                        "README documente cette automatisation comme une "
+                        "décision délibérée : si elle est révoquée, c'est le "
+                        "README qu'il faut amender d'abord.")
 
     def test_la_regle_est_toujours_ecrite_dans_le_module(self):
         """Si quelqu'un retire cette phrase du docstring, le test ci-dessus
