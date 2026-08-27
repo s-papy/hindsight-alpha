@@ -888,6 +888,91 @@ class TestPositionNonReconnueALaSortie(BaseExit):
         self.assertTrue(actions)
         self.assertEqual(actions[0].kind, risk_gates.ExitKind.WOULD_CLOSE)
 
+
+class TestIdentiteDeCompteInconnue(BaseExit):
+    """Ajouté le 27/08, la veille du kickoff — donc sur le code qui ne
+    s'exécutera qu'UNE fois, sans personne devant, à la bascule de compte.
+
+    `bascule_de_compte = state.get("account_id") not in (None, account_id)`.
+    Quand account_id vaut None — une réponse de compte sans champ « id » —
+    l'expression devient `état_id not in (None,)`, donc VRAI. Un identifiant
+    ILLISIBLE était traité exactement comme une vraie bascule.
+
+    Reproduit, sur un état portant un verrou de perte ACTIF :
+
+        même compte              -> verrou=True   pertes=2  sorties=1
+        vraie bascule            -> verrou=False  pertes=0  sorties=0
+        id illisible (None)      -> verrou=False  pertes=0  sorties=0
+
+    Le verrou hebdomadaire effacé, le disjoncteur remis à zéro, la mémoire des
+    sorties vidée, la référence d'équité redéfinie — sur une donnée qu'on n'a
+    pas su lire. C'est la famille que ce fichier documente déjà mot pour mot :
+    « silently cleared an active weekly loss lock ».
+
+    Atteignabilité non démontrée en production — alpaca_cli.get_account() rend
+    aujourd'hui un « id ». Mais ce dépôt documente DEUX surprises de nommage de
+    ce CLI en « Alpha Preview », et « je n'ai pas su lire » n'autorise jamais à
+    effacer une protection."""
+
+    ETAT = {"account_id": "compte-A", "starting_equity": 100000.0,
+            "locked": True, "lock_reason": "perte hebdomadaire de 3% atteinte",
+            "consecutive_losses": 2, "exits_counted": {"SPY260831P00764000": True}}
+
+    def _poser(self, account_id, etat=None):
+        import contextlib, io
+        etat = dict(etat if etat is not None else self.ETAT)
+        with contextlib.redirect_stdout(io.StringIO()) as sortie:
+            apres = risk_gates._record_starting_equity(100000.0, etat, account_id)
+        return apres, sortie.getvalue()
+
+    def test_un_identifiant_illisible_n_efface_aucune_protection(self):
+        """Les trois formes d'illisible, pas seulement None.
+
+        Ajouté après qu'une mutation soit restée verte : remplacer
+        `account_id is None or not str(account_id).strip()` par le seul
+        `is None` ne cassait aucun test, parce que mes témoins n'utilisaient
+        que None. Une réponse portant `"id": ""` ou `"id": "  "` est tout
+        aussi illisible, et effaçait tout de la même façon."""
+        for illisible in (None, "", "   "):
+            with self.subTest(id=repr(illisible)):
+                apres, _ = self._poser(illisible)
+                self.assertTrue(
+                    apres.get("locked"),
+                    "identifiant %r : le verrou a été effacé" % (illisible,))
+                self.assertEqual(apres.get("consecutive_losses"), 2)
+                self.assertEqual(apres.get("account_id"), "compte-A")
+
+    def test_l_identifiant_illisible_est_annonce(self):
+        _, sortie = self._poser(None)
+        self.assertIn("WARNING", sortie.upper(),
+                      "ne pas savoir sur quel compte on tourne passe en silence")
+
+    def test_une_vraie_bascule_efface_toujours_tout(self):
+        """Témoin n°1, et il compte : cette remise à zéro existe pour que
+        l'oubli d'effacer state.json à la main ne fasse pas mesurer un
+        drawdown contre l'équité d'un AUTRE compte."""
+        apres, _ = self._poser("compte-B")
+        self.assertFalse(apres.get("locked"))
+        self.assertEqual(apres.get("consecutive_losses"), 0)
+        self.assertEqual(apres.get("exits_counted"), {})
+        self.assertEqual(apres.get("account_id"), "compte-B")
+
+    def test_le_meme_compte_ne_touche_a_rien(self):
+        """Témoin n°2."""
+        apres, _ = self._poser("compte-A")
+        self.assertTrue(apres.get("locked"))
+        self.assertEqual(apres.get("consecutive_losses"), 2)
+
+    def test_un_tout_premier_passage_reste_possible(self):
+        """Témoin n°3, le plus important pour ne pas fabriquer une panne : sur
+        un état VIERGE, il n'y a aucune protection à préserver. Refuser là
+        empêcherait l'agent de poser sa référence d'équité, donc de démarrer,
+        y compris quand tout va bien."""
+        apres, _ = self._poser(None, etat={})
+        self.assertEqual(apres.get("starting_equity"), 100000.0,
+                         "un premier passage ne peut plus poser sa référence "
+                         "d'équité : l'agent ne démarrerait jamais")
+
 class TestSymboleOCCNonReconnu(HarnaisPlafonds, BaseExit):
     """Ajouté le 27/08. La règle « jamais deux positions sur le même
     sous-jacent » — énoncée dans le deck, le write-up et le script vidéo —

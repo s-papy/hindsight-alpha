@@ -396,6 +396,40 @@ def _record_starting_equity(equity: float, state: dict, account_id: Optional[str
     real losses -- the identical failure shape this function already
     exists to prevent for starting_equity/locked, just not yet extended to
     fields added after it was written."""
+    # AJOUTE le 27/08/2026, la veille du kickoff -- donc sur le code qui ne
+    # s'executera qu'UNE fois, sans personne devant, a la bascule de compte.
+    #
+    # `bascule_de_compte = state.get("account_id") not in (None, account_id)`.
+    # Quand account_id vaut None -- une reponse de compte sans champ « id » --
+    # l'expression devient `etat_id not in (None,)`, donc VRAI. Un identifiant
+    # ILLISIBLE etait donc traite exactement comme une vraie bascule.
+    #
+    # Reproduit, sur un etat portant un verrou de perte ACTIF :
+    #     meme compte         -> verrou=True   pertes=2  sorties=1
+    #     vraie bascule       -> verrou=False  pertes=0  sorties=0
+    #     id illisible (None) -> verrou=False  pertes=0  sorties=0
+    #
+    # Le verrou hebdomadaire efface, le disjoncteur remis a zero, la memoire
+    # des sorties videe -- sur une donnee qu'on n'a pas su lire. C'est la
+    # famille que le docstring ci-dessus decrit deja mot pour mot.
+    #
+    # LA GARDE EST ETROITE, volontairement : elle ne protege que ce qui EXISTE
+    # deja. Sur un etat vierge il n'y a aucune protection a preserver, et
+    # refuser la fabriquerait une panne -- l'agent ne pourrait jamais poser sa
+    # reference d'equite, donc jamais demarrer, y compris quand tout va bien.
+    identite_inconnue = account_id is None or not str(account_id).strip()
+    if identite_inconnue and state.get("account_id") is not None:
+        print(
+            "  WARNING: the account response carried no usable id, so we "
+            "cannot tell whether this is still account %r or a different one. "
+            "NOT re-baselining and NOT clearing anything -- an unreadable id "
+            "is not an account switch. The weekly lock, the consecutive-loss "
+            "counter and the counted-exits memory are left exactly as they "
+            "were." % state.get("account_id"),
+            flush=True,
+        )
+        return state
+
     if state.get("account_id") != account_id or "starting_equity" not in state:
         # Cette branche couvre DEUX situations differentes, et elles ne meritent
         # pas le meme traitement :
