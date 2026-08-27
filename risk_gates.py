@@ -493,12 +493,38 @@ def _extract_float(position: dict, key: str) -> Optional[float]:
     """Same string-vs-number defensiveness as _extract_unrealized_plpc below,
     for any other numeric position field -- cost_basis in particular, needed
     to sum up total premium committed across multiple open positions."""
+    # AJOUTE le 27/08/2026 : le filtre `math.isfinite`, comme dans
+    # _extract_unrealized_plpc corrige quelques minutes plus tot. Ici la
+    # consequence est PIRE, parce que ce champ alimente les PLAFONDS.
+    #
+    # Mesure avant correctif, sur une position au cout « nan » :
+    #
+    #     lu = nan          positions_au_cout_illisible : ne la signale PAS
+    #     _total_committed  = nan
+    #     check_gates       -> AUTORISE un nouveau trade
+    #
+    # Le mecanisme : remaining_total_budget = 3000 - nan = nan, et
+    # `nan <= 0` est FAUX, donc le plafond d'exposition totale est franchi
+    # sans bruit. Un seul cout non fini parmi les positions ouvertes et le
+    # plafond de 3% cesse simplement de s'appliquer -- pour toutes les
+    # positions suivantes de la journee.
+    #
+    # C'est la panne la plus grave que ce fichier puisse produire : non pas
+    # refuser a tort, mais AUTORISER sans limite. Un cout non fini rejoint
+    # donc les couts illisibles, que positions_au_cout_illisible() fait
+    # refuser explicitement.
+    #
+    # `inf` refusait deja, par accident : 3000 - inf est negatif. On ne
+    # s'appuie pas sur cet accident.
+    def _fini(x):
+        return x if math.isfinite(x) else None
+
     value = position.get(key)
     if isinstance(value, (int, float)) and not isinstance(value, bool):
-        return float(value)
+        return _fini(float(value))
     if isinstance(value, str) and value.strip():
         try:
-            return float(value)
+            return _fini(float(value))
         except ValueError:
             return None
     return None

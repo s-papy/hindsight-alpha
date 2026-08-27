@@ -1915,6 +1915,72 @@ _CLOSE_ORIGINALE = alpaca_cli.close_position
 
 
 
+
+class TestCoutNonFini(HarnaisPlafonds, BaseExit):
+    """La panne la plus grave que risk_gates puisse produire : non pas
+    refuser à tort, mais AUTORISER sans limite.
+
+    Trouvé le 27/08 au soir en balayant la famille NaN après l'avoir corrigée
+    sur le P&L. Ici la conséquence est pire, parce que ce champ alimente les
+    PLAFONDS. Mesuré sur une position ouverte au coût « nan » :
+
+        _extract_float                     -> nan
+        positions_au_cout_illisible        -> ne la signale PAS
+        _total_committed                   -> nan
+        check_gates                        -> AUTORISE un nouveau trade
+
+    Le mécanisme : remaining_total_budget = 3000 − nan = nan, et `nan <= 0`
+    est FAUX. Un seul coût non fini parmi les positions ouvertes, et le
+    plafond de 3% cesse simplement de s'appliquer — pour toutes les positions
+    suivantes de la journée.
+
+    `inf` refusait déjà, mais par ACCIDENT : 3000 − inf est négatif. On ne
+    s'appuie pas sur un accident."""
+
+    def _avec_cout(self, cout):
+        ouverte = {"symbol": "GLD260831C00300000", "asset_class": "us_option",
+                   "cost_basis": cout, "unrealized_plpc": "0.0", "qty": "1"}
+        return ouverte, self._decide([ouverte], sous_jacent="SPY",
+                                     option="SPY260905P00760000")
+
+    def test_un_cout_non_fini_ferme_la_porte(self):
+        for cout, cas in (("nan", "chaîne « nan »"),
+                          ("inf", "chaîne « inf »"),
+                          ("-inf", "chaîne « -inf »"),
+                          (float("nan"), "flottant NaN"),
+                          (float("inf"), "flottant Infinity")):
+            with self.subTest(cas=cas):
+                ouverte, d = self._avec_cout(cout)
+                self.assertTrue(
+                    risk_gates.positions_au_cout_illisible([ouverte]),
+                    "%s : la position n'est pas comptée comme illisible" % cas)
+                self.assertFalse(
+                    self._autorise(d),
+                    "%s : un nouveau trade est AUTORISÉ alors que "
+                    "l'exposition totale est incalculable — le plafond de 3%% "
+                    "ne s'applique plus" % cas)
+                self.assertIn("cost_basis", d.reason or "",
+                              "%s : le refus ne dit pas d'où vient le "
+                              "problème — %s" % (cas, d.reason))
+
+    def test_un_cout_normal_laisse_passer(self):
+        """Témoin : un garde qui refuse tout ne protège rien."""
+        ouverte, d = self._avec_cout("840.00")
+        self.assertEqual(risk_gates.positions_au_cout_illisible([ouverte]), [])
+        self.assertTrue(self._autorise(d), d.reason)
+
+    def test_l_exposition_totale_reste_un_nombre(self):
+        """La cause directe, épinglée à sa source. Une somme qui vaut NaN rend
+        FAUSSE toute comparaison de plafond — c'est ça, et pas le refus, qui
+        est le vrai danger."""
+        import math
+        ouverte = {"symbol": "X260831C00100000", "asset_class": "us_option",
+                   "cost_basis": "nan", "qty": "1"}
+        total = risk_gates._total_committed([ouverte])
+        self.assertTrue(math.isfinite(total),
+                        "l'exposition totale vaut %s : toute comparaison de "
+                        "plafond devient fausse" % total)
+
 class TestPnLNonFini(BaseExit):
     """Ajouté le 27/08 au soir. `float("nan")` RÉUSSIT sur une chaîne, et le
     NaN qui en sort traversait tout le reste comme s'il était une mesure.
