@@ -267,7 +267,17 @@ traded live) passes `hindsight_guard` clean on **4 of 4** symbols, while the
 live strategy (`vol_strategy.py`) only passes on **3 of 4** — XLK leaks under
 HV-rank. The strategy kept for real trading is the one that fits the
 "options-native" brief better, not the one with the cleanest leak-check
-record; `compare_strategies.py` and `STRATEGY_COMPARISON.md` exist
+record.
+
+**And the difference is not statistically distinguishable.** Added 27/08 after
+`hindsight_benchmark.py` made it measurable: on the observed table (momentum
+4 pass / 0 fail, HV-rank 3 / 1), Fisher's exact test gives **p = 1.000**. If
+the two strategies were *identical*, a one-symbol gap would still show up 48%
+to 70% of the time at n=4, depending on the per-symbol pass rate. So "momentum
+is cleaner on the leak check" is a coin flip reported as a finding — the fact
+is worth disclosing, the comparison is not worth acting on. This project exists
+to catch exactly that error, and it had committed it in its own README;
+`compare_strategies.py` and `STRATEGY_COMPARISON.md` exist
 specifically so that trade-off is measured and shown, not silently made and
 hidden. No threshold was adjusted after seeing this.
 

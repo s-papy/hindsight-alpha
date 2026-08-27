@@ -70,6 +70,23 @@ Dans le jeu D il n'y a **aucune fuite** — et le garde-fou imprime pourtant `LE
 
 C'est une limite de vocabulaire, pas de code, et elle est assumée ici plutôt que corrigée en silence.
 
+## Le banc retourné contre le projet lui-même
+
+Le README affirme, sous le titre *« Honest fact worth surfacing »*, que `momentum_strategy.py` passe le garde-fou sur **4 symboles sur 4** tandis que `vol_strategy.py` n'en passe que **3 sur 4**. L'intention est honnête — c'est un résultat qui dessert la stratégie retenue. Mais personne n'avait demandé son intervalle à cette comparaison.
+
+- Test exact de Fisher sur la table observée (4/0 contre 3/1) : **p = 1.000**.
+- Si les deux stratégies étaient **identiques**, un écart d'au moins un symbole apparaîtrait quand même :
+
+| taux de succès réel par symbole | écart ≥ 1 symbole observé |
+|---|---|
+| 0.70 | 69.7% |
+| 0.80 | 64.0% |
+| 0.85 | 58.2% |
+| 0.90 | 48.2% |
+| 0.95 | 30.7% |
+
+**« Momentum est plus propre sur le test de fuite » est donc un tirage à pile ou face présenté comme un constat.** Le fait mérite d'être publié ; la comparaison ne mérite pas qu'on agisse dessus. Lire un signal dans un écart qui tient dans le bruit est exactement l'erreur que ce projet existe pour attraper — et il l'avait commise dans son propre README. C'est corrigé là-bas, avec ces chiffres.
+
 ## Ce que ce banc ne démontre pas
 
 - La vérité-terrain est construite **au niveau des scores**, pas des prix. C'est le contrat réel de `check_selection_leakage`, et c'est le seul moyen de contrôler exactement la taille d'effet — mais cela ne démontre pas que le pipeline de prix produit ces situations-là.

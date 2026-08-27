@@ -186,6 +186,45 @@ def jeu_a_balaye() -> List[Tuple[float, Counter]]:
     return sortie
 
 
+def comparaison_a_quatre_symboles() -> Dict[str, float]:
+    """« momentum passe 4/4, HV-rank 3/4 » : cet ecart veut-il dire quelque
+    chose ?
+
+    Cette phrase est dans le README du projet, sous le titre « Honest fact
+    worth surfacing ». L'intention est honnete -- on publie un resultat qui
+    dessert la strategie retenue. Mais c'est une comparaison de deux
+    proportions a n=4, et personne ne lui avait demande son intervalle.
+
+    Le banc rend la question calculable, donc il faut la poser : lire un signal
+    dans un ecart qui tient dans le bruit est EXACTEMENT l'erreur que ce projet
+    existe pour attraper. La commettre dans son propre README serait le pire
+    endroit possible pour la laisser.
+    """
+    from math import comb
+
+    # Fisher exact bilateral sur la table observee.
+    a, b, c, d = 4, 0, 3, 1
+
+    def hyper(x: int) -> float:
+        return comb(a + b, x) * comb(c + d, a + c - x) / comb(a + b + c + d, a + c)
+
+    obs = hyper(a)
+    lo, hi = max(0, a + c - (c + d)), min(a + b, a + c)
+    fisher = sum(hyper(x) for x in range(lo, hi + 1)
+                 if hyper(x) <= obs * (1 + 1e-9))
+
+    # Si les deux strategies etaient IDENTIQUES, a quelle frequence verrait-on
+    # un ecart d'au moins un symbole sur quatre ?
+    ecarts = {}
+    for pp in (0.70, 0.80, 0.85, 0.90, 0.95):
+        def bino(k: int, pp: float = pp) -> float:
+            return comb(4, k) * pp ** k * (1 - pp) ** (4 - k)
+        ecarts[pp] = sum(bino(i) * bino(j)
+                         for i in range(5) for j in range(5) if abs(i - j) >= 1)
+
+    return {"fisher": fisher, "ecarts": ecarts}
+
+
 def jeu_d() -> Counter:
     """D -- LE jeu qui delimite la promesse. Aucun candidat n'a le moindre edge
     (toutes les moyennes vraies sont nulles) et il n'y a AUCUNE fuite : le
@@ -235,6 +274,7 @@ def construire_rapport() -> str:
     c = jeu_c()
     d = jeu_d()
     ab = jeu_a_balaye()
+    cmp4 = comparaison_a_quatre_symboles()
     d2 = jeu_d_sans_seuil()
 
     faux_positifs = 100.0 - _pct(a, "agrees")
@@ -355,6 +395,33 @@ def construire_rapport() -> str:
     L.append("")
     L.append("C'est une limite de vocabulaire, pas de code, et elle est "
              "assumée ici plutôt que corrigée en silence.")
+    L.append("")
+    L.append("## Le banc retourné contre le projet lui-même")
+    L.append("")
+    L.append("Le README affirme, sous le titre *« Honest fact worth "
+             "surfacing »*, que `momentum_strategy.py` passe le garde-fou sur "
+             "**4 symboles sur 4** tandis que `vol_strategy.py` n'en passe que "
+             "**3 sur 4**. L'intention est honnête — c'est un résultat qui "
+             "dessert la stratégie retenue. Mais personne n'avait demandé son "
+             "intervalle à cette comparaison.")
+    L.append("")
+    L.append("- Test exact de Fisher sur la table observée (4/0 contre 3/1) : "
+             "**p = %.3f**." % cmp4["fisher"])
+    L.append("- Si les deux stratégies étaient **identiques**, un écart d'au "
+             "moins un symbole apparaîtrait quand même :")
+    L.append("")
+    L.append("| taux de succès réel par symbole | écart ≥ 1 symbole observé |")
+    L.append("|---|---|")
+    for pp, v in sorted(cmp4["ecarts"].items()):
+        L.append("| %.2f | %.1f%% |" % (pp, 100.0 * v))
+    L.append("")
+    L.append("**« Momentum est plus propre sur le test de fuite » est donc un "
+             "tirage à pile ou face présenté comme un constat.** Le fait mérite "
+             "d'être publié ; la comparaison ne mérite pas qu'on agisse dessus. "
+             "Lire un signal dans un écart qui tient dans le bruit est "
+             "exactement l'erreur que ce projet existe pour attraper — et il "
+             "l'avait commise dans son propre README. C'est corrigé là-bas, "
+             "avec ces chiffres.")
     L.append("")
     L.append("## Ce que ce banc ne démontre pas")
     L.append("")
