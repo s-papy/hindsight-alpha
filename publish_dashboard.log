@@ -1,0 +1,18 @@
+==========================================================================
+GARDE-FOU — hindsight-alpha — 27/08/2026 19:00
+==========================================================================
+🟡 À REGARDER : 2
+   submission/Hindsight_Alpha_Deck.pptx          cite un nombre d'équipes inscrites — vérifier à la main sur lablab.ai avant la soumission finale, ce script ne peut pas savoir si le chiffre a encore bougé.
+   pmset                                         AUCUN REVEIL RECURRENT programme sur cette machine. Si le Mac dort a 15:15, launchd ne declenchera le moniteur de sorties que pendant de brefs reveils de maintenance -- l'incident des 11 echecs consecutifs raconte dans le README. Le plist market-hours-awake garde la machine eveillee mais NE PEUT PAS la reveiller. Corrige avec :  sudo pmset repeat wakeorpoweron MTWRF 15:15:00
+
+--------------------------------------------------------------------------
+VERDICT : 🟡 À VÉRIFIER — rien de bloquant, mais relis les points ci-dessus.
+
+  ⚠️  Même au vert : ce script attrape 14 formes d'erreur précises,
+     pas le fond. Un dossier qu'il approuve peut encore être faux.
+[main e35f17a] dashboard: snapshot 2026-08-27T17:00:06.322490+00:00
+ 1 file changed, 37 insertions(+), 69 deletions(-)
+To https://github.com/s-papy/hindsight-alpha.git
+   0d95681..e35f17a  main -> main
+Wrote /Users/s-pap/hindsight-alpha/docs/data.json
+Published to GitHub Pages (after the next Pages build completes).

@@ -2450,6 +2450,131 @@ class TestVerdictPublieDansLesRapports(unittest.TestCase):
         finally:
             garde_fou.alertes.clear()
 
+
+class TestMotifsDIdentifiants(unittest.TestCase):
+    """Ajouté le 27/08 sur décision de l'opérateur. Le contrôle par VALEUR
+    EXACTE est inerte partout où les clés ne sont pas présentes — donc en CI
+    et sur tout clone. Reproduit : une fausse clé au format Alpaca passait un
+    commit NORMAL, hooks actifs.
+
+    Ce dépôt avait délibérément refusé les motifs, et pour une bonne raison :
+    « un contrôle qui crie sur des valeurs bidon apprend à être ignoré ». Ces
+    tests existent pour que ce refus reste honoré — la moitié d'entre eux ne
+    vérifie pas la détection, mais l'ABSENCE de détection."""
+
+    def _bloque_sur(self, contenu, nom="fichier.py"):
+        import garde_fou, subprocess
+        garde_fou.alertes.clear()
+        garde_fou.blocages.clear()
+        vraie = garde_fou.RACINE
+        depot = tempfile.mkdtemp(prefix="hindsight-motif-")
+        try:
+            subprocess.run(["git", "init", "-q", depot], check=True)
+            Path(depot, nom).write_text(contenu, encoding="utf-8")
+            subprocess.run(["git", "-C", depot, "add", "-A"], check=True)
+            garde_fou.RACINE = depot
+            garde_fou.controle_motifs_d_identifiants()
+            return list(garde_fou.blocages)
+        finally:
+            garde_fou.RACINE = vraie
+            shutil.rmtree(depot, ignore_errors=True)
+            garde_fou.alertes.clear()
+            garde_fou.blocages.clear()
+
+    @staticmethod
+    def _cle(prefixe, corps="7Q2XZ9WLMN4PC1B3D5"):
+        """Assemblée À L'EXÉCUTION, jamais écrite en clair.
+
+        Première version : les clés factices étaient des littéraux. Ce fichier
+        est suivi par git, donc le contrôle les a trouvées ICI et a rendu le
+        dépôt incommittable — attrapé par test_le_depot_reel_ne_declenche_rien
+        avant tout commit. Un test qui contient ce qu'il cherche se trouve
+        lui-même ; ce dépôt s'était déjà fait avoir de la même façon avec un
+        scan de chaînes, remplacé depuis par un balayage AST."""
+        return prefixe + "K" + corps
+
+    def test_une_cle_alpaca_collee_dans_un_fichier_suivi_bloque(self):
+        for nom, contenu in (
+                ("clé paper", 'ALPACA_API_KEY = "%s"' % self._cle("P")),
+                ("clé live", 'KEY = "%s"' % self._cle("A")),
+                ("clé nue en markdown",
+                 "ma cle est %s voila" % self._cle("P", "ABCDEFGH12345678IJ"))):
+            with self.subTest(cas=nom):
+                self.assertTrue(self._bloque_sur(contenu),
+                                "%s n'est pas détectée" % nom)
+
+    def test_un_secret_affecte_bloque_dans_les_formes_courantes(self):
+        V = "abcdefghij0123456789ABCDEFGHIJ0123456789"
+        for nom, contenu in (("python", 'ALPACA_SECRET_KEY=%s' % V),
+                             ("json", '"api_key": "%s"' % V),
+                             ("yaml", "token: %s" % V)):
+            with self.subTest(cas=nom):
+                self.assertTrue(self._bloque_sur(contenu),
+                                "un secret en %s n'est pas détecté" % nom)
+
+    def test_ce_qui_ressemble_a_une_cle_sans_en_etre_une_ne_bloque_pas(self):
+        """La moitié qui compte le plus. Ce dépôt a refusé les motifs pendant
+        trois jours pour éviter exactement ça, et il avait raison : un
+        contrôle BLOQUANT qui se déclenche à tort rend le dépôt incommittable
+        et s'apprend à contourner avec --no-verify — ce qui désarme aussi
+        tous les autres."""
+        for nom, contenu in (
+                ("SHA-1 de commit", "commit e49a9cb0f1a2b3c4d5e6f7089a1b2c3d4e5f6071"),
+                ("placeholder d'exemple", "ALPACA_API_KEY=your_key_here"),
+                ("valeur factice des tests", 'CLE = "CLEFACTICEPOURLETEST1234567890"'),
+                ("prose contenant « token »",
+                 "# le token est stocke dans le fichier d environnement"),
+                ("mot en majuscules", "PARTICULIEREMENT IMPORTANT A RETENIR"),
+                # Les deux suivants ont été ajoutés après que des mutations
+                # soient restées vertes : sans eux, abaisser le seuil du
+                # secret ou rendre le motif insensible à la casse ne cassait
+                # AUCUN test. Un contrôle bloquant dont on peut élargir les
+                # motifs sans rien casser finira élargi, puis contourné.
+                ("placeholder nommé « secret », valeur courte",
+                 "ALPACA_SECRET_KEY=changeme12345678"),
+                ("jeton de 20 car. en MINUSCULES (les clés Alpaca sont "
+                 "majuscules)", "empreinte ak9f3d2c1b8e7a6d5c4b dans un log")):
+            with self.subTest(cas=nom):
+                self.assertEqual(self._bloque_sur(contenu), [],
+                                 "faux positif sur %s" % nom)
+
+    def test_le_depot_reel_ne_declenche_rien(self):
+        """Le témoin le plus important : ce contrôle BLOQUE, et il tourne à
+        chaque commit. Un seul faux positif ici et le dépôt devient
+        incommittable."""
+        import garde_fou
+        garde_fou.blocages.clear()
+        garde_fou.alertes.clear()
+        try:
+            garde_fou.controle_motifs_d_identifiants()
+            self.assertEqual(garde_fou.blocages, [],
+                             "faux positif sur le dépôt réel : %s"
+                             % garde_fou.blocages)
+        finally:
+            garde_fou.blocages.clear()
+            garde_fou.alertes.clear()
+
+    def test_le_controle_dit_quand_il_n_a_rien_pu_lister(self):
+        """Même exigence que partout ailleurs aujourd'hui : ne pas pouvoir
+        vérifier doit se dire, jamais se taire."""
+        import garde_fou
+        garde_fou.alertes.clear()
+        garde_fou.blocages.clear()
+        vraie = garde_fou.RACINE
+        try:
+            # Un dossier qui n'est pas un dépôt git : `ls-files` échoue.
+            garde_fou.RACINE = tempfile.mkdtemp(prefix="hindsight-nogit-")
+            garde_fou.controle_motifs_d_identifiants()
+            dits = " ".join(m for _, m in garde_fou.alertes)
+            self.assertTrue(garde_fou.alertes,
+                            "le contrôle ne peut rien lister et ne le dit pas")
+            self.assertIn("RIEN", dits.upper())
+        finally:
+            shutil.rmtree(garde_fou.RACINE, ignore_errors=True)
+            garde_fou.RACINE = vraie
+            garde_fou.alertes.clear()
+            garde_fou.blocages.clear()
+
 class TestEntreesAttendues(unittest.TestCase):
     """Ajouté le 27/08, après un balayage systématique : j'ai retiré une à une
     les douze entrées de garde_fou.py dans un clone jetable. UNE SEULE absence

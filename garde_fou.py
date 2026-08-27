@@ -1759,8 +1759,10 @@ def controle_aucun_identifiant_dans_les_fichiers_publies() -> None:
         alerte("identifiants",
                "AUCUNE valeur d'identifiant connue sur cette machine, donc ce "
                "controle n'a RIEN verifie. Il cherche par valeur exacte (aucun "
-               "faux positif possible) et n'a rien a comparer ici : une cle "
-               "posee dans un fichier suivi passerait sans un mot. C'est l'etat "
+               "faux positif possible) et n'a rien a comparer ici. Le controle "
+               "par MOTIF, lui, reste actif et couvre les formes Alpaca "
+               "reconnaissables ; ce qui reste decouvert, c'est une valeur qui "
+               "ne ressemble pas a une cle. C'est l'etat "
                "normal en CI et sur un clone ; il est effectif la ou il compte, "
                "sur la machine qui detient les cles. Ne pas lire ce vert comme "
                "« aucun identifiant publie ».")
@@ -2085,6 +2087,85 @@ ENTREES_ATTENDUES = {
 }
 
 
+MOTIF_CLE_ALPACA = re.compile(r"\b[AP]K[A-Z0-9]{18}\b")
+MOTIF_SECRET_AFFECTE = re.compile(
+    r"(?i)\b[A-Za-z_]*(?:secret|token|api[_-]?key)[A-Za-z_]*[\"']?\s*[=:]\s*"
+    r"[\"']?([A-Za-z0-9/+]{35,})")
+
+
+def controle_motifs_d_identifiants() -> None:
+    """Un identifiant Alpaca est-il present dans un fichier SUIVI, reconnu a
+    sa FORME et non a sa valeur ?
+
+    AJOUTE le 27/08/2026 sur decision de l'operateur, pour combler le trou
+    mesure le meme jour : controle_aucun_identifiant_dans_les_fichiers_publies
+    cherche par VALEUR EXACTE -- aucun faux positif possible, mais il faut
+    avoir les valeurs sous la main. Il est donc INERTE en CI et sur tout clone.
+    Reproduit dans un depot jetable : une fausse cle au format Alpaca y passait
+    un commit NORMAL, hooks actifs.
+
+    Les deux controles sont complementaires, aucun ne remplace l'autre :
+      - par VALEUR : attrape n'importe quelle chaine, meme sans forme
+        reconnaissable, mais seulement sur la machine qui detient les cles ;
+      - par MOTIF (ici) : attrape les formes Alpaca partout, y compris en CI
+        et apres un `git commit --no-verify`, mais rate ce qui ne ressemble
+        pas a une cle.
+
+    LE RISQUE ASSUME EST LE FAUX POSITIF, et c'est pourquoi ce depot l'avait
+    refuse jusqu'ici : « un controle qui crie sur des valeurs bidon apprend a
+    etre ignore ». Les motifs ont donc ete mesures DANS LES DEUX SENS avant
+    d'etre poses -- 9 cas temoins, 0 ecart, 0 faux positif sur les 38 fichiers
+    suivis :
+
+        detecte     : cle paper/live collee dans un .py, cle nue en markdown,
+                      secret affecte en .py / json / yaml
+        NON detecte : SHA-1 de commit, placeholder « your_key_here », valeurs
+                      factices des tests, prose contenant le mot « token »
+
+    La cle d'API est reconnue precisement : « PK » (paper) ou « AK » (live)
+    suivis de 18 alphanumeriques MAJUSCULES. Le secret fait 40 caracteres
+    base64, indistinguable d'un hash, donc il n'est cherche QUE dans un
+    contexte d'affectation nommee.
+
+    BLOQUE : une cle poussee sur un depot public est publique pour toujours,
+    et c'est le seul defaut irreversible que ce projet puisse produire."""
+    try:
+        suivis = subprocess.run(["git", "-C", RACINE, "ls-files"],
+                                capture_output=True, text=True, timeout=30)
+    except Exception as e:
+        alerte("identifiants (motifs)",
+               "impossible de lister les fichiers suivis (%s: %s) -- ce "
+               "controle n'a RIEN verifie." % (type(e).__name__, e))
+        return
+    if suivis.returncode != 0:
+        alerte("identifiants (motifs)",
+               "`git ls-files` a echoue (code %d) -- ce controle n'a RIEN "
+               "verifie." % suivis.returncode)
+        return
+    fichiers = [f for f in suivis.stdout.split() if f]
+    if not fichiers:
+        alerte("identifiants (motifs)",
+               "aucun fichier suivi trouve -- ce controle n'a RIEN verifie.")
+        return
+
+    for relatif in fichiers:
+        try:
+            texte = open(os.path.join(RACINE, relatif),
+                         encoding="utf-8", errors="replace").read()
+        except (OSError, IsADirectoryError):
+            continue
+        for nom, motif in (("CLE D'API Alpaca", MOTIF_CLE_ALPACA),
+                           ("SECRET affecte a un nom d'identifiant",
+                            MOTIF_SECRET_AFFECTE)):
+            for m in motif.finditer(texte):
+                bloque(relatif,
+                       "ligne %d : %s reconnu a sa FORME. Ce fichier est SUIVI "
+                       "PAR GIT et part sur le depot PUBLIC. Retirer la valeur, "
+                       "puis REVOQUER cette cle chez Alpaca -- si elle est deja "
+                       "partie, elle est publique pour toujours."
+                       % (texte[:m.start()].count("\n") + 1, nom))
+
+
 def controle_entrees_attendues_presentes() -> None:
     """Un fichier que les autres controles LISENT a-t-il disparu ?
 
@@ -2206,6 +2287,7 @@ def main() -> int:
     # un chiffre derive de la realite, non. len(CONTROLES) est desormais la
     # seule source.
     CONTROLES = (
+        controle_motifs_d_identifiants,
         controle_entrees_attendues_presentes,
         controle_plists_sont_du_xml_valide,
         controle_journal,
