@@ -724,6 +724,13 @@ def find_near_the_money_contract(
     return closest["symbol"]
 
 
+# Statuts d'ordre qui veulent dire « rien ne s'est passe ». Constante PARTAGEE
+# entre la soumission et la cloture -- ecrire cette liste deux fois serait la
+# faire diverger, ce qui s'est produit deux fois dans ce depot le meme jour
+# (reconnaissance des options, verdict binaire des rapports).
+ECHECS_TERMINAUX = {"rejected", "canceled", "cancelled", "expired", "suspended"}
+
+
 def close_position(symbol: str) -> Any:
     """VERIFIED 24/08 against CLI v0.0.13 by actually closing a live paper
     position: the flag is --symbol-or-asset-id, NOT --symbol. The wrong form
@@ -731,7 +738,41 @@ def close_position(symbol: str) -> Any:
     an AlpacaCLIError -- meaning manage_exits() would have raised every time
     a take-profit or stop-loss actually fired. This is the one branch mocks
     could never catch, and it sat in the risk system, not a nice-to-have."""
-    return run(["position", "close", "--symbol-or-asset-id", symbol])
+    resultat = run(["position", "close", "--symbol-or-asset-id", symbol])
+
+    # AJOUTE le 27/08/2026, miroir du controle de statut pose sur la
+    # SOUMISSION quelques minutes plus tot. Ici le resultat etait purement et
+    # simplement JETE, et manage_exits enchaine sur un commentaire qui dit
+    # « the position IS closed at this point » -- une hypothese, pas une
+    # verification.
+    #
+    # Consequence si Alpaca rend un ordre de cloture au statut « rejected »
+    # (permission options revoquee, position deja fermee ailleurs, contrat
+    # suspendu) : la position est comptee comme FERMEE, le compteur de pertes
+    # consecutives s'incremente, le tableau de bord affiche un badge VERT
+    # « position closed » -- et la position reste OUVERTE, au-dela de son
+    # stop-loss, sans surveillance particuliere.
+    #
+    # C'est exactement la panne que tout ce sous-systeme existe pour empecher,
+    # et c'est le cote le plus grave des deux : une entree ratee coute une
+    # occasion, une SORTIE ratee laisse une perte courir.
+    #
+    # run() leve deja sur un code de retour non nul et sur un corps d'erreur ;
+    # le trou est l'appel qui REUSSIT en rendant un ordre au statut d'echec.
+    # En levant ici, manage_exits rattrape et produit un ExitKind.ERROR, donc
+    # le badge rouge « close FAILED - position still open ».
+    if isinstance(resultat, dict):
+        statut = str(resultat.get("status", "")).lower()
+        if statut in ECHECS_TERMINAUX:
+            motif = (resultat.get("reason") or resultat.get("reject_reason")
+                     or resultat.get("message") or "no reason given")
+            raise AlpacaCLIError(
+                "the close order for %s came back with status '%s' (%s). The "
+                "position is very likely STILL OPEN. Reporting this as a "
+                "failed close rather than a completed one, so it is not "
+                "counted as a realised loss and the dashboard does not show a "
+                "position that never closed." % (symbol, statut, motif))
+    return resultat
 
 
 def submit_paper_option_order(option_symbol: str, qty: int = 1) -> str:
@@ -771,8 +812,6 @@ def submit_paper_option_order(option_symbol: str, qty: int = 1) -> str:
     # On ne refuse QUE les statuts terminaux d'echec. Un ordre de marche est
     # rarement « filled » a la milliseconde ou l'API repond : exiger « filled »
     # bloquerait la totalite des trades.
-    ECHECS_TERMINAUX = {"rejected", "canceled", "cancelled", "expired",
-                        "suspended"}
     statut = str(result.get("status", "")).lower()
     if statut in ECHECS_TERMINAUX:
         motif = (result.get("reason") or result.get("reject_reason")

@@ -1909,6 +1909,74 @@ class TestQualiteDesBarres(unittest.TestCase):
 
 
 
+
+# La vraie close_position, capturee AVANT que BaseExit ne la remplace.
+_CLOSE_ORIGINALE = alpaca_cli.close_position
+
+
+class TestStatutDeLaCloture(BaseExit):
+    """Le miroir du contrôle de statut posé sur la SOUMISSION, et le côté le
+    plus grave des deux : une entrée ratée coûte une occasion, une SORTIE
+    ratée laisse une perte courir.
+
+    Le résultat de close_position() était purement et simplement JETÉ, et
+    manage_exits enchaîne sur un commentaire qui affirme « the position IS
+    closed at this point » — une hypothèse, pas une vérification.
+
+    Si Alpaca rend un ordre de clôture au statut « rejected » (permission
+    options révoquée, contrat suspendu, position déjà fermée ailleurs), la
+    position était comptée comme FERMÉE : compteur de pertes consécutives
+    incrémenté, badge VERT « position closed » sur la page publique — et la
+    position toujours OUVERTE, au-delà de son stop-loss."""
+
+    def _fermeture(self, reponse):
+        """Une position bien au-delà de son stop-loss, et un CLI qui répond
+        `reponse` à l'ordre de clôture.
+
+        On stube `run`, pas `close_position` : ma première version remplaçait
+        close_position elle-même, ce qui court-circuitait très exactement le
+        code sous test. Les cinq tests échouaient alors que le correctif était
+        déjà posé — un harnais qui contourne ce qu'il vérifie ment dans les
+        deux sens."""
+        self.positions = [{"symbol": "SPY260831P00764000",
+                           "asset_class": "us_option",
+                           "unrealized_plpc": "-0.60", "cost_basis": "840.00",
+                           "qty": "1"}]
+        alpaca_cli.close_position = _CLOSE_ORIGINALE
+        alpaca_cli.run = lambda args: reponse
+        return risk_gates.manage_exits(dry_run=False)
+
+    def test_une_cloture_rejetee_n_est_pas_une_fermeture(self):
+        for statut in ("rejected", "canceled", "expired", "suspended"):
+            with self.subTest(statut=statut):
+                actions = self._fermeture({"id": "o-1", "status": statut})
+                self.assertTrue(actions, "aucune action produite")
+                self.assertEqual(
+                    actions[0].kind, risk_gates.ExitKind.ERROR,
+                    "clôture au statut « %s » comptée comme %s : badge vert "
+                    "pour une position toujours ouverte"
+                    % (statut, actions[0].kind))
+
+    def test_le_motif_du_rejet_remonte_jusqu_a_l_action(self):
+        actions = self._fermeture({"id": "o-2", "status": "rejected",
+                                   "reason": "options trading not enabled"})
+        self.assertIn("options trading not enabled", str(actions[0]),
+                      "le motif ne remonte pas : %s" % actions[0])
+
+    def test_une_cloture_normale_reste_une_fermeture(self):
+        """Témoin. Les statuts d'un ordre de clôture qui part bien, plus les
+        réponses que ce CLI peut rendre sans objet ordre du tout."""
+        for reponse in ({"id": "o-3", "status": "accepted"},
+                        {"id": "o-3", "status": "filled"},
+                        {"id": "o-3"},
+                        None,
+                        []):
+            with self.subTest(reponse=repr(reponse)[:24]):
+                actions = self._fermeture(reponse)
+                self.assertEqual(actions[0].kind, risk_gates.ExitKind.CLOSED,
+                                 "une clôture normale est comptée comme un "
+                                 "échec : %s" % actions[0].kind)
+
 class TestStatutDeLOrdre(unittest.TestCase):
     """Ajouté le 27/08 au soir, la veille du kickoff.
 
