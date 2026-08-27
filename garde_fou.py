@@ -1190,13 +1190,23 @@ def main() -> int:
     print("GARDE-FOU — hindsight-alpha — %s" % datetime.now().strftime("%d/%m/%Y %H:%M"))
     print("=" * 74)
 
-    controle_journal()
-    controle_env_hackathon_scelle()
-    controle_garde_live_trading()
-    controle_chiffres_perimes()
-    controle_source_de_verite()
-    controle_dependances_scellees()
-    controle_hooks_actifs()
+    # La liste, plutot que sept appels alignes : le nombre de controles est
+    # affiche en bas de ce meme script, et il a deja PERIME DEUX FOIS -- le
+    # commentaire y admet lui-meme qu'il « trainait encore a 4 » et qu'il a
+    # fallu une revue croisee pour le voir. Un chiffre recopie a la main perime ;
+    # un chiffre derive de la realite, non. len(CONTROLES) est desormais la
+    # seule source.
+    CONTROLES = (
+        controle_journal,
+        controle_env_hackathon_scelle,
+        controle_garde_live_trading,
+        controle_chiffres_perimes,
+        controle_source_de_verite,
+        controle_dependances_scellees,
+        controle_hooks_actifs,
+    )
+    for controle in CONTROLES:
+        controle()
 
     if blocages:
         print("🔴 BLOQUANT : %d" % len(blocages))
@@ -1221,10 +1231,11 @@ def main() -> int:
         code = 0
 
     # Emprunté tel quel au garde-fou d'un projet antérieur, affiché à
-    # CHAQUE run, même vert : 6 contrôles existent aujourd'hui (mis à jour au
-    # fil du 25/08, ce commentaire trainait encore à "4" — trouvé par une
-    # revue croisée multi-agents avant ce commit, corrigé dans la foulée),
-    # tous nés d'erreurs déjà trouvées CETTE session. Un dossier approuvé
+    # CHAQUE run, même vert : le nombre de contrôles est maintenant DÉRIVÉ de
+    # la liste CONTROLES ci-dessus (27/08). Il était recopié à la main et a
+    # périmé deux fois — ce commentaire admettait lui-même qu'il « trainait
+    # encore à 4 » après le passage à 6, trouvé par une revue croisée. Tous
+    # sont nés d'erreurs déjà trouvées, jamais d'une anticipation. Un dossier approuvé
     # peut encore être faux sur tout ce que ce script ne sait pas encore
     # chercher.
     #
@@ -1241,7 +1252,8 @@ def main() -> int:
     # commentaire juste au-dessus de la boucle `for symbole, attendu in
     # fuites.items()` dans controle_source_de_verite(), et PLAN_SPRINT.md.
     print()
-    print("  ⚠️  Même au vert : ce script attrape 6 formes d'erreur précises,")
+    print("  ⚠️  Même au vert : ce script attrape %d formes d'erreur précises,"
+          % len(CONTROLES))
     print("     pas le fond. Un dossier qu'il approuve peut encore être faux.")
     return code
 

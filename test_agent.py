@@ -703,5 +703,45 @@ class TestHooksBranches(unittest.TestCase):
         self.assertNotIn("hooksPath", self._sortie(self._clone(), env_ci=True))
 
 
+class TestInventaireDesControles(unittest.TestCase):
+    """Le nombre de contrôles est affiché à chaque run de garde_fou.py. Il
+    était recopié à la main et a PÉRIMÉ DEUX FOIS — le commentaire du script
+    admettait lui-même qu'il « trainait encore à 4 » après le passage à 6, et
+    qu'il avait fallu une revue croisée pour le voir. Il est désormais dérivé
+    de la liste CONTROLES.
+
+    Reste le risque que la dérivation ne couvre pas : un contrôle DÉFINI dans
+    le fichier et jamais ajouté à la liste. Le compte affiché serait alors
+    juste, et le contrôle ne tournerait jamais.
+    """
+
+    RACINE = Path(__file__).resolve().parent
+
+    def test_tout_controle_defini_est_appele(self):
+        source = (self.RACINE / "garde_fou.py").read_text(encoding="utf-8")
+        definis = set(re.findall(r"^def (controle_\w+)\(", source, re.M))
+        self.assertTrue(definis, "aucune fonction controle_* trouvée")
+        bloc = re.search(r"CONTROLES = \(([^)]*)\)", source, re.S)
+        self.assertIsNotNone(bloc, "la liste CONTROLES a disparu de garde_fou.py")
+        listes = set(re.findall(r"(controle_\w+)", bloc.group(1)))
+        oublies = sorted(definis - listes)
+        self.assertEqual(oublies, [],
+                         "contrôle(s) défini(s) mais jamais appelé(s) : %s — le "
+                         "compte affiché resterait juste et le contrôle ne "
+                         "tournerait jamais" % ", ".join(oublies))
+
+    def test_le_nombre_affiche_correspond_aux_controles_reels(self):
+        source = (self.RACINE / "garde_fou.py").read_text(encoding="utf-8")
+        definis = re.findall(r"^def (controle_\w+)\(", source, re.M)
+        proc = subprocess.run([sys.executable, "garde_fou.py"],
+                              cwd=str(self.RACINE), capture_output=True,
+                              text=True, timeout=120)
+        m = re.search(r"attrape (\d+) formes d'erreur", proc.stdout)
+        self.assertIsNotNone(m, "le script n'annonce plus son nombre de contrôles")
+        self.assertEqual(int(m.group(1)), len(definis),
+                         "le script annonce %s contrôles, il en définit %d"
+                         % (m.group(1), len(definis)))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
