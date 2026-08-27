@@ -1914,6 +1914,72 @@ class TestQualiteDesBarres(unittest.TestCase):
 _CLOSE_ORIGINALE = alpaca_cli.close_position
 
 
+
+class TestPnLNonFini(BaseExit):
+    """Ajouté le 27/08 au soir. `float("nan")` RÉUSSIT sur une chaîne, et le
+    NaN qui en sort traversait tout le reste comme s'il était une mesure.
+
+    Mesuré de bout en bout, avant correctif :
+
+        unrealized_plpc = "-0.60"  -> would_close   (juste)
+        unrealized_plpc = "nan"    -> HOLDING       silencieux
+        unrealized_plpc = "inf"    -> would_close   absurde
+
+    Le NaN est le plus grave : toute comparaison avec lui rend False, donc ni
+    le take-profit ni le stop-loss ne se déclenchent, et la position ressort
+    en HOLDING — l'issue ROUTINIÈRE, la seule qui ne soit même pas
+    journalisée (voir _merite_le_journal). Alors que le cas voisin, une
+    valeur illisible rendant None, produit un ExitKind.UNREADABLE bien
+    visible en jaune sur la page.
+
+    Deux chemins « je n'ai pas su lire », deux traitements opposés, à
+    l'endroit précis où ça compte. C'est le correctif de _sharpe() du matin
+    même, ailleurs : une valeur qui veut dire « je n'ai pas pu mesurer »
+    circulait comme un résultat."""
+
+    def _position(self, **champs):
+        pos = {"symbol": "SPY260831P00764000", "asset_class": "us_option",
+               "cost_basis": "840.00", "qty": "1"}
+        pos.update(champs)
+        self.positions = [pos]
+        return risk_gates.manage_exits(dry_run=True)
+
+    def test_un_pnl_non_fini_est_signale_et_non_ignore(self):
+        # Les deux FORMES comptent. Le CLI type ses champs numériques en
+        # chaîne (vérifié le 24/08 sur `position list --schema`), mais
+        # json.loads accepte aussi les littéraux NaN et Infinity SANS
+        # guillemets et rend de vrais flottants — la branche numérique est
+        # donc atteignable. Une mutation retirant le filtre de cette
+        # branche-là restait verte tant que mes cas n'étaient que des
+        # chaînes.
+        for champs, cas in (({"unrealized_plpc": "nan"}, "chaîne « nan »"),
+                            ({"unrealized_plpc": "inf"}, "chaîne « inf »"),
+                            ({"unrealized_plpc": "-inf"}, "chaîne « -inf »"),
+                            ({"unrealized_plpc": float("nan")}, "flottant NaN"),
+                            ({"unrealized_plpc": float("inf")}, "flottant Infinity"),
+                            ({"unrealized_pl": "nan"}, "repli : pl = nan")):
+            with self.subTest(cas=cas):
+                actions = self._position(**champs)
+                self.assertEqual(
+                    actions[0].kind, risk_gates.ExitKind.UNREADABLE,
+                    "%s : rendu %s au lieu d'UNREADABLE — une position dont "
+                    "on ne sait pas lire le P&L ressort comme routinière"
+                    % (cas, actions[0].kind))
+
+    def test_les_seuils_normaux_declenchent_toujours(self):
+        """Témoins. Sans eux, un correctif qui casserait toute lecture de P&L
+        passerait pour un succès — c'est exactement ce qui m'est arrivé au
+        premier essai, où un `math` non importé faisait tout ressortir en
+        ERROR et où « nan n'est plus HOLDING » avait l'air d'être gagné."""
+        for plpc, attendu, cas in (
+                ("-0.60", risk_gates.ExitKind.WOULD_CLOSE, "stop-loss"),
+                ("0.70", risk_gates.ExitKind.WOULD_CLOSE, "take-profit"),
+                ("-0.10", risk_gates.ExitKind.HOLDING, "on garde")):
+            with self.subTest(cas=cas):
+                actions = self._position(unrealized_plpc=plpc)
+                self.assertEqual(actions[0].kind, attendu,
+                                 "%s : %s" % (cas, actions[0].kind))
+
 class TestStatutDeLaCloture(BaseExit):
     """Le miroir du contrôle de statut posé sur la SOUMISSION, et le côté le
     plus grave des deux : une entrée ratée coûte une occasion, une SORTIE

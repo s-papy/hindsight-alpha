@@ -68,6 +68,7 @@ from __future__ import annotations
 import contextlib
 import fcntl
 import json
+import math
 import os
 import time
 from dataclasses import dataclass
@@ -613,12 +614,36 @@ def _extract_unrealized_plpc(position: dict) -> Optional[float]:
     # fallback below recomputes from unrealized_pl / cost_basis -- but that
     # made the authoritative field dead code, and left the exit gate relying
     # on cost_basis being present and non-zero. Accept the string form.
+    # AJOUTE le 27/08/2026 : `math.isfinite`. `float("nan")` REUSSIT sur une
+    # chaine, et le NaN qui en sort traversait tout le reste comme une mesure.
+    # Mesure de bout en bout :
+    #
+    #     unrealized_plpc = "-0.60"  -> would_close   (juste)
+    #     unrealized_plpc = "nan"    -> HOLDING       silencieux
+    #     unrealized_plpc = "inf"    -> would_close   absurde
+    #
+    # Le NaN est le plus grave : toute comparaison avec lui rend False, donc
+    # ni le take-profit ni le stop-loss ne se declenchent, et la position
+    # ressort en HOLDING -- l'issue ROUTINIERE, celle qui n'est meme pas
+    # journalisee. Alors que le cas voisin (valeur illisible -> None) produit
+    # un ExitKind.UNREADABLE bien visible en jaune.
+    #
+    # Deux chemins « je n'ai pas su lire », deux traitements opposes, a
+    # l'endroit precis ou ca compte. On les fait converger : non fini -> None,
+    # donc UNREADABLE, donc visible.
+    #
+    # C'est exactement le correctif de _sharpe() du matin meme, ailleurs : une
+    # valeur qui veut dire « je n'ai pas pu mesurer » circulait comme un
+    # resultat.
+    def _fini(x):
+        return x if math.isfinite(x) else None
+
     plpc = position.get("unrealized_plpc")
     if isinstance(plpc, (int, float)) and not isinstance(plpc, bool):
-        return float(plpc)
+        return _fini(float(plpc))
     if isinstance(plpc, str) and plpc.strip():
         try:
-            return float(plpc)
+            return _fini(float(plpc))
         except ValueError:
             pass
     pl = position.get("unrealized_pl")
@@ -630,7 +655,8 @@ def _extract_unrealized_plpc(position: dict) -> Optional[float]:
         return None
     if cost_basis == 0:
         return None
-    return pl / cost_basis
+    # Le repli peut lui aussi produire un NaN : float("nan") / 840 vaut nan.
+    return _fini(pl / cost_basis)
 
 
 def _today() -> str:
