@@ -195,10 +195,42 @@ def git_publish() -> None:
     if result.returncode == 0:
         print("Nothing changed since last publish — skipping commit.")
         return
-    subprocess.run(
-        ["git", "commit", "-m", f"dashboard: snapshot {datetime.now(timezone.utc).isoformat()}", "--", *paths],
-        check=True, timeout=_DELAI_LOCAL, env=_ENV_GIT,
-    )
+    # AJOUTE le 27/08/2026 au soir, apres avoir lu publish_dashboard.log en
+    # vrai : le hook de pre-commit lance garde_fou.py a CHAQUE publication,
+    # toutes les 30 minutes, et le log en porte la trace complete.
+    #
+    # Le couplage qui en decoule : si le verdict passe au 🔴 -- un chiffre de
+    # livrable qui derive, un faux positif d'un controle, un plist casse --
+    # `git commit` est REFUSE, CalledProcessError remonte, et ce script meurt.
+    # Toutes les 30 minutes. Le tableau de bord public gele pendant la semaine
+    # ou des juges le regardent.
+    #
+    # Mesure avant ce correctif : l'exception remontait SANS UN MOT, sur une
+    # trace brute, dans un fichier de log gitignore que personne ne lit.
+    #
+    # La banniere de la page finit par dire « snapshot from X ago » (chemin
+    # verifie le 26/08), donc le silence devient visible. Sa CAUSE, non -- et
+    # c'est elle qui permet d'agir. On la nomme, et on releve : un commit
+    # refuse reste une ERREUR, sans quoi launchd croirait a une publication
+    # reussie.
+    try:
+        subprocess.run(
+            ["git", "commit", "-m", f"dashboard: snapshot {datetime.now(timezone.utc).isoformat()}", "--", *paths],
+            check=True, timeout=_DELAI_LOCAL, env=_ENV_GIT,
+        )
+    except subprocess.CalledProcessError as refus:
+        print(
+            "  ERROR: `git commit` was refused (exit %d). The most likely "
+            "cause is this repo's own pre-commit hook, which runs "
+            "garde_fou.py and refuses the commit on a red verdict. While that "
+            "verdict stands, EVERY publish attempt fails the same way and the "
+            "public dashboard stops updating -- its banner will start "
+            "reporting a stale snapshot, without saying why. Run "
+            "`python3 garde_fou.py` to see what it is refusing."
+            % refus.returncode,
+            flush=True,
+        )
+        raise
 
     # Le push, et le seul appel qui parle au reseau. Sa panne se raconte comme
     # celle de l'ordre qui expire dans agent.py, corrigee le matin meme : un

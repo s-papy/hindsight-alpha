@@ -2717,6 +2717,64 @@ class TestAppelsDeSousProcessusBornes(unittest.TestCase):
                         "vérifiable")
         self.assertEqual(publish_dashboard._ENV_GIT.get("GIT_TERMINAL_PROMPT"), "0")
 
+    def test_un_commit_refuse_par_le_hook_dit_pourquoi(self):
+        """Ajouté le 27/08 au soir, après avoir lu publish_dashboard.log en
+        vrai : le hook de pre-commit lance garde_fou.py à CHAQUE publication,
+        toutes les 30 minutes. Le log en porte la trace complète.
+
+        Conséquence du couplage : si le verdict passe au 🔴 — un chiffre de
+        livrable qui dérive, un faux positif du scan par motif, un plist
+        cassé — `git commit` est refusé, CalledProcessError remonte, et le
+        publieur meurt. Toutes les 30 minutes. Le tableau de bord public
+        gèle pendant la semaine où des juges le regardent.
+
+        Mesuré avant correctif : l'exception remontait SANS UN MOT, sur une
+        trace brute, dans un fichier de log gitignoré que personne ne lit.
+
+        La bannière de la page finit par dire « snapshot from X ago » (chemin
+        vérifié le 26/08), donc le silence devient visible. Sa CAUSE, non —
+        et c'est elle qui permet d'agir."""
+        import publish_dashboard, subprocess
+        from unittest import mock
+
+        def faux_run(cmd, **kw):
+            if cmd[:2] == ["git", "diff"]:
+                return subprocess.CompletedProcess(cmd, 1)
+            if cmd[:2] == ["git", "commit"]:
+                raise subprocess.CalledProcessError(1, cmd)
+            return subprocess.CompletedProcess(cmd, 0)
+
+        with mock.patch.object(publish_dashboard.subprocess, "run", faux_run):
+            with contextlib.redirect_stdout(io.StringIO()) as sortie:
+                with self.assertRaises(subprocess.CalledProcessError):
+                    publish_dashboard.git_publish()
+        texte = sortie.getvalue()
+        self.assertTrue(texte.strip(),
+                        "le publieur meurt sans imprimer quoi que ce soit")
+        self.assertIn("garde_fou", texte,
+                      "la cause la plus probable n'est pas nommée : %r" % texte)
+        self.assertIn("dashboard", texte.lower(),
+                      "la conséquence — le tableau de bord gèle — n'est pas dite")
+
+    def test_le_publieur_echoue_toujours_bruyamment(self):
+        """Témoin : nommer la cause ne doit pas devenir l'avaler. Un commit
+        refusé reste une ERREUR, avec un code de sortie non nul — sinon
+        launchd croirait à une publication réussie."""
+        import publish_dashboard, subprocess
+        from unittest import mock
+
+        def faux_run(cmd, **kw):
+            if cmd[:2] == ["git", "diff"]:
+                return subprocess.CompletedProcess(cmd, 1)
+            if cmd[:2] == ["git", "commit"]:
+                raise subprocess.CalledProcessError(1, cmd)
+            return subprocess.CompletedProcess(cmd, 0)
+
+        with mock.patch.object(publish_dashboard.subprocess, "run", faux_run):
+            with contextlib.redirect_stdout(io.StringIO()):
+                with self.assertRaises(subprocess.CalledProcessError):
+                    publish_dashboard.git_publish()
+
     def test_un_push_qui_expire_est_annonce_comme_INCERTAIN(self):
         """Même raisonnement que l'ordre qui expire dans agent.py, corrigé le
         27/08 au matin : un délai dépassé ne veut pas dire « ça a échoué », il
