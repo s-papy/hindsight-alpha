@@ -1908,6 +1908,74 @@ class TestQualiteDesBarres(unittest.TestCase):
 
 
 
+
+class TestStatutDeLOrdre(unittest.TestCase):
+    """Ajouté le 27/08 au soir, la veille du kickoff.
+
+    submit_paper_option_order() ne regardait que la présence d'un `id`. Or
+    l'objet ordre d'Alpaca porte TOUJOURS un `status`, et « rejected » en fait
+    partie. Mesuré :
+
+        accepted / filled          -> id rendu   (juste)
+        REJECTED                   -> id rendu   → badge VERT « traded »
+        canceled / expired         -> id rendu   → badge VERT « traded »
+
+    Un ordre REJETÉ produisait donc, sur la page publique, la même preuve
+    verte qu'un ordre exécuté. Trois conséquences, et aucune n'est cosmétique :
+
+      · le tableau de bord affirme un trade qui n'a pas eu lieu ;
+      · record_order_submitted() arme le garde anti-doublon, donc ce symbole
+        ne peut plus être retenté de la journée ;
+      · l'exposition compte une prime jamais dépensée, ce qui rétrécit le
+        budget restant pour les autres symboles.
+
+    Et ce n'est pas un cas d'école : le journal d'ingénierie relève un fil de
+    forum Alpaca du 30 juillet 2026 où des comptes paper perdent l'accès aux
+    options du jour au lendemain. « options trading not enabled » est le motif
+    de rejet le plus plausible de la semaine."""
+
+    def _soumettre(self, reponse):
+        from unittest import mock
+        with mock.patch.object(alpaca_cli, "run", lambda a: reponse):
+            return alpaca_cli.submit_paper_option_order("SPY260911C00500000", 3)
+
+    def test_un_ordre_rejete_ne_passe_pas_pour_un_ordre_passe(self):
+        for statut in ("rejected", "canceled", "expired", "suspended"):
+            with self.subTest(statut=statut):
+                with self.assertRaises(alpaca_cli.AlpacaCLIError,
+                                       msg="statut « %s » rendu comme un ordre "
+                                           "passé : badge vert sur la page "
+                                           "publique" % statut) as e:
+                    self._soumettre({"id": "o-1", "status": statut})
+                self.assertIn(statut, str(e.exception).lower(),
+                              "le refus ne nomme pas le statut reçu")
+
+    def test_le_motif_du_rejet_est_repris(self):
+        """Le seul renseignement qui permet d'agir. « rejected » seul
+        n'apprend rien ; « options trading not enabled » dit quoi faire."""
+        with self.assertRaises(alpaca_cli.AlpacaCLIError) as e:
+            self._soumettre({"id": "o-2", "status": "rejected",
+                             "reason": "options trading not enabled"})
+        self.assertIn("options trading not enabled", str(e.exception))
+
+    def test_les_statuts_normaux_passent_toujours(self):
+        """Témoin indispensable : un ordre de marché est rarement « filled »
+        à la milliseconde où l'API répond. Refuser tout ce qui n'est pas
+        « filled » bloquerait la totalité des trades."""
+        for statut in ("accepted", "new", "pending_new", "filled",
+                       "partially_filled", "accepted_for_bidding"):
+            with self.subTest(statut=statut):
+                self.assertEqual(
+                    self._soumettre({"id": "o-3", "status": statut}), "o-3")
+
+    def test_un_statut_absent_ne_fait_pas_echouer(self):
+        """Second témoin, et c'est un choix explicite. Un statut manquant veut
+        dire « on ne sait pas » — or l'ordre a PU partir. Lever ferait croire
+        à un échec net et laisserait le garde anti-doublon désarmé sur un
+        ordre peut-être réel. Même raisonnement que le délai dépassé, corrigé
+        le matin même."""
+        self.assertEqual(self._soumettre({"id": "o-4"}), "o-4")
+
 class TestReponseDesContratsIllisible(unittest.TestCase):
     """Dernier lecteur de frontière non durci, trouvé par un balayage AST des
     24 lectures avec valeur par défaut sur une réponse externe.

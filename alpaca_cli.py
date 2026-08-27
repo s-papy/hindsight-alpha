@@ -746,4 +746,53 @@ def submit_paper_option_order(option_symbol: str, qty: int = 1) -> str:
     )
     if not isinstance(result, dict) or "id" not in result:
         raise AlpacaCLIError(f"order submit returned no order id: {result}")
+
+    # AJOUTE le 27/08/2026, la veille du kickoff. Cette fonction ne regardait
+    # que la PRESENCE d'un id. Or l'objet ordre d'Alpaca porte TOUJOURS un
+    # `status`, et « rejected » en fait partie. Mesure avant correctif :
+    #
+    #     accepted / filled   -> id rendu   (juste)
+    #     REJECTED            -> id rendu   -> badge VERT « traded »
+    #     canceled / expired  -> id rendu   -> badge VERT « traded »
+    #
+    # Un ordre REJETE produisait donc, sur la page publique, la meme preuve
+    # verte qu'un ordre execute. Trois consequences, aucune cosmetique :
+    #   . le tableau de bord affirme un trade qui n'a pas eu lieu ;
+    #   . record_order_submitted() arme le garde anti-doublon, donc ce symbole
+    #     ne peut plus etre retente de la journee ;
+    #   . l'exposition compte une prime jamais depensee, ce qui retrecit le
+    #     budget restant pour les autres symboles.
+    #
+    # Ce n'est pas un cas d'ecole : le journal d'ingenierie releve un fil de
+    # forum Alpaca du 30 juillet 2026 ou des comptes paper perdent l'acces aux
+    # options du jour au lendemain. « options trading not enabled » est le
+    # motif de rejet le plus plausible de la semaine.
+    #
+    # On ne refuse QUE les statuts terminaux d'echec. Un ordre de marche est
+    # rarement « filled » a la milliseconde ou l'API repond : exiger « filled »
+    # bloquerait la totalite des trades.
+    ECHECS_TERMINAUX = {"rejected", "canceled", "cancelled", "expired",
+                        "suspended"}
+    statut = str(result.get("status", "")).lower()
+    if statut in ECHECS_TERMINAUX:
+        motif = (result.get("reason") or result.get("reject_reason")
+                 or result.get("message") or "no reason given")
+        raise AlpacaCLIError(
+            "order for %s was accepted by the CLI but came back with status "
+            "'%s' (%s). No position was opened. Reporting this as a failure "
+            "rather than a submitted order, so the dashboard does not show a "
+            "trade that never happened and the duplicate-order guard stays "
+            "unarmed for a retry." % (option_symbol, statut, motif))
+
+    # Un statut ABSENT n'est PAS traite comme un echec, et c'est un choix :
+    # « on ne sait pas » n'est pas « ca a rate », et l'ordre a pu partir. Lever
+    # ici laisserait le garde anti-doublon desarme sur un ordre peut-etre reel.
+    # Meme raisonnement que le delai depasse, corrige le matin meme.
+    if not statut:
+        print("  WARNING: the order response for %s carried no 'status' field, "
+              "so whether it was accepted is UNKNOWN. Treating it as submitted "
+              "(the safe direction: the duplicate-order guard gets armed), but "
+              "verify with Alpaca before assuming a position exists."
+              % option_symbol, flush=True)
+
     return result["id"]
