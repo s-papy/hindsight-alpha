@@ -23,6 +23,7 @@ import io
 import json
 import math
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -577,6 +578,102 @@ class TestSourcesDeVerite(unittest.TestCase):
                            "un fichier présent mais illisible est traité comme "
                            "un fichier absent, sans un mot")
         self.assertIn("format a change", garde_fou.alertes[-1][1])
+
+
+class TestLecteursDeCodeSource(unittest.TestCase):
+    """garde_fou.py lit DEFAULT_UNIVERSE et les huit seuils de risque
+    DIRECTEMENT dans le code — c'est ce qui rend le croisement des livrables
+    mécanique plutôt que déclaratif.
+
+    Deux façons pour ces lecteurs de se tromper, toutes deux mesurées le 27/08 :
+    ne rien lire sans le dire, et lire la MAUVAISE valeur.
+    """
+
+    RACINE = Path(__file__).resolve().parent
+
+    def _dossier(self, fichier=None, ancien=None, nouveau=None):
+        d = Path(tempfile.mkdtemp(prefix="hindsight-lecteurs-"))
+        for nom in ("agent.py", "risk_gates.py", "vol_strategy.py",
+                    "monitor_exits.py"):
+            shutil.copy(self.RACINE / nom, d / nom)
+        if fichier:
+            chemin = d / fichier
+            avant = chemin.read_text(encoding="utf-8")
+            apres = re.sub(ancien, nouveau, avant, count=1, flags=re.M)
+            self.assertNotEqual(avant, apres,
+                                "la mutation %r n'a rien changé : le fichier a "
+                                "changé de forme et ce test ne vérifie plus "
+                                "rien" % ancien)
+            chemin.write_text(apres, encoding="utf-8")
+        return d
+
+    def _avec(self, dossier, fn):
+        import garde_fou
+        vraie = garde_fou.RACINE
+        avant = len(garde_fou.alertes)
+        garde_fou.RACINE = str(dossier)
+        try:
+            resultat = fn(garde_fou)
+        finally:
+            garde_fou.RACINE = vraie
+            shutil.rmtree(dossier, ignore_errors=True)
+            nouvelles = garde_fou.alertes[avant:]
+        return resultat, [a[1] for a in nouvelles]
+
+    def test_les_huit_seuils_sont_lisibles_dans_le_depot_reel(self):
+        """Contrôle : sans lui, un lecteur qui échoue TOUJOURS passerait les
+        tests ci-dessous."""
+        import garde_fou
+        valeurs, alertes = self._avec(
+            self._dossier(), lambda gf: gf._parse_seuils_risque())
+        self.assertEqual(len(valeurs), len(garde_fou.SEUILS_RISQUE),
+                         "seuil(s) non lu(s) : %s"
+                         % sorted({n for n, _ in garde_fou.SEUILS_RISQUE}
+                                  - set(valeurs)))
+        self.assertEqual(alertes, [])
+
+    def test_un_seuil_refactore_est_nomme_et_non_saute(self):
+        """`MAX_TOTAL_RISK_PCT = 3 / 100` est un refactor parfaitement
+        légitime."""
+        valeurs, alertes = self._avec(
+            self._dossier("risk_gates.py",
+                          r"^MAX_TOTAL_RISK_PCT = 0\.03.*$",
+                          "MAX_TOTAL_RISK_PCT = 3 / 100"),
+            lambda gf: gf._parse_seuils_risque())
+        self.assertNotIn("MAX_TOTAL_RISK_PCT", valeurs)
+        self.assertTrue(any("MAX_TOTAL_RISK_PCT" in a for a in alertes),
+                        "un seuil qui échappe au contrôle n'est pas nommé : "
+                        "le livrable pourrait annoncer n'importe quoi pour lui")
+
+    def test_un_seuil_calcule_n_est_jamais_lu_de_travers(self):
+        """LE point important : ce n'était pas un saut silencieux mais une
+        MAUVAISE LECTURE. `3 / 100` donnait 3.0 au lieu de 0.03, et le contrôle
+        validait ensuite les livrables contre une référence fausse — le chiffre
+        VRAI aurait été signalé comme erroné."""
+        valeurs, _ = self._avec(
+            self._dossier("risk_gates.py",
+                          r"^MAX_SECTOR_EXPOSURE_PCT = 0\.015.*$",
+                          "MAX_SECTOR_EXPOSURE_PCT = 1.5 / 100"),
+            lambda gf: gf._parse_seuils_risque())
+        self.assertNotIn("MAX_SECTOR_EXPOSURE_PCT", valeurs,
+                         "le lecteur a rendu %r pour une valeur qui vaut 0.015"
+                         % valeurs.get("MAX_SECTOR_EXPOSURE_PCT"))
+
+    def test_un_univers_illisible_est_signale(self):
+        univers, alertes = self._avec(
+            self._dossier("agent.py",
+                          r"^DEFAULT_UNIVERSE = \[[^\]]*\]",
+                          'DEFAULT_UNIVERSE = list(map(str.upper, ("spy",)))'),
+            lambda gf: gf._parse_univers_actuel())
+        self.assertIsNone(univers)
+        self.assertTrue(any("DEFAULT_UNIVERSE" in a for a in alertes),
+                        "le croisement de l'univers disparaît sans un mot")
+
+    def test_un_univers_normal_ne_declenche_rien(self):
+        univers, alertes = self._avec(
+            self._dossier(), lambda gf: gf._parse_univers_actuel())
+        self.assertTrue(univers)
+        self.assertEqual(alertes, [])
 
 
 if __name__ == "__main__":

@@ -652,9 +652,25 @@ def _parse_univers_actuel() -> list | None:
         return None
     src = open(chemin, encoding="utf-8").read()
     m = re.search(r'DEFAULT_UNIVERSE\s*=\s*\[([^\]]+)\]', src)
-    if not m:
+    symboles = (re.findall(r'"(\w+)"', m.group(1)) or
+                re.findall(r"'(\w+)'", m.group(1))) if m else []
+    if not symboles:
+        # AJOUTE le 27/08/2026 : c'etait `return None`, muet. Mesure -- ecrire
+        # DEFAULT_UNIVERSE sous une forme que ce motif ne lit pas (par exemple
+        # `list(map(str.upper, (...)))`, un refactor parfaitement legitime) fait
+        # DISPARAITRE le croisement de l'univers dans les livrables : code de
+        # sortie 0, pas un mot.
+        #
+        # Ne pas pouvoir lire la reference n'est pas la preuve que les livrables
+        # sont justes. On le dit.
+        alerte(
+            "agent.py",
+            "DEFAULT_UNIVERSE n'a pas pu etre lu (forme inattendue ?) -- le "
+            "croisement de l'univers cite dans les livrables est SANS EFFET tant "
+            "que cette liste n'est pas relisible.",
+        )
         return None
-    return re.findall(r'"(\w+)"', m.group(1)) or re.findall(r"'(\w+)'", m.group(1))
+    return symboles
 
 
 SEUILS_RISQUE = [
@@ -681,14 +697,53 @@ def _parse_seuils_risque() -> dict:
     directement depuis le code — jamais importé (risk_gates.py a des effets
     de bord au chargement), toujours par lecture de texte brute."""
     valeurs = {}
+    illisibles = []
     for nom, fichier in SEUILS_RISQUE:
         chemin = os.path.join(RACINE, fichier)
         if not os.path.exists(chemin):
+            illisibles.append("%s (%s absent)" % (nom, fichier))
             continue
         src = open(chemin, encoding="utf-8").read()
-        m = re.search(r"^%s\s*=\s*([\d.]+)" % re.escape(nom), src, re.M)
+        # RESSERRE le 27/08/2026. Le motif etait `([\d.]+)` SANS ancre de fin :
+        # il capturait le premier nombre venu et s'arretait la. Mesure sur cinq
+        # formes plausibles :
+        #
+        #     MAX_TOTAL_RISK_PCT = 0.03    # commentaire  -> 0.03  correct
+        #     MAX_TOTAL_RISK_PCT = 3 / 100               -> 3.0   au lieu de 0.03
+        #     MAX_SECTOR_EXPOSURE_PCT = 1.5 / 100        -> 1.5   au lieu de 0.015
+        #     MAX_CONSECUTIVE_LOSSES = 6 // 2            -> 6.0   au lieu de 3
+        #
+        # Ce n'est pas un saut silencieux, c'est une MAUVAISE LECTURE : le
+        # controle valide ensuite les livrables contre une valeur de reference
+        # fausse. Le chiffre VRAI serait signale comme erronne, et le chiffre
+        # faux passerait.
+        #
+        # On exige donc que le nombre soit TOUTE la partie droite (un
+        # commentaire de fin de ligne reste tolere, c'est la forme du fichier).
+        # Toute autre forme est declaree illisible et nommee, plutot que
+        # devinee.
+        m = re.search(r"^%s\s*=\s*([\d.]+)\s*(?:#.*)?$" % re.escape(nom), src, re.M)
         if m:
             valeurs[nom] = float(m.group(1))
+        else:
+            illisibles.append("%s (dans %s)" % (nom, fichier))
+
+    # AJOUTE le 27/08/2026 : les seuils introuvables etaient simplement SAUTES.
+    # Mesure -- reecrire `MAX_TOTAL_RISK_PCT = 0.03` en `MAX_TOTAL_RISK_PCT =
+    # 3 / 100`, un refactor parfaitement legitime que ce motif ne lit pas, fait
+    # disparaitre ce seuil du controle des chiffres cites dans les livrables :
+    # code de sortie 0, pas un mot. Le livrable pourrait alors annoncer
+    # n'importe quoi pour ce seuil.
+    #
+    # On ne BLOQUE pas -- une valeur qu'on ne sait pas lire n'est pas une valeur
+    # fausse -- mais on nomme precisement ce qui echappe au controle.
+    if illisibles:
+        alerte(
+            "seuils de risque",
+            "valeur(s) non lisible(s) depuis le code : %s. Les livrables ne sont "
+            "PAS verifies contre ce(s) seuil(s) tant que la forme n'est pas "
+            "`NOM = <nombre>` en debut de ligne." % ", ".join(illisibles),
+        )
     return valeurs
 
 
