@@ -2311,6 +2311,101 @@ class TestQualiteDesBarresFaceAuNaN(unittest.TestCase):
             with self.subTest(cas=etiquette):
                 alpaca_cli._check_bar_quality("SPY", r, minimum_usable=600)
 
+    @staticmethod
+    def _flux_vol_variable(n=700, plat=0, debut=None, graine=7):
+        """Volatilité qui VARIE dans le temps : sans cela le rang HV vaut 0
+        partout et le témoin ne distingue plus rien. `plat` clôtures en fin de
+        série (ou à partir de `debut`) répètent la précédente — dates
+        distinctes, prix identique."""
+        import math
+        import random
+        maintenant = datetime.now(timezone.utc)
+        rng = random.Random(graine)
+        fin = n if debut is None else debut + plat
+        d = (n - plat) if debut is None else debut
+        lignes, prix = [], 100.0
+        for i in range(n):
+            if plat and d <= i < fin:
+                cloture = prix
+            else:
+                ampl = 0.004 + 0.014 * (0.5 + 0.5 * math.sin(i / 47.0))
+                prix = prix * (1.0 + rng.gauss(0.0, ampl))
+                cloture = prix
+            lignes.append({"t": (maintenant - timedelta(days=n - i)).isoformat(),
+                           "c": cloture})
+        return lignes
+
+    def _passer_la_porte(self, lignes):
+        # PAS `_porte` : la classe en a deja un, qui prend une fabrique de prix.
+        # Le redefinir ici l'ecrasait silencieusement pour toute la classe.
+        from unittest import mock
+        with mock.patch.object(alpaca_cli, "run",
+                               lambda a: {"bars": {"SPY": lignes}}):
+            return alpaca_cli.get_daily_bars("SPY", lookback_days=600)
+
+    def test_un_flux_dont_le_prix_ne_bouge_plus_est_refuse(self):
+        """Le contrôle de flux GELÉ ne regarde que l'ÂGE de la barre la plus
+        récente. Une source qui répète sa dernière clôture pendant que les
+        horodatages avancent le traverse intact — et la déduplication par
+        horodatage ne la voit pas non plus, puisque les dates sont distinctes.
+
+        Ce n'est pas cosmétique. Mesuré sur 700 jours, fenêtre HV 30 :
+
+            aucun plat (témoin)              rang HV 81.0  -> s'abstient
+            3 clôtures identiques à la fin   rang HV 71.8  -> s'abstient
+            10 clôtures identiques à la fin  rang HV 63.5  -> s'abstient
+            30 clôtures identiques à la fin  rang HV  0.0  -> ACHÈTE
+
+        Dégradation monotone, pas un artefact de seuil : un défaut de données
+        qui AUTORISE un trade."""
+        with self.assertRaises(alpaca_cli.DataQualityError) as ctx:
+            self._passer_la_porte(self._flux_vol_variable(plat=30))
+        message = str(ctx.exception)
+        self.assertIn("SPY", message)
+        self.assertIn("frozen", message,
+                      "le message ne nomme pas la panne : %r" % message[:120])
+
+    def test_un_palier_de_quatre_clotures_passe_encore(self):
+        """Frontière basse, mesurée plutôt que devinée. Sans ce témoin, un
+        contrôle qui refuserait DEUX clôtures identiques passerait le test
+        ci-dessus tout en criant sur des données parfaitement normales."""
+        lignes = self._flux_vol_variable(plat=3)   # la dernière non-plate porte
+        self.assertEqual(self._palier(lignes), 4,  # déjà le prix : palier = 3+1
+                         "la fixture ne produit pas le palier attendu")
+        self._passer_la_porte(lignes)                        # ne doit pas lever
+
+    def test_un_palier_de_cinq_clotures_est_refuse(self):
+        """Frontière haute : le seuil est `>= 5`, pas `> 5`."""
+        lignes = self._flux_vol_variable(plat=4)
+        self.assertEqual(self._palier(lignes), 5)
+        with self.assertRaises(alpaca_cli.DataQualityError):
+            self._passer_la_porte(lignes)
+
+    def test_un_plat_au_milieu_n_est_pas_refuse(self):
+        """La portée est limitée à la QUEUE, et cette limite est MESURÉE :
+        un plat au milieu abaisse les valeurs HV passées, donc REMONTE le rang
+        d'aujourd'hui —
+
+            30 plats au milieu (j300-330)    rang HV 99.2  -> s'abstient
+            60 plats au milieu (j200-260)    rang HV 73.8  -> s'abstient
+
+        — il pousse vers le refus, du côté sûr. Refuser là serait une fausse
+        alerte sur des données qui ne trompent personne."""
+        self._passer_la_porte(self._flux_vol_variable(plat=30, debut=300))
+
+    def test_un_flux_normal_n_est_pas_refuse(self):
+        """Témoin : sans lui, un contrôle qui refuse tout passerait les trois
+        tests de refus ci-dessus."""
+        self._passer_la_porte(self._flux_vol_variable(plat=0))
+
+    @staticmethod
+    def _palier(lignes):
+        clotures = [l["c"] for l in lignes]
+        k = 1
+        while k < len(clotures) and clotures[-1 - k] == clotures[-1]:
+            k += 1
+        return k
+
     def test_les_barres_dupliquees_sont_retirees(self):
         """Suite directe du contrôle d'ordre, qui tolère DÉLIBÉRÉMENT deux
         horodatages égaux — un doublon n'est pas un désordre. Mais rien

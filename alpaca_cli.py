@@ -446,6 +446,7 @@ def _extract_bars(data: Any, expected_symbol: Optional[str] = None) -> List[dict
 
 
 MAX_STALE_DAYS = 5           # refuse to trade if the most recent bar is older than this (calendar days)
+MAX_IDENTICAL_CLOSES = 5     # a liquid ETF does not print the same close a full trading week running
 MAX_DAILY_JUMP_PCT = 0.50    # refuse to trade if any adjacent-day close moves more than this -- likely bad data, not a real move, for a liquid sector ETF
 
 
@@ -591,6 +592,53 @@ def _check_bar_quality(symbol: str, rows: List[dict], minimum_usable: Optional[i
                 f"{symbol}: bar {i} has a close of {c} -- a non-positive price is "
                 f"impossible for a tradable ETF, so this feed is corrupted. Refusing "
                 f"rather than silently dropping the point from the return series."
+            )
+
+    # AJOUTE le 27/08/2026. Le controle de flux GELE juste au-dessus ne regarde
+    # que l'AGE de la barre la plus recente. Une source qui repete sa derniere
+    # cloture pendant que les horodatages continuent d'avancer le traverse
+    # intact -- et la deduplication par horodatage (get_daily_bars) ne la voit
+    # pas non plus, puisque les dates, elles, sont bien distinctes.
+    #
+    # Ce n'est pas cosmetique : une cloture repetee donne un rendement de 0%,
+    # ce qui fait BAISSER la volatilite mesuree. Or cette strategie entre quand
+    # « la volatilite est bon marche ». Mesure sur 700 jours, fenetre HV 30 :
+    #
+    #     aucun plat (temoin)                 rang HV 81.0  -> s'abstient
+    #     3 clotures identiques a la fin      rang HV 71.8  -> s'abstient
+    #     10 clotures identiques a la fin     rang HV 63.5  -> s'abstient
+    #     30 clotures identiques a la fin     rang HV  0.0  -> ACHETE
+    #
+    # Degradation monotone, pas un artefact de seuil. Un defaut de donnees qui
+    # AUTORISE un trade, pas un qui le refuse.
+    #
+    # Portee volontairement limitee a la QUEUE de la serie, et cette limite est
+    # mesuree, pas supposee : un plat au MILIEU de l'historique abaisse les
+    # valeurs HV passees, donc remonte le rang d'aujourd'hui --
+    #
+    #     30 plats au milieu (j300-330)       rang HV 99.2  -> s'abstient
+    #     60 plats au milieu (j200-260)       rang HV 73.8  -> s'abstient
+    #
+    # -- il pousse vers le refus, du cote sur. Seule la queue retourne la
+    # decision vers l'achat.
+    #
+    # Limite assumee : le reseau sortant est bloque ici, je n'ai donc PAS pu
+    # mesurer la longueur des series de clotures identiques sur les vraies
+    # donnees SPY/GLD/XLK/XLV. Le seuil est choisi genereux pour cela -- une
+    # semaine de bourse entiere au meme centime. Si un ETF liquide declenche
+    # cette alerte, c'est le seuil qu'il faut relire, pas l'alerte qu'il faut
+    # taire.
+    if len(closes) >= MAX_IDENTICAL_CLOSES:
+        queue = closes[-MAX_IDENTICAL_CLOSES:]
+        if all(c == queue[0] for c in queue):
+            raise DataQualityError(
+                f"{symbol}: the last {MAX_IDENTICAL_CLOSES} closes are all "
+                f"${queue[0]:.2f} -- the timestamps advance but the price does "
+                f"not, so this feed is frozen in a way the staleness check "
+                f"cannot see. Repeated closes are 0% returns: they push measured "
+                f"volatility DOWN, and this strategy buys when volatility looks "
+                f"cheap. Refusing rather than trading on a feed that biases "
+                f"toward entering."
             )
 
     for i in range(1, len(closes)):
