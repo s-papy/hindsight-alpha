@@ -100,6 +100,17 @@ class LeakageReport:
             and self.in_sample_clears_bar
         )
 
+    def _plein_franchit_le_seuil(self) -> bool:
+        """Le meilleur score sur la fenetre PLEINE depasse-t-il le seuil ?
+
+        Sert a distinguer « la selection ne tient que grace a des donnees non
+        connaissables » (fuite) de « rien ne gagne nulle part » (pas d'edge).
+        Meme comparaison stricte que in_sample_clears_bar : `>` et non `>=`."""
+        try:
+            return self.full_scores[self.full_winner] > self.threshold
+        except (KeyError, TypeError):
+            return False
+
     def summary(self) -> str:
         lines = []
         if self.agrees:
@@ -115,6 +126,43 @@ class LeakageReport:
             lines.append(
                 "  -> a candidate that could not be scored is not a candidate that "
                 "lost. Refusing to certify this selection as leak-free."
+            )
+        elif not self.in_sample_clears_bar and not self._plein_franchit_le_seuil():
+            # AJOUTE le 27/08/2026, trouve en faisant tourner le pipeline
+            # complet sur des barres synthetiques plausibles.
+            #
+            # Quand AUCUN candidat ne franchit le seuil -- ni en in-sample, NI
+            # sur la fenetre pleine -- le message annoncait quand meme :
+            #
+            #   LEAK DETECTED: this selection depends on data outside the
+            #     in-sample window.
+            #     full-window winner: 90  (score -0.3807)
+            #     -> the apparent winner exists only because the scoring window
+            #        included data that would not have been knowable ...
+            #
+            # Le gagnant « apparent » a un score NEGATIF. Il n'existe pas « a
+            # cause de » donnees futures : il perd des deux cotes. Il n'y a pas
+            # de fuite, il n'y a pas d'edge -- deux verdicts qu'un outil de ce
+            # nom ne peut pas se permettre de confondre. Annoncer une fuite la
+            # ou rien n'a fuite est un faux positif dans le TITRE.
+            #
+            # Le REFUS ne bouge pas d'un iota (agrees reste False, on ne trade
+            # pas). Seule la raison change -- et c'est elle qu'un juge lit.
+            meilleur = self.full_scores[self.full_winner]
+            lines.append(
+                "NO EDGE: no candidate clears the threshold on EITHER window."
+            )
+            lines.append(
+                f"  best full-window score:  {self.full_winner!r}  "
+                f"({meilleur:.4f}, threshold {self.threshold})"
+            )
+            lines.append(
+                f"  best in-sample score:    "
+                f"{self.in_sample_scores[self.in_sample_winner]:.4f}"
+            )
+            lines.append(
+                "  -> this is NOT a hindsight leak: nothing wins on the full "
+                "window either. There is simply nothing here worth selecting."
             )
         else:
             lines.append("LEAK DETECTED: this selection depends on data outside the in-sample window.")

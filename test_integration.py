@@ -45,7 +45,8 @@ import risk_gates  # noqa: E402
 import vol_strategy  # noqa: E402
 
 
-def serie(n, graine, amplitude=1000, calme_a_la_fin=0):
+def serie(n, graine, amplitude=1000, calme_a_la_fin=0, choc_a_la_fin=0,
+          force_choc=6):
     """Série de prix déterministe. Pas de Math.random : suite congruentielle,
     pour que l'échec d'un test soit reproductible à l'identique.
 
@@ -53,6 +54,20 @@ def serie(n, graine, amplitude=1000, calme_a_la_fin=0):
     fabrique un régime de volatilité BASSE, donc un rang HV sous le seuil, donc
     un symbole négociable. Sans ce levier, un test « l'agent entre en position »
     dépendrait du hasard de la graine.
+
+    `choc_a_la_fin` est son miroir, ajouté le 27/08 : il MULTIPLIE l'amplitude
+    sur les N derniers jours. Posé pour une raison précise — fabriquer une
+    VRAIE fuite de hindsight, et non un symbole simplement sans edge.
+
+    Un choc tombant exactement dans les IN_SAMPLE_HOLDOUT_DAYS derniers jours
+    change la fenêtre HV gagnante sur l'historique COMPLET sans toucher au
+    classement in-sample : c'est la définition même de ce que ce projet
+    détecte, et c'est physiquement ce qu'un agent en direct ne pouvait pas
+    connaître. Avec `graine=10, choc_a_la_fin=20, force_choc=6` : gagnant plein
+    10 jours, gagnant in-sample 20 jours, et le plein franchit le seuil.
+
+    Aucune combinaison de `calme_a_la_fin` sur 100 essais ne produisait ça —
+    toutes donnaient « aucun edge nulle part », ce qui n'est pas une fuite.
     """
     prix, out, x = 100.0, [], graine
     for i in range(n):
@@ -60,6 +75,8 @@ def serie(n, graine, amplitude=1000, calme_a_la_fin=0):
         amp = amplitude
         if calme_a_la_fin and i >= n - calme_a_la_fin:
             amp = max(1, amplitude // 40)
+        if choc_a_la_fin and i >= n - choc_a_la_fin:
+            amp = amplitude * force_choc
         prix *= 1.0 + ((x % (2 * amp + 1)) - amp) / 100000.0
         out.append(vol_strategy.Bar(close=prix))
     return out
@@ -181,13 +198,49 @@ class TestPipelineComplet(BaseIntegration):
         """La fonctionnalité qui donne son nom au projet, exercée de bout en
         bout et non sur la bibliothèque seule.
 
-        graine=3 : la fenêtre HV qui gagne sur la fenêtre complète ne tient pas
-        en in-sample. Le verdict le dit, aucun ordre ne part, et la raison porte
-        le préfixe exact que le tableau de bord met en évidence."""
-        self.barres = {"SPY": serie(self.N_BARRES, graine=3, calme_a_la_fin=60)}
+        CORRIGÉ le 27/08, et la correction dit quelque chose sur le test
+        lui-même. Sa docstring affirmait « graine=3 : la fenêtre qui gagne sur
+        la fenêtre complète ne tient pas en in-sample ». C'était FAUX : avec
+        cette graine, aucun candidat ne franchit le seuil NI en in-sample NI
+        sur la fenêtre pleine. Ce n'est pas une fuite, c'est un symbole sans
+        edge — et le test passait parce qu'agent.py étiquetait les deux cas de
+        la même façon, défaut corrigé le même jour.
+
+        Autrement dit : le test de bout en bout de la fonctionnalité qui donne
+        son nom au projet n'exerçait AUCUNE fuite réelle. Aucune des 100
+        combinaisons de `calme_a_la_fin` essayées n'en produit une.
+
+        `choc_a_la_fin=20` en fabrique une vraie, et pour la bonne raison
+        physique : un choc de volatilité tombant exactement dans les 20 jours
+        de holdout change la fenêtre gagnante sur l'historique complet sans
+        toucher au classement in-sample. C'est précisément ce qu'un agent en
+        direct ne pouvait pas connaître.
+
+        Les deux assertions ajoutées PINGLENT le cas exercé. C'est ce qui
+        manquait : rien ne vérifiait LEQUEL des trois refus était en jeu, donc
+        rien ne pouvait signaler que ce test avait glissé vers un autre."""
+        self.barres = {"SPY": serie(self.N_BARRES, graine=10, choc_a_la_fin=20)}
         record, _ = self.lancer(("SPY",))
         verdict = record["verdicts"][0]
         self.assertFalse(verdict["tradeable"])
+
+        # Épingle le CAS, pas seulement le refus : sans ceci, le test peut
+        # glisser vers « pas d'edge » sans que personne ne le voie -- ce qui
+        # est exactement ce qui s'était produit.
+        from hindsight_guard import check_selection_leakage
+        import vol_strategy
+        rapport = check_selection_leakage(
+            vol_strategy.CANDIDATE_HV_WINDOWS,
+            lambda w, sp: vol_strategy.score_hv_window(w, sp, self.barres["SPY"]))
+        self.assertNotEqual(
+            rapport.full_winner, rapport.in_sample_winner,
+            "ce test n'exerce plus une VRAIE fuite : les deux fenêtres "
+            "désignent le même gagnant")
+        self.assertTrue(
+            rapport._plein_franchit_le_seuil(),
+            "ce test n'exerce plus une vraie fuite : rien ne franchit le seuil "
+            "même sur la fenêtre pleine, donc il n'y a pas d'edge à protéger")
+
         self.assertTrue(verdict["reason"].startswith("hindsight_guard:"),
                         "la raison ne porte pas le préfixe que renderLeakStat() "
                         "et renderDecisions() cherchent : %r" % verdict["reason"])
@@ -216,6 +269,64 @@ class TestPipelineComplet(BaseIntegration):
         self.assertIn("CANNOT CONCLUDE", sortie,
                       "la sortie imprime encore « LEAK DETECTED » pour un cas "
                       "où le garde dit ne pas pouvoir conclure")
+
+    def test_un_symbole_sans_edge_n_est_pas_compte_comme_une_fuite(self):
+        """Ajouté le 27/08 : le même défaut que celui corrigé le matin pour
+        « CANNOT CONCLUDE », dans la branche voisine.
+
+        Quand aucun candidat ne franchit le seuil ni en in-sample NI sur la
+        fenêtre pleine, agent.py affirmait que le gagnant « only wins on data
+        that wasn't knowable yet ». Son score est négatif : il ne gagne rien,
+        il perd des deux côtés. Pas de fuite — pas d'edge.
+
+        Ce n'est pas qu'une question de mots. renderLeakStat() compte les
+        raisons commençant par « hindsight_guard: » et les publie comme
+        « Hindsight leaks caught », le chiffre le plus mis en avant du projet.
+        Un symbole sans edge y serait affiché comme une prise du garde : une
+        exagération, dans un dossier dont tout l'argument est de ne pas en
+        faire.
+
+        Vérifié directement sur agent.evaluate_symbol via un rapport
+        fabriqué — provoquer ce cas par des barres synthétiques marcherait
+        aussi, mais dépendrait d'un tirage, et un test qui repose sur la
+        chance cesse un jour de tester ce qu'il annonce."""
+        import agent as agent_mod
+        from hindsight_guard import LeakageReport
+        rapport = LeakageReport(
+            candidates=[10, 90],
+            full_scores={10: -1.0, 90: -0.4},
+            in_sample_scores={10: -1.2, 90: -0.5},
+            full_winner=90, in_sample_winner=90,
+            in_sample_clears_bar=False, threshold=0.0)
+        self.assertFalse(rapport.agrees, "prérequis : on refuse de trader")
+        self.assertFalse(rapport._plein_franchit_le_seuil(),
+                         "prérequis : la fenêtre pleine ne franchit pas non plus")
+        texte = rapport.summary()
+        self.assertIn("NO EDGE", texte)
+        self.assertNotIn("LEAK DETECTED", texte)
+
+    def test_agent_py_n_annonce_pas_une_fuite_pour_un_symbole_sans_edge(self):
+        """Le pendant de bout en bout, ajouté après qu'une mutation a montré
+        que la correction d'agent.py n'était couverte par AUCUN test : le mien
+        visait LeakageReport.summary() directement, pas l'étiquetage d'agent.
+
+        `graine=3, calme_a_la_fin=60` est l'ancien décor du test phare — celui
+        dont on a découvert qu'il ne produisait pas de fuite mais un symbole
+        sans edge. Il retrouve ici son vrai emploi."""
+        self.barres = {"SPY": serie(self.N_BARRES, graine=3, calme_a_la_fin=60)}
+        record, sortie = self.lancer(("SPY",))
+        raison = record["verdicts"][0]["reason"]
+        self.assertIn("NO EDGE", raison,
+                      "le cas « rien ne gagne nulle part » n'est pas nommé : %r"
+                      % raison)
+        self.assertFalse(
+            raison.startswith("hindsight_guard:"),
+            "un symbole sans edge porte le préfixe réservé aux vraies prises : "
+            "renderLeakStat() le publierait comme « Hindsight leaks caught », "
+            "le chiffre le plus mis en avant du projet — %r" % raison)
+        self.assertNotIn("LEAK DETECTED", sortie,
+                         "la sortie annonce encore une fuite là où rien ne "
+                         "gagne sur aucune des deux fenêtres")
 
     def test_les_trois_refus_du_garde_ont_trois_raisons_distinctes(self):
         """« the agent refuses to trade and prints why » (README). Une seule

@@ -159,6 +159,29 @@ def evaluate_symbol(symbol: str, sharpe_threshold: float) -> SymbolVerdict:
                     + " -- a candidate that could not be scored is not a "
                       "candidate that lost, so this selection cannot be "
                       "certified leak-free")
+            elif not report.in_sample_clears_bar and not report._plein_franchit_le_seuil():
+                # AJOUTE le 27/08/2026, meme defaut que dans
+                # LeakageReport.summary(), corrige en meme temps. Quand AUCUN
+                # candidat ne franchit le seuil -- ni en in-sample, NI sur la
+                # fenetre pleine -- la branche du dessous affirmait que le
+                # gagnant « only wins on data that wasn't knowable yet ». Or son
+                # score est negatif : il ne gagne rien du tout, il perd des deux
+                # cotes. Pas de fuite, pas d'edge -- deux verdicts que ce projet
+                # ne peut pas se permettre de confondre.
+                #
+                # Le prefixe est DIFFERENT de « hindsight_guard: », et c'est le
+                # point qui compte : renderLeakStat() compte les raisons portant
+                # ce prefixe et les annonce comme « Hindsight leaks caught », le
+                # chiffre le plus mis en avant du projet. Un symbole sans edge
+                # y serait publie comme une prise du garde -- une exageration,
+                # dans un dossier dont tout l'argument est de ne pas en faire.
+                # Meme raisonnement que pour « CANNOT CONCLUDE », le 27/08.
+                etiquette = "NO EDGE"
+                raison = (
+                    "hindsight_guard NO EDGE: no candidate clears the threshold "
+                    "on either window -- the best full-window score (%r) doesn't "
+                    "clear it either, so this is not a leak, there is simply "
+                    "nothing worth selecting" % (report.full_winner,))
             elif not report.in_sample_clears_bar:
                 etiquette = "LEAK DETECTED"
                 raison = (

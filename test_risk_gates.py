@@ -480,6 +480,66 @@ class TestHindsightGuard(unittest.TestCase):
         self.assertFalse(r.agrees)
         self.assertFalse(r.in_sample_clears_bar)
 
+    def test_aucun_edge_nulle_part_n_est_pas_une_fuite(self):
+        """Ajouté le 27/08, trouvé en faisant tourner le pipeline complet sur
+        des barres synthétiques plausibles.
+
+        Quand AUCUN candidat ne franchit le seuil — ni en in-sample, ni sur la
+        fenêtre pleine — le résumé annonçait quand même :
+
+            LEAK DETECTED: this selection depends on data outside the
+              in-sample window.
+              full-window winner: 90  (score -0.3807)
+              -> the apparent winner exists only because the scoring window
+                 included data that would not have been knowable at decision
+                 time.
+
+        Le gagnant « apparent » a un score NÉGATIF. Il n'existe pas « à cause
+        de » données futures : il perd des deux côtés. Il n'y a pas de fuite,
+        il n'y a pas d'edge. Annoncer une fuite là où rien n'a fuité est un
+        faux positif dans le TITRE du module phare.
+
+        Le refus reste entier — on ne trade pas. Seule la RAISON change, et
+        c'est elle qu'un juge lit."""
+        r = self._verdict({"A": -0.4, "B": -1.0}, {"A": -0.5, "B": -1.2})
+        self.assertFalse(r.agrees, "prérequis : on refuse toujours de trader")
+        texte = r.summary()
+        self.assertNotIn("LEAK DETECTED", texte,
+                         "fuite annoncée alors que rien ne gagne nulle part :\n%s"
+                         % texte)
+        self.assertNotIn("only because", texte,
+                         "le résumé affirme une causalité fausse :\n%s" % texte)
+        self.assertIn("NO EDGE", texte)
+
+    def test_un_edge_qui_disparait_en_in_sample_reste_une_fuite(self):
+        """Témoin indispensable, et c'est LE cas que le module existe pour
+        attraper : la fenêtre pleine trouve quelque chose, l'in-sample non.
+        Là, le gagnant existe bel et bien à cause de données non
+        connaissables."""
+        r = self._verdict({"A": 2.0, "B": 1.0}, {"A": -0.5, "B": -1.2})
+        self.assertFalse(r.agrees)
+        texte = r.summary()
+        self.assertIn("LEAK DETECTED", texte)
+        self.assertIn("only because", texte)
+
+    def test_le_seuil_du_plein_est_strict_lui_aussi(self):
+        """Pile AU seuil ne franchit pas, sur la fenêtre pleine comme en
+        in-sample. Ajouté après qu'une mutation `>` -> `>=` soit restée verte :
+        mes scores étaient à -0.4 contre un seuil de 0.0, donc la frontière
+        n'était jamais touchée. Un test qui ne va pas au bord ne teste pas le
+        bord."""
+        from hindsight_guard import check_selection_leakage
+        r = check_selection_leakage(
+            ["A", "B"],
+            lambda c, w: ({"A": 0.0, "B": -1.0}[c] if w == "full"
+                          else {"A": -0.5, "B": -1.2}[c]),
+            threshold=0.0)
+        self.assertFalse(r._plein_franchit_le_seuil(),
+                         "un score PILE au seuil est compté comme le "
+                         "franchissant")
+        self.assertIn("NO EDGE", r.summary(),
+                      "pile au seuil des deux côtés doit rester « pas d'edge »")
+
     def test_le_seuil_est_strict(self):
         """Pile au seuil ne passe pas : `>` et non `>=`."""
         self.assertFalse(self._verdict({"A": 9.0}, {"A": 0.0}).in_sample_clears_bar)
