@@ -3027,6 +3027,92 @@ class TestEntreesAttendues(unittest.TestCase):
             garde_fou.alertes.clear()
 
 
+
+class TestComparabiliteDesDeuxStrategies(unittest.TestCase):
+    """STRATEGY_COMPARISON.md, un livrable, affirme mot pour mot :
+
+        « What IS comparable per symbol: hindsight_guard agreement [...] and
+          the in-sample Sharpe of each vetted parameter (same statistic, same
+          holdout window length, same computation). »
+
+    Vérifié le 27/08 : c'est VRAI. Les deux modules déclarent
+    IN_SAMPLE_HOLDOUT_DAYS = 20, découpent `bars[:len-20]` de la même façon, et
+    leurs deux `_sharpe` ont une logique identique au caractère près une fois
+    les docstrings retirées.
+
+    Mais vrai par COÏNCIDENCE de deux copies indépendantes. C'est la forme que
+    ce dépôt a déjà rencontrée deux fois dans la journée — la reconnaissance
+    des options dupliquée entre alpaca_cli et manage_exits, le verdict binaire
+    dupliqué entre backtest et compare_strategies — et les deux fois les
+    copies avaient DÉJÀ divergé.
+
+    Ici la divergence ne casserait rien de visible : elle rendrait simplement
+    FAUSSE une phrase publiée, sans que personne ne s'en aperçoive. Les deux
+    modules restent séparés (momentum est présentée comme une stratégie
+    distincte) ; c'est leur ÉQUIVALENCE qui est figée."""
+
+    RACINE = Path(__file__).resolve().parent
+
+    def _logique(self, fichier, nom_fonction):
+        """Le corps d'une fonction, docstring retirée, normalisé par l'AST.
+
+        Comparer le TEXTE échouerait sur un commentaire ou une indentation ;
+        comparer l'AST compare ce que le code FAIT."""
+        import ast
+        arbre = ast.parse((self.RACINE / fichier).read_text(encoding="utf-8"), fichier)
+        fn = next((n for n in ast.walk(arbre)
+                   if isinstance(n, ast.FunctionDef) and n.name == nom_fonction), None)
+        self.assertIsNotNone(fn, "%s introuvable dans %s" % (nom_fonction, fichier))
+        corps = fn.body
+        if corps and isinstance(corps[0], ast.Expr) and isinstance(corps[0].value, ast.Constant):
+            corps = corps[1:]
+        return "\n".join(ast.unparse(n) for n in corps)
+
+    def test_l_instrument_extrait_bien_quelque_chose(self):
+        """Contrôle d'instrument : deux corps VIDES seraient égaux."""
+        logique = self._logique("vol_strategy.py", "_sharpe")
+        self.assertIn("pstdev", logique,
+                      "l'extraction ne rend plus la logique de _sharpe : ce "
+                      "test comparerait deux chaînes vides")
+        self.assertGreater(len(logique.splitlines()), 3)
+
+    def test_les_deux_sharpe_calculent_la_meme_chose(self):
+        a = self._logique("vol_strategy.py", "_sharpe")
+        b = self._logique("momentum_strategy.py", "_sharpe")
+        if a != b:
+            import difflib
+            diff = "\n".join(difflib.unified_diff(
+                a.splitlines(), b.splitlines(), "vol_strategy", "momentum", lineterm=""))
+            self.fail("les deux _sharpe ont divergé, et STRATEGY_COMPARISON.md "
+                      "affirme pourtant « same statistic, same computation » :\n%s"
+                      % diff)
+
+    def test_les_deux_holdouts_ont_la_meme_longueur(self):
+        import vol_strategy, momentum_strategy
+        self.assertEqual(
+            vol_strategy.IN_SAMPLE_HOLDOUT_DAYS,
+            momentum_strategy.IN_SAMPLE_HOLDOUT_DAYS,
+            "les deux stratégies retiennent des fenêtres de holdout "
+            "DIFFÉRENTES : leurs Sharpe in-sample ne sont plus comparables, "
+            "et STRATEGY_COMPARISON.md affirme le contraire")
+
+    def test_les_deux_decoupes_in_sample_sont_identiques(self):
+        """La longueur du holdout ne suffit pas : encore faut-il le retirer du
+        même côté de la série."""
+        a = self._logique("vol_strategy.py", "score_hv_window")
+        b = self._logique("momentum_strategy.py", "score_lookback")
+        # Seuls le PARAMETRE balaye et la fonction de rendements different
+        # legitimement entre les deux strategies. Tout le reste doit coincider.
+        # Ma premiere version normalisait aussi « window », ce qui MASQUAIT une
+        # vraie collision : momentum appelait « window » son parametre de
+        # SPLIT, le mot qui designe un entier dans vol_strategy. Renomme.
+        norm = lambda t: (t.replace("window", "P").replace("lookback", "P")
+                          .replace("_vol_strategy_returns", "F")
+                          .replace("_tsmom_returns", "F"))
+        self.assertEqual(norm(a), norm(b),
+                         "les deux fonctions de score ne découpent plus "
+                         "l'in-sample de la même façon")
+
 class TestAucunSeuilMort(unittest.TestCase):
     """La thèse de ce projet, appliquée à lui-même.
 

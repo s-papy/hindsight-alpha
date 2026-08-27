@@ -99,21 +99,37 @@ def _tsmom_returns(bars: Sequence[Bar], lookback: int) -> List[float]:
     return strat_rets
 
 
-def score_lookback(lookback: int, window: str, bars: Sequence[Bar]) -> float:
+def score_lookback(lookback: int, split: str, bars: Sequence[Bar]) -> float:
     """score_fn for hindsight_guard.check_selection_leakage.
 
-    window="full"      -> Sharpe computed using every bar fetched.
-    window="in_sample"  -> Sharpe computed using every bar except the most
+    split="full"       -> Sharpe computed using every bar fetched.
+    split="in_sample"   -> Sharpe computed using every bar except the most
                             recent IN_SAMPLE_HOLDOUT_DAYS — what would have
                             been knowable before "today".
-    """
-    if window == "full":
+
+    RENOMME le 27/08/2026. Ce parametre s'appelait `window` -- le meme mot
+    qui, dans vol_strategy, designe la FENETRE de volatilite historique, un
+    ENTIER. Ici il portait "full" / "in_sample", une chaine. Deux sens
+    opposes pour le meme nom, dans les deux modules que
+    STRATEGY_COMPARISON.md invite explicitement a comparer :
+
+        « the in-sample Sharpe of each vetted parameter (same statistic,
+          same holdout window length, same computation) »
+
+    Aucune casse en production -- les trois appelants passent leurs arguments
+    par POSITION -- mais deux consequences reelles : un appel par mot-cle
+    `split=` levait un TypeError ici et passait dans vol_strategy, et un
+    lecteur qui verifie la phrase ci-dessus en lisant les deux fonctions cote
+    a cote devait d'abord defaire cette collision de noms.
+
+    Une affirmation publiee doit etre verifiable a la lecture."""
+    if split == "full":
         usable_bars = bars
-    elif window == "in_sample":
+    elif split == "in_sample":
         cutoff = max(0, len(bars) - IN_SAMPLE_HOLDOUT_DAYS)
         usable_bars = bars[:cutoff]
     else:
-        raise ValueError(f"unknown window: {window!r}")
+        raise ValueError(f"unknown split: {split!r}")
 
     strat_rets = _tsmom_returns(usable_bars, lookback)
     return _sharpe(strat_rets)
