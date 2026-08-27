@@ -202,7 +202,7 @@ def _load_state() -> dict:
     if not STATE_FILE.exists():
         return {}
     try:
-        return json.loads(STATE_FILE.read_text())
+        return json.loads(STATE_FILE.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
         print(
             f"WARNING: {STATE_FILE} exists but is corrupted (not valid JSON) -- likely a "
@@ -282,7 +282,7 @@ def _save_state(state: dict) -> bool:
     # the swap so the content is durable before it becomes visible.
     tmp = STATE_FILE.with_name(STATE_FILE.name + ".tmp")
     try:
-        with open(tmp, "w") as fh:
+        with open(tmp, "w", encoding="utf-8") as fh:
             fh.write(json.dumps(state, indent=2))
             fh.flush()
             os.fsync(fh.fileno())
@@ -345,6 +345,8 @@ def _state_lock(timeout_s: float = 10.0):
     """
     lock_path = STATE_FILE.with_name(STATE_FILE.name + ".lock")
     lock_path.parent.mkdir(parents=True, exist_ok=True)
+    # Pas d'encoding : ce descripteur ne sert QU'a flock(), on n'y lit ni
+    # n'y ecrit jamais de texte. Le preciser suggererait le contraire.
     fh = open(lock_path, "a+")
     try:
         limite = time.monotonic() + timeout_s
@@ -682,7 +684,7 @@ def is_halted() -> tuple:
         )
 
     try:
-        content = HALT_FILE.read_text().strip()
+        content = HALT_FILE.read_text(encoding="utf-8").strip()
     except OSError as err:
         return True, (
             "HALT file present but unreadable (%s) -- paused. Its reason text "

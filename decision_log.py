@@ -17,6 +17,20 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List
 
+# Encodage EXPLICITE partout ou un fichier texte est lu ou ecrit (27/08/2026).
+# Sans lui, Python utilise celui de la locale. Mesure : sur macOS il rend
+# UTF-8 quoi qu'il arrive -- meme sous `env -i`, meme avec LANG=C -- donc le
+# defaut n'est PAS atteignable sur la plateforme cible. Mais la CI tourne sur
+# Linux, ou LANG=C donne de l'ASCII, et un juge qui clone dans un conteneur
+# (ou LANG est souvent absent) est dans ce cas la.
+#
+# Demontre plutot qu'affirme, avec un codec ascii force :
+#   ecriture -> UnicodeEncodeError sur le premier caractere accentue
+#   lecture  -> UnicodeDecodeError sur le meme octet
+#
+# La consequence porte sur la PREUVE PUBLIEE : log_run() leverait et
+# l'enregistrement serait perdu du fichier, read_log() leverait et le tableau
+# de bord ne se construirait plus.
 LOG_FILE = Path(__file__).parent / "decision_log.jsonl"
 
 # NOTE 26/08/2026 : read_log() citait plus bas un troisieme exemple du principe
@@ -79,7 +93,7 @@ def log_run(record: Dict[str, Any]) -> None:
     # Caviardage sur la ligne SERIALISEE : une cle enfouie a n'importe quelle
     # profondeur du dictionnaire est attrapee, sans avoir a parcourir la
     # structure ni a deviner quels champs peuvent en contenir.
-    with LOG_FILE.open("a") as f:
+    with LOG_FILE.open("a", encoding="utf-8") as f:
         f.write(caviarder(json.dumps(record)) + "\n")
 
 
@@ -138,7 +152,7 @@ def read_log(limit: int = 30) -> List[Dict[str, Any]]:
     freeze the public dashboard for the rest of the hackathon week."""
     if not LOG_FILE.exists():
         return []
-    lines = LOG_FILE.read_text().strip().splitlines()
+    lines = LOG_FILE.read_text(encoding="utf-8").strip().splitlines()
     records = []
     for i, line in enumerate(lines, start=1):
         if not line.strip():

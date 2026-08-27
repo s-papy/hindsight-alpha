@@ -50,7 +50,7 @@ def _read_monitor_status() -> dict | None:
     file should degrade the dashboard's health banner to 'no data', never
     break the whole snapshot build."""
     try:
-        return json.loads(MONITOR_STATUS_FILE.read_text())
+        return json.loads(MONITOR_STATUS_FILE.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
 
@@ -114,7 +114,7 @@ def write_snapshot() -> Path:
     # file.
     tmp = DATA_FILE.with_name(DATA_FILE.name + ".tmp")
     try:
-        with open(tmp, "w") as fh:
+        with open(tmp, "w", encoding="utf-8") as fh:
             fh.write(json.dumps(snapshot, indent=2))
             fh.flush()
             os.fsync(fh.fileno())

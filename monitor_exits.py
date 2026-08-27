@@ -110,14 +110,14 @@ def _load_dedup_state() -> Dict[str, str]:
     current failure as new," which just means one extra log line, not a
     silently-cleared safety lock."""
     try:
-        return json.loads(DEDUP_FILE.read_text())
+        return json.loads(DEDUP_FILE.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return {}
 
 
 def _save_dedup_state(state: Dict[str, str]) -> None:
     try:
-        DEDUP_FILE.write_text(json.dumps(state))
+        DEDUP_FILE.write_text(json.dumps(state), encoding="utf-8")
     except OSError as e:
         print(f"  WARNING: could not persist {DEDUP_FILE.name} ({type(e).__name__}: {e}) -- "
               "a persistent failure may get re-logged more often than the usual heartbeat until this is fixed.")
@@ -135,7 +135,7 @@ def _write_last_run_status(record: Dict[str, object], now: datetime) -> None:
             "last_run_at": now.isoformat(),
             "outcome": record.get("outcome", "unknown"),
             "market_open": record.get("market_open"),
-        }))
+        }), encoding="utf-8")
     except Exception as e:
         print(f"  WARNING: could not persist {MONITOR_STATUS_FILE.name} ({type(e).__name__}: {e}) -- "
               "the dashboard's health indicator may show a stale status until this is fixed.")

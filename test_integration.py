@@ -1700,6 +1700,54 @@ class TestCompatibiliteFuture(unittest.TestCase):
                     imports.append((chemin.name, n.lineno, n.module.split(".")[0]))
         return attributs, imports
 
+    def test_toute_lecture_ecriture_de_texte_precise_son_encodage(self):
+        """Sans `encoding=`, Python utilise celui de la LOCALE — donc le même
+        code ne lit pas la même chose selon la machine.
+
+        Mesuré le 27/08 : sur macOS, Python rend UTF-8 quoi qu'il arrive, même
+        sous `env -i`, même avec LANG=C. Le défaut n'est donc PAS atteignable
+        sur la plateforme cible. Mais la CI tourne sur Linux, où LANG=C donne de
+        l'ASCII, et un juge qui clone dans un conteneur — où LANG est souvent
+        absent — est dans ce cas-là.
+
+        Démontré plutôt qu'affirmé, avec un codec ascii forcé : l'écriture lève
+        UnicodeEncodeError sur le premier caractère accentué, la lecture lève
+        UnicodeDecodeError sur le même octet. La conséquence porte sur la PREUVE
+        PUBLIÉE — log_run() lèverait et l'enregistrement serait perdu du
+        fichier, read_log() lèverait et le tableau de bord ne se construirait
+        plus.
+
+        Une seule exception, vérifiée par son nom : le descripteur du verrou
+        d'état, qui ne sert qu'à flock() et où l'on n'écrit jamais de texte.
+        Le préciser suggérerait le contraire."""
+        import ast
+        fautifs = []
+        for chemin in self._modules():
+            lignes = chemin.read_text(encoding="utf-8").splitlines()
+            for n in ast.walk(ast.parse("\n".join(lignes), str(chemin))):
+                if not isinstance(n, ast.Call):
+                    continue
+                nom = (n.func.id if isinstance(n.func, ast.Name)
+                       else getattr(n.func, "attr", None))
+                if nom not in ("open", "read_text", "write_text"):
+                    continue
+                if "encoding" in {k.arg for k in n.keywords}:
+                    continue
+                # un mode binaire n'a pas d'encodage
+                if any(isinstance(a, ast.Constant) and isinstance(a.value, str)
+                       and "b" in a.value for a in n.args[1:2]):
+                    continue
+                # le verrou : flock seulement, jamais de texte
+                cible = n.args[0] if n.args else None
+                if isinstance(cible, ast.Name) and cible.id == "lock_path":
+                    continue
+                fautifs.append("%s:%d %s" % (chemin.name, n.lineno,
+                                             lignes[n.lineno - 1].strip()[:50]))
+        self.assertEqual(fautifs, [],
+                         "lecture/écriture de texte sans encoding= : %s — le "
+                         "résultat dépendrait alors de la locale de la machine"
+                         % "; ".join(fautifs))
+
     def test_aucun_appel_datetime_utcnow(self):
         """datetime.utcnow() est DEPRECIE depuis 3.12 et sera SUPPRIME. Le jour
         ou il disparait, l'agent ne demarre plus -- pas un avertissement, une

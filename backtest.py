@@ -212,7 +212,7 @@ def main() -> None:
         return
 
     report = format_report(results)
-    RESULTS_FILE.write_text(report)
+    RESULTS_FILE.write_text(report, encoding="utf-8")
     print(f"\nWrote {RESULTS_FILE}")
     print(report)
 
