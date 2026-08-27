@@ -589,6 +589,71 @@ class TestCompteurDeFuites(BaseRendu):
         self.assertEqual(r["affiche"], "none")
 
 
+
+class TestIsolationParEnregistrement(BaseRendu):
+    """Ajouté le 27/08 au soir. Les cinq fonctions de rendu s'exécutent dans
+    UN SEUL try, et renderDecisions boucle sur les enregistrements sans
+    isolation. Mesuré :
+
+        trois enregistrements sains        -> tableau rendu, 694 caractères
+        un exit_actions en CHAÎNE          -> TypeError, tableau VIDE
+        un enregistrement null             -> TypeError, tableau VIDE
+
+    Un seul enregistrement malformé vide donc la totalité du tableau des
+    décisions — la section qu'un juge regarde en premier — et empêche au
+    passage les sections suivantes de se rendre.
+
+    Ce n'est pas théorique : le README dit que decision_log.jsonl est
+    committé et JAMAIS réécrit, donc les anciennes formes d'enregistrement y
+    restent pour toujours (« both have to render, not just the new one »).
+
+    Et ce dépôt applique déjà l'isolation par élément PARTOUT ailleurs —
+    manage_exits, evaluate_symbol, la boucle d'entrée d'agent.py,
+    backtest.py, compare_strategies.py. La page publique est le seul endroit
+    qui ne l'avait pas."""
+
+    SAIN = ('{timestamp:"2026-08-31T19:37:00Z", outcome:"order_submitted", '
+            'trades:[]}')
+
+    def _rendu(self, decisions_js):
+        r = self.executer("""
+            renderDecisions([%s]);
+            _resultats.html = document.getElementById('decisions-container').innerHTML;
+        """ % decisions_js)
+        return r["html"]
+
+    def test_un_enregistrement_casse_ne_vide_pas_le_tableau(self):
+        for casse, cas in (
+                ('{timestamp:"2026-08-31T19:37:00Z", outcome:"checked", '
+                 'run_type:"exit_monitor", exit_actions:"cassé"}', "exit_actions en chaîne"),
+                ('null', "enregistrement null"),
+                ('{timestamp:"2026-08-31T19:37:00Z", outcome:"x", verdicts:"cassé"}',
+                 "verdicts en chaîne")):
+            with self.subTest(cas=cas):
+                html = self._rendu("%s, %s, %s" % (self.SAIN, casse, self.SAIN))
+                self.assertTrue(html,
+                                "%s : le tableau est VIDE — un seul "
+                                "enregistrement a tout emporté" % cas)
+                self.assertGreaterEqual(
+                    html.count("<tr>"), 3,
+                    "%s : les enregistrements SAINS ont disparu avec lui "
+                    "(%d lignes)" % (cas, html.count("<tr>")))
+
+    def test_l_enregistrement_casse_est_signale_et_non_masque(self):
+        """Sauter l'enregistrement en silence serait le pendant exact du
+        défaut : la page montrerait moins que ce que le journal contient,
+        sans le dire. On rend une ligne qui l'annonce."""
+        html = self._rendu('%s, null' % self.SAIN)
+        self.assertIn("could not be rendered", html.lower(),
+                      "l'enregistrement illisible disparaît sans un mot : %s"
+                      % html[:200])
+
+    def test_des_enregistrements_sains_restent_intacts(self):
+        """Témoin : l'isolation ne doit rien changer au cas normal."""
+        html = self._rendu("%s, %s" % (self.SAIN, self.SAIN))
+        self.assertEqual(html.count("<tr>"), 3, html[:200])   # 2 lignes + entête
+        self.assertNotIn("could not be rendered", html.lower())
+
 class TestEchappement(BaseRendu):
     """Tout ce qui vient de data.json était interpolé BRUT dans innerHTML.
 

@@ -793,12 +793,53 @@ function renderDecisions(decisions) {
   // Le separateur n'apparait QUE s'il separe vraiment quelque chose : rien
   // au-dessus ou rien en dessous, et il ne serait que du bruit.
   const KICKOFF_MS = Date.UTC(2026, 7, 28, 15, 0);   // 28 aout 2026, 15:00 UTC
-  const horodatage = (d) => d.timestamp ? new Date(d.timestamp).getTime() : NaN;
+  // `d &&` ajoute le 27/08 : cette fonction tourne dans les deux `some()`
+  // ci-dessous, AVANT la boucle isolee, donc un enregistrement null y
+  // levait hors de toute protection et vidait le tableau malgre elle.
+  const horodatage = (d) => (d && d.timestamp) ? new Date(d.timestamp).getTime() : NaN;
   const aPendant = decisions.some(d => horodatage(d) >= KICKOFF_MS);
   const aAvant   = decisions.some(d => horodatage(d) <  KICKOFF_MS);
   let separateurPose = !(aPendant && aAvant);
 
+  // AJOUTE 27/08 au soir. Cette boucle n'avait AUCUNE isolation par
+  // enregistrement, alors que ce depot l'applique partout ailleurs --
+  // manage_exits, evaluate_symbol, la boucle d'entree d'agent.py,
+  // backtest.py, compare_strategies.py. La page publique etait le seul
+  // endroit qui ne l'avait pas.
+  //
+  // Mesure : un seul enregistrement malforme vide la TOTALITE du tableau.
+  //
+  //     trois enregistrements sains   -> tableau rendu
+  //     un exit_actions en CHAINE     -> TypeError, tableau VIDE
+  //     un enregistrement null        -> TypeError, tableau VIDE
+  //
+  // Et l'exception remonte jusqu'au try de loadDashboard(), donc les
+  // sections rendues APRES celle-ci ne se rendent pas non plus.
+  //
+  // Ce n'est pas theorique : le README dit que decision_log.jsonl est
+  // committe et JAMAIS reecrit, donc les anciennes formes d'enregistrement y
+  // restent pour toujours (« both have to render, not just the new one »).
+  //
+  // Un enregistrement illisible devient donc UNE LIGNE qui le dit, pas un
+  // tableau vide. Le sauter en silence serait le pendant exact du defaut :
+  // la page montrerait moins que ce que le journal contient, sans le dire.
   const rows = decisions.map(d => {
+    try {
+      return _ligneDecision(d);
+    } catch (err) {
+      const quand = (d && d.timestamp) ? esc(String(d.timestamp)) : 'unknown time';
+      return `<tr><td>${quand}</td><td colspan="3">`
+        + `This record could not be rendered (${esc(String(err && err.message))}). `
+        + `It is still in decision_log.jsonl, unchanged — nothing was dropped.`
+        + `</td></tr>`;
+    }
+  }).join('');
+  el.innerHTML = `<div style="overflow-x:auto"><table>
+    <thead><tr><th>When</th><th>Outcome</th><th>Trade</th><th>Symbol verdicts</th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table></div>`;
+
+  function _ligneDecision(d) {
     const when = d.timestamp ? new Date(d.timestamp).toLocaleString() : '—';
     const verdicts = (d.verdicts || []).map(v => {
       // hindsight_guard's own refusal reason has a fixed prefix (agent.py's
@@ -832,11 +873,7 @@ function renderDecisions(decisions) {
       <td>${trade}</td>
       <td><ul class="verdict-list">${verdicts}</ul></td>
     </tr>`;
-  }).join('');
-  el.innerHTML = `<div style="overflow-x:auto"><table>
-    <thead><tr><th>When</th><th>Outcome</th><th>Trade</th><th>Symbol verdicts</th></tr></thead>
-    <tbody>${rows}</tbody>
-  </table></div>`;
+  }
 }
 
 function renderLeakStat(decisions) {
