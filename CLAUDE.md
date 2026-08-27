@@ -24,7 +24,7 @@ Après ça, chaque `git commit` relance `garde_fou.py` et refuse le commit si le
 
 ## Contraintes non négociables du projet (répétées tout au long du sprint hackathon)
 
-- **`.env.hackathon` et le compte Alpaca `PA3K8MP3MF0U` : intouchables avant le kickoff du 28/08/2026**, même par accident.
+- **`.env.hackathon` et le compte Alpaca qu'il désigne : intouchables avant le kickoff du 28/08/2026**, même par accident.
 - **Jamais `--live` au CLI, jamais `ALPACA_LIVE_TRADE=true`** — paper trading uniquement, `config.py` refuse de tourner sinon (vérifié par `garde_fou.py`).
 - **Aucun seuil de risque modifié** (`MAX_RISK_PCT_PER_TRADE`, `MAX_TOTAL_RISK_PCT`, `MAX_SECTOR_EXPOSURE_PCT`, `WEEKLY_LOSS_LOCK_PCT`, `MAX_OPEN_POSITIONS`, `MAX_CONSECUTIVE_LOSSES`, `CHEAP_VOL_PERCENTILE`, `HEARTBEAT_SECONDS`) sans décision humaine explicite.
 - **La stratégie live reste `vol_strategy.py`** — bascule vers `momentum_strategy.py` réservée à une décision humaine explicite, même si `momentum_strategy` passe `hindsight_guard` plus proprement (4/4 vs 3/4, observation honnête déjà documentée, pas une invitation à changer).

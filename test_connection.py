@@ -28,7 +28,7 @@ def main() -> None:
     # (an internal UUID) and `account_number` (the human-visible "PA..."
     # number shown on the dashboard's account switcher -- exactly what
     # .env.example tells you to paste here, and what .env.hackathon already
-    # holds: PA3K8MP3MF0U). Comparing ALPACA_ACCOUNT_ID against `id` would
+    # holds). Comparing ALPACA_ACCOUNT_ID against `id` would
     # compare a "PA..." string against a UUID -- never equal by construction,
     # so this check would print a false "mismatch" warning on every single
     # correctly-configured run. Compare against account_number instead (see

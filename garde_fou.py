@@ -146,7 +146,7 @@ def controle_journal() -> None:
 # ── CONTRÔLE 2 : LE COMPTE HACKATHON EST UN FICHIER SCELLÉ AVANT LE KICKOFF ─
 # Née de la contrainte répétée littéralement des dizaines de fois dans
 # cette session : « ne jamais toucher .env.hackathon ni le compte
-# PA3K8MP3MF0U avant le kickoff du 28/08 ». C'est l'équivalent exact d'un
+# qu'il désigne avant le kickoff du 28/08 ». C'est l'équivalent exact d'un
 # fichier « scellé » sur un projet antérieur — sauf que la pire façon de le
 # "modifier"
 # ici serait de le committer par erreur (fuite de clé API), pas de changer
