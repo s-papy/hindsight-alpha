@@ -307,7 +307,7 @@ cp .env.example .env
 # Alpaca dashboard, Home page -> API Keys widget). Never the live-account keys.
 
 # 4. Run
-python3 -m unittest discover   # 196 offline tests, no credentials needed
+python3 -m unittest discover   # 202 offline tests, no credentials needed
 python test_connection.py      # confirms CLI install + credentials + network
 python agent.py --dry-run      # runs the full leakage check, no order placed
 python agent.py                # if vetted, places a real (paper) options order
@@ -333,11 +333,11 @@ python agent.py                # if vetted, places a real (paper) options order
   independently of `agent.py`'s once-a-day cycle. See its module docstring
   for the "why".
 - `launchagents/` — the three macOS scheduling definitions, versioned rather
-  than living only on one machine: `com.hindsightalpha.monitor-exits.plist`
+  than living only on one machine: `launchagents/com.hindsightalpha.monitor-exits.plist`
   (every 15 minutes through the session, including the close),
-  `com.hindsightalpha.market-hours-awake.plist` (a `caffeinate` job that keeps
+  `launchagents/com.hindsightalpha.market-hours-awake.plist` (a `caffeinate` job that keeps
   the machine awake through market hours), and
-  `com.hindsightalpha.publish-dashboard.plist` (see "Hosted dashboard" for why
+  `launchagents/com.hindsightalpha.publish-dashboard.plist` (see "Hosted dashboard" for why
   that one pushes automatically). `agent.py` itself is
   deliberately NOT scheduled — the entry decision is launched by hand, so a
   human sees it happen.

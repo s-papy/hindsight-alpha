@@ -1869,6 +1869,106 @@ def controle_reveil_programme() -> None:
     )
 
 
+def controle_renvois_resolvent() -> None:
+    """Chaque fichier cite dans un livrable existe-t-il vraiment ?
+
+    AJOUTE le 27/08/2026. Un juge qui suit un renvoi vers un fichier absent ne
+    voit pas une coquille : il voit un dossier qui parle de choses qui n'y sont
+    pas.
+
+    Ce n'est pas theorique. Une session anterieure a trouve 37 renvois morts
+    dans ce depot, dont un qui disait litteralement au jury d'aller consulter
+    les `BRIEF_*.md` « at the repo root » -- alors qu'ils venaient d'etre
+    retires du suivi git. Le fichier existait encore sur la machine de
+    l'auteur ; il n'existait plus pour personne d'autre.
+
+    C'est precisement le piege : `os.path.exists` sur SA machine dit oui.
+    On croise donc contre ce que GIT SUIT, c'est-a-dire ce qu'un lecteur
+    recevra -- en acceptant aussi un fichier present mais non suivi, qui est un
+    autre probleme (celui-la se voit au clone, pas ici).
+
+    Les motifs a etoile (`BRIEF_*.md`) sont developpes : c'est la forme exacte
+    du renvoi mort d'origine, et une simple existence de chemin ne l'aurait pas
+    attrape.
+
+    Portee : les livrables en Markdown, ou les chemins sont cites entre
+    accents graves. Le .docx et le .pptx citent en prose, sans marqueur fiable ;
+    y deviner des chemins produirait des faux positifs, et un controle qui crie
+    a tort s'apprend a ignorer.
+    """
+    try:
+        suivis = subprocess.run(
+            ["git", "ls-files"], cwd=RACINE, capture_output=True, text=True,
+            timeout=20,
+        )
+        connus = set(suivis.stdout.split()) if suivis.returncode == 0 else set()
+    except Exception as exc:
+        alerte("git", "impossible de lister les fichiers suivis (%s) -- les "
+                      "renvois des livrables n'ont PAS ete verifies." % exc)
+        return
+    if not connus:
+        alerte("git", "aucun fichier suivi listable -- les renvois des livrables "
+                      "n'ont PAS ete verifies. Une liste vide est indistinguable "
+                      "d'un depot sans renvoi mort.")
+        return
+
+    def _volontairement_ignore(rel_cite: str) -> bool:
+        """Le chemin cite est-il gitignore, donc absent d'un clone a dessein ?"""
+        try:
+            r = subprocess.run(["git", "check-ignore", "-q", rel_cite],
+                               cwd=RACINE, capture_output=True, timeout=15)
+            return r.returncode == 0
+        except Exception:
+            return False
+
+    MOTIF = re.compile(
+        r"`([A-Za-z0-9_][A-Za-z0-9_.*/-]*"
+        r"\.(?:py|md|json|jsonl|yml|yaml|html|plist|txt|docx|pptx|sh))`")
+
+    for rel in ("README.md", os.path.join("submission", "Video_Script.md")):
+        chemin = os.path.join(RACINE, rel)
+        if not os.path.exists(chemin):
+            continue
+        texte = open(chemin, encoding="utf-8", errors="replace").read()
+        morts = []
+        for m in MOTIF.finditer(texte):
+            cite = m.group(1)
+            # Une URL relative de la page (./data.json) n'est pas un chemin du
+            # depot : elle est resolue par le navigateur, pas par un lecteur.
+            if cite.startswith("./") or cite.startswith("http"):
+                continue
+            if "*" in cite:
+                import fnmatch
+                if any(fnmatch.fnmatch(f, cite) or fnmatch.fnmatch(
+                        os.path.basename(f), cite) for f in connus):
+                    continue
+            elif cite in connus:
+                continue
+            elif _volontairement_ignore(cite):
+                # RESSERRE aussitot ecrit, par un clone frais -- c'est-a-dire ce
+                # que voit la CI. La premiere version acceptait aussi
+                # `os.path.exists`, donc elle passait sur MA machine (ou
+                # state.json existe, genere a l'execution) et CRIAIT sur un
+                # clone. Un controle qui crie a chaque run de CI est un controle
+                # qu'on apprend a ignorer.
+                #
+                # Un fichier gitignore est ABSENT DU CLONE PAR CONSTRUCTION :
+                # le README le decrit comme cree au vol, pas comme livre. Ce
+                # n'est pas un renvoi mort.
+                continue
+            if cite not in morts:
+                morts.append(cite)
+        if morts:
+            alerte(
+                rel,
+                "cite %d fichier(s) que le depot ne contient pas : %s. Un "
+                "lecteur qui suit ce renvoi ne trouve rien -- exactement ce qui "
+                "est arrive quand les notes internes ont ete retirees du suivi "
+                "git alors que ce fichier y renvoyait encore."
+                % (len(morts), ", ".join(morts[:6])),
+            )
+
+
 def main() -> int:
     print("=" * 74)
     print("GARDE-FOU — hindsight-alpha — %s" % datetime.now().strftime("%d/%m/%Y %H:%M"))
@@ -1892,6 +1992,7 @@ def main() -> int:
         controle_readme_decrit_les_agents,
         controle_aucun_identifiant_dans_les_fichiers_publies,
         controle_reveil_programme,
+        controle_renvois_resolvent,
     )
     for controle in CONTROLES:
         controle()

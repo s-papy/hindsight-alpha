@@ -1550,5 +1550,88 @@ class TestReveilProgramme(unittest.TestCase):
         self.assertNotIn("REVEIL", self._sortie(self.SORTIE_SANS, env_ci=True))
 
 
+@unittest.skipUnless(shutil.which("git"), "git absent")
+class TestRenvoisResolvent(unittest.TestCase):
+    """Un juge qui suit un renvoi vers un fichier absent ne voit pas une
+    coquille : il voit un dossier qui parle de choses qui n'y sont pas.
+
+    Ce n'est pas théorique. Une session antérieure a trouvé 37 renvois morts
+    dans ce dépôt, dont un qui disait littéralement au jury d'aller consulter
+    les `BRIEF_*.md` « at the repo root » — alors qu'ils venaient d'être
+    retirés du suivi git. Le fichier existait encore sur la machine de
+    l'auteur ; il n'existait plus pour personne d'autre.
+    """
+
+    RACINE = Path(__file__).resolve().parent
+
+    def _sortie(self, readme, gitignore="", fichiers=()):
+        import garde_fou
+        d = Path(tempfile.mkdtemp(prefix="hindsight-renvois-"))
+        try:
+            shutil.copy(self.RACINE / "garde_fou.py", d / "garde_fou.py")
+            (d / "README.md").write_text(readme, encoding="utf-8")
+            if gitignore:
+                (d / ".gitignore").write_text(gitignore, encoding="utf-8")
+            for nom in fichiers:
+                (d / nom).write_text("x\n", encoding="utf-8")
+            for args in (["init", "-q", "."], ["add", "-A"]):
+                subprocess.run([shutil.which("git")] + args, cwd=str(d),
+                               capture_output=True, timeout=30)
+            proc = subprocess.run([sys.executable, "garde_fou.py"], cwd=str(d),
+                                  capture_output=True, text=True, timeout=120)
+            return proc.stdout + proc.stderr
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
+    def test_un_renvoi_vers_un_fichier_absent_est_signale(self):
+        sortie = self._sortie("Voir `NOTES_INTERNES.md` pour le detail.\n")
+        self.assertIn("NOTES_INTERNES.md", sortie)
+        self.assertIn("que le depot ne contient pas", sortie)
+
+    def test_un_motif_a_etoile_sans_correspondance_est_signale(self):
+        """La forme EXACTE du renvoi mort d'origine. Une simple vérification
+        d'existence de chemin ne l'aurait pas attrapé : `BRIEF_*.md` n'est pas
+        un chemin, c'est un motif."""
+        sortie = self._sortie("See the `BRIEF_*.md` files at the repo root.\n")
+        self.assertIn("BRIEF_*.md", sortie)
+
+    def test_un_motif_a_etoile_qui_correspond_ne_declenche_rien(self):
+        sortie = self._sortie("See the `BRIEF_*.md` files.\n",
+                              fichiers=("BRIEF_sprint.md",))
+        self.assertNotIn("que le depot ne contient pas", sortie)
+
+    def test_un_fichier_gitignore_n_est_pas_un_renvoi_mort(self):
+        """LE contrôle qui compte : c'est un clone frais — donc la CI — qui a
+        montré le défaut. La première version acceptait aussi os.path.exists,
+        donc elle passait sur la machine de l'auteur (où state.json existe,
+        généré à l'exécution) et CRIAIT sur un clone. Un contrôle qui crie à
+        chaque run de CI est un contrôle qu'on apprend à ignorer.
+
+        Un fichier gitignoré est absent du clone PAR CONSTRUCTION : le README
+        le décrit comme créé au vol, pas comme livré."""
+        sortie = self._sortie("L'agent écrit `state.json` à l'exécution.\n",
+                              gitignore="state.json\n")
+        self.assertNotIn("state.json", sortie)
+
+    def test_un_fichier_suivi_ne_declenche_rien(self):
+        """Contrôle : sans lui, tout signaler passerait les tests ci-dessus."""
+        sortie = self._sortie("Voir `agent.py` pour la boucle.\n",
+                              fichiers=("agent.py",))
+        self.assertNotIn("que le depot ne contient pas", sortie)
+
+    def test_le_depot_reel_n_a_aucun_renvoi_mort(self):
+        """Sur le vrai dépôt, tel qu'il est aujourd'hui."""
+        import garde_fou
+        avant = len(garde_fou.alertes)
+        try:
+            garde_fou.controle_renvois_resolvent()
+            morts = [a for a in garde_fou.alertes[avant:]
+                     if "ne contient pas" in a[1]]
+        finally:
+            del garde_fou.alertes[avant:]
+        self.assertEqual(morts, [], "le dépôt cite des fichiers qu'il ne "
+                                    "contient pas : %s" % morts)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
