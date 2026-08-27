@@ -1712,6 +1712,68 @@ def controle_aucun_identifiant_dans_les_fichiers_publies() -> None:
                     "assume. Signale pour que ce soit un choix, pas un oubli." % nom,
                 )
 
+    # ══ L'HISTORIQUE, pas seulement l'arbre de travail ═══════════════════════
+    #
+    # AJOUTE le 27/08/2026. Tout ce qui precede regarde les fichiers TELS QU'ILS
+    # SONT. Une cle committee puis retiree n'y apparait plus -- et reste dans
+    # l'historique public pour toujours.
+    #
+    # Le chemin : `git commit --no-verify` contourne le hook, donc contourne
+    # tout ce script. Sans ce balayage, la fuite serait DEFINITIVEMENT
+    # silencieuse.
+    #
+    # Verifie une fois sur ce depot, 87 commits : AUCUNE cle, AUCUN secret n'a
+    # jamais ete commite. Le defaut irreversible n'a pas eu lieu. Ce controle
+    # existe pour que ca reste vrai.
+    #
+    # Uniquement les valeurs CRITIQUES : le numero de compte est deja dans
+    # l'historique (11 commits, en commentaire depuis le debut) et n'autorise
+    # aucune action -- le chercher a chaque run produirait un bruit permanent.
+    #
+    # Cout mesure : 0,22 s pour quatre valeurs sur 87 commits, soit l'equivalent
+    # du temps total de ce script. Negligeable, meme lance 75 fois par jour par
+    # l'agent de publication.
+    #
+    # LE REMEDE N'EST PAS DE RETIRER LA LIGNE. Ce projet s'interdit de reecrire
+    # l'historique (« pas de filter-repo, pas de --force » -- regle repetee tout
+    # au long du sprint). Si une cle est dans l'historique d'un depot public,
+    # la REVOCATION est le seul remede reel, et ce message le dit.
+    critiques = [(n, v) for n, v in valeurs if n in CRITIQUES]
+    if not critiques:
+        return
+    for nom, valeur in critiques:
+        try:
+            trouve = subprocess.run(
+                ["git", "log", "--all", "--oneline", "-S", valeur, "--"],
+                cwd=RACINE, capture_output=True, text=True, timeout=120,
+            )
+        except Exception as err:
+            alerte(
+                "git",
+                "impossible de balayer l'historique pour %s (%s) -- une cle "
+                "commitee puis retiree ne serait PAS vue ici." % (nom, err),
+            )
+            continue
+        if trouve.returncode != 0:
+            alerte(
+                "git",
+                "`git log -S` a echoue (code %d) -- l'historique n'a PAS ete "
+                "verifie pour %s. Une sortie vide est indistinguable d'un "
+                "historique propre." % (trouve.returncode, nom),
+            )
+            continue
+        commits = [l for l in trouve.stdout.splitlines() if l.strip()]
+        if commits:
+            bloque(
+                "historique git",
+                "LA VALEUR DE %s APPARAIT DANS L'HISTORIQUE (%d commit(s) : %s). "
+                "Elle est recuperable par quiconque clone le depot, meme si le "
+                "fichier a ete retire depuis. Ce projet s'interdit de reecrire "
+                "l'historique : REVOQUER cette cle chez Alpaca est le seul "
+                "remede reel."
+                % (nom, len(commits), ", ".join(c.split()[0] for c in commits[:5])),
+            )
+
 
 def main() -> int:
     print("=" * 74)

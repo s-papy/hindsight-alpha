@@ -1325,6 +1325,102 @@ class TestAucunIdentifiantPublie(unittest.TestCase):
                       "le filtre ne distingue plus le numéro de compte des "
                       "clés : un seuil unique le rejetterait")
 
+    @unittest.skipUnless(shutil.which("git"), "git absent")
+    def test_une_cle_retiree_des_fichiers_reste_vue_dans_l_historique(self):
+        """Tout le reste du contrôle regarde les fichiers TELS QU'ILS SONT. Une
+        clé committée puis retirée n'y apparaît plus — et reste dans
+        l'historique public pour toujours.
+
+        Le chemin : `git commit --no-verify` contourne le hook, donc contourne
+        tout le garde-fou. Sans ce balayage, la fuite serait DÉFINITIVEMENT
+        silencieuse.
+
+        Vérifié une fois sur le vrai dépôt, 87 commits : aucune clé, aucun
+        secret n'a jamais été committé. Ce contrôle existe pour que ça le
+        reste."""
+        import garde_fou
+        d = Path(tempfile.mkdtemp(prefix="hindsight-histo-"))
+        try:
+            shutil.copy(Path(garde_fou.__file__).resolve().parent / "garde_fou.py",
+                        d / "garde_fou.py")
+            (d / ("." + "env")).write_text("ALPACA_API_KEY=%s\n" % self.CLE,
+                                           encoding="utf-8")
+            # Le fichier d'environnement doit etre IGNORE, comme dans le vrai
+            # depot. Sans ca, `git add -A` le committe et la cle se retrouve
+            # dans l'historique par ce chemin-la : le test « historique propre »
+            # echouait, et le test « cle retiree » passait pour la MAUVAISE
+            # raison -- il verifiait un fichier d'environnement commite, pas
+            # une cle retiree d'un fichier source.
+            (d / ".gitignore").write_text("." + "env\n", encoding="utf-8")
+            for args in (["init", "-q", "."], ["config", "user.email", "t@t"],
+                         ["config", "user.name", "t"]):
+                subprocess.run([GIT] + args, cwd=str(d), capture_output=True,
+                               timeout=30)
+            # commit fautif, puis retrait du fichier
+            (d / "notes.md").write_text("cle: %s\n" % self.CLE, encoding="utf-8")
+            subprocess.run([GIT, "add", "-A"], cwd=str(d), capture_output=True,
+                           timeout=30)
+            subprocess.run([GIT, "commit", "-qm", "fautif", "--no-verify"],
+                           cwd=str(d), capture_output=True, timeout=30)
+            (d / "notes.md").unlink()
+            subprocess.run([GIT, "add", "-A"], cwd=str(d), capture_output=True,
+                           timeout=30)
+            subprocess.run([GIT, "commit", "-qm", "retire", "--no-verify"],
+                           cwd=str(d), capture_output=True, timeout=30)
+
+            restants = [f for f in d.rglob("*")
+                        if f.is_file() and ".git" not in f.parts
+                        and "env" not in f.name
+                        and self.CLE in f.read_text(encoding="utf-8",
+                                                    errors="replace")]
+            self.assertEqual(restants, [],
+                             "prérequis : la clé ne doit plus être dans aucun "
+                             "fichier, sinon ce test vérifie le mauvais chemin")
+
+            proc = subprocess.run([sys.executable, "garde_fou.py"], cwd=str(d),
+                                  capture_output=True, text=True, timeout=180)
+            sortie = proc.stdout + proc.stderr
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
+        self.assertIn("APPARAIT DANS L'HISTORIQUE", sortie,
+                      "une clé committée puis retirée n'est plus vue par "
+                      "personne, et reste récupérable par quiconque clone")
+        self.assertIn("REVOQUER", sortie,
+                      "le message doit dire que la révocation est le SEUL "
+                      "remède : ce projet s'interdit de réécrire l'historique, "
+                      "donc retirer la ligne ne répare rien")
+
+    @unittest.skipUnless(shutil.which("git"), "git absent")
+    def test_un_historique_propre_ne_declenche_rien(self):
+        """Contrôle : sans lui, bloquer TOUJOURS passerait le test du dessus."""
+        import garde_fou
+        d = Path(tempfile.mkdtemp(prefix="hindsight-histo-ok-"))
+        try:
+            shutil.copy(Path(garde_fou.__file__).resolve().parent / "garde_fou.py",
+                        d / "garde_fou.py")
+            (d / ("." + "env")).write_text("ALPACA_API_KEY=%s\n" % self.CLE,
+                                           encoding="utf-8")
+            (d / "notes.md").write_text("rien de sensible ici\n", encoding="utf-8")
+            # Le fichier d'environnement doit etre IGNORE, comme dans le vrai
+            # depot. Sans ca, `git add -A` le committe et la cle se retrouve
+            # dans l'historique par ce chemin-la : le test « historique propre »
+            # echouait, et le test « cle retiree » passait pour la MAUVAISE
+            # raison -- il verifiait un fichier d'environnement commite, pas
+            # une cle retiree d'un fichier source.
+            (d / ".gitignore").write_text("." + "env\n", encoding="utf-8")
+            for args in (["init", "-q", "."], ["config", "user.email", "t@t"],
+                         ["config", "user.name", "t"], ["add", "-A"],
+                         ["commit", "-qm", "propre", "--no-verify"]):
+                subprocess.run([GIT] + args, cwd=str(d), capture_output=True,
+                               timeout=30)
+            proc = subprocess.run([sys.executable, "garde_fou.py"], cwd=str(d),
+                                  capture_output=True, text=True, timeout=180)
+            sortie = proc.stdout + proc.stderr
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+        self.assertNotIn("APPARAIT DANS L'HISTORIQUE", sortie)
+
     def test_des_fichiers_propres_ne_declenchent_rien(self):
         """Contrôle : sans lui, bloquer TOUJOURS passerait les deux tests
         ci-dessus."""
