@@ -332,15 +332,37 @@ python agent.py                # if vetted, places a real (paper) options order
 - `monitor_exits.py` — standalone exit-only monitor, schedulable
   independently of `agent.py`'s once-a-day cycle. See its module docstring
   for the "why".
-- `launchagents/` — the three macOS scheduling definitions, versioned rather
+- `launchagents/` — the four macOS scheduling definitions, versioned rather
   than living only on one machine: `launchagents/com.hindsightalpha.monitor-exits.plist`
   (every 15 minutes through the session, including the close),
   `launchagents/com.hindsightalpha.market-hours-awake.plist` (a `caffeinate` job that keeps
-  the machine awake through market hours), and
+  the machine awake through market hours),
   `launchagents/com.hindsightalpha.publish-dashboard.plist` (see "Hosted dashboard" for why
-  that one pushes automatically). `agent.py` itself is
-  deliberately NOT scheduled — the entry decision is launched by hand, so a
-  human sees it happen.
+  that one pushes automatically), and
+  `launchagents/com.hindsightalpha.agent-daily.plist` (the entry-decision cycle,
+  once per trading day).
+
+  **This paragraph used to end with "`agent.py` itself is deliberately NOT
+  scheduled — the entry decision is launched by hand, so a human sees it
+  happen." That decision was reversed on 27/08, the evening before kickoff,
+  and the reason is worth stating plainly: the P&L being judged runs for a
+  week, and a human who is at work does not launch anything.** Keeping a human
+  in the loop was the better principle right up until it meant the agent would
+  place no trades at all — at which point it protects nobody and hides
+  nothing. The honest trade is named rather than quietly dropped.
+
+  What replaces the human as the stop: the `HALT` file. Creating a file named
+  `HALT` at the repo root makes `check_gates()` refuse every new entry, while
+  `monitor-exits` keeps managing positions already open. No code edit, no
+  credential touched. The entry decision is now automatic; stopping it is
+  still one file away.
+
+  The schedule is 21:30 local (15:30 ET), thirty minutes before the US close.
+  That hour is not arbitrary: this strategy's signal is a volatility rank
+  computed on DAILY CLOSES, and `get_daily_bars()` does not exclude today —
+  mid-session, the most recent bar is today's PARTIAL one. The later the run,
+  the closer that bar is to the real close. See the plist's own comment for
+  the trade-off this accepts in exchange.
 - `decision_log.py` — appends one JSON record per run to `decision_log.jsonl`
   (committed, not gitignored — it's evidence of what the agent decided and
   why, every day of the hackathon, not a secret).

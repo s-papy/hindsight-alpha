@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Lance agent.py une fois par jour de bourse : le cycle de decision d'ENTREE.
+
+  POURQUOI CE FICHIER EXISTE, ET POURQUOI IL ARRIVE SI TARD
+  Trouve le 27/08 a 20h, la veille du kickoff, en preparant la bascule de
+  compte : AUCUN plist et AUCUN cron ne lancait agent.py. Les trois agents
+  existants gardaient le Mac eveille, surveillaient les SORTIES et publiaient
+  le tableau de bord. Personne n'ouvrait de position.
+
+  Ce n'etait pas un oubli du jour : le journal d'ingenierie ecrit « si l'agent
+  est planifie une fois par jour (option encore ouverte dans "Choix a trancher
+  avant le 28") », et le README parle deja du « once-a-day cycle » d'agent.py.
+  L'option n'a jamais ete tranchee, et le README decrivait donc un cycle que
+  rien ne declenchait.
+
+  Sans ce fichier : le Mac se reveille, surveille des positions qui n'existent
+  pas, publie un tableau de bord vide, et le P&L juge reste a zero toute la
+  semaine.
+
+  L'HEURE, ET POURQUOI CELLE-LA
+  21:30 heure locale (Europe/Zurich), soit 15:30 ET, trente minutes avant la
+  cloture du marche americain. Deux raisons, et la premiere pese le plus :
+
+  1. Le signal de cette strategie est un rang de volatilite calcule sur des
+     CLOTURES QUOTIDIENNES. get_daily_bars() ne borne pas sa requete a hier :
+     en pleine seance, la derniere barre rendue est celle d'AUJOURD'HUI, donc
+     PARTIELLE. Plus on lance tot, plus cette barre est incomplete et plus le
+     rang de volatilite du jour est fausse. A 21:30 elle est presque formee.
+  2. La liquidite des options est meilleure qu'a l'ouverture.
+
+  Le revers, assume : une position ouverte a 21:30 n'a que ~30 minutes de
+  surveillance de sortie avant la cloture. C'est acceptable ici parce que les
+  contrats retenus font 7 a 21 jours d'echeance — ils ne sont pas censes etre
+  fermes le jour meme — et que monitor-exits reprend des l'ouverture suivante.
+
+  Pour changer l'heure : editer Hour/Minute ci-dessous, puis recharger.
+
+  UNE POSITION REELLE (PAPER) EST PASSEE PAR CE JOB. Pour tout arreter sans
+  toucher au code ni aux identifiants : creer un fichier nomme HALT a la racine
+  du depot. check_gates() refuse alors toute nouvelle entree, et monitor-exits
+  continue de gerer les positions deja ouvertes.
+
+  INSTALL   cp launchagents/com.hindsightalpha.agent-daily.plist ~/Library/LaunchAgents/
+            launchctl load ~/Library/LaunchAgents/com.hindsightalpha.agent-daily.plist
+-->
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.hindsightalpha.agent-daily</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/usr/bin/python3</string>
+		<string>/Users/s-pap/hindsight-alpha/agent.py</string>
+	</array>
+	<key>WorkingDirectory</key>
+	<string>/Users/s-pap/hindsight-alpha</string>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>PATH</key>
+		<string>/Users/s-pap/.local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+	</dict>
+	<key>StartCalendarInterval</key>
+	<array>
+		<dict><key>Weekday</key><integer>1</integer><key>Hour</key><integer>21</integer><key>Minute</key><integer>30</integer></dict>
+		<dict><key>Weekday</key><integer>2</integer><key>Hour</key><integer>21</integer><key>Minute</key><integer>30</integer></dict>
+		<dict><key>Weekday</key><integer>3</integer><key>Hour</key><integer>21</integer><key>Minute</key><integer>30</integer></dict>
+		<dict><key>Weekday</key><integer>4</integer><key>Hour</key><integer>21</integer><key>Minute</key><integer>30</integer></dict>
+		<dict><key>Weekday</key><integer>5</integer><key>Hour</key><integer>21</integer><key>Minute</key><integer>30</integer></dict>
+	</array>
+	<key>StandardOutPath</key>
+	<string>/Users/s-pap/hindsight-alpha/agent.log</string>
+	<key>StandardErrorPath</key>
+	<string>/Users/s-pap/hindsight-alpha/agent.log</string>
+</dict>
+</plist>
