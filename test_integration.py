@@ -3026,6 +3026,107 @@ class TestEntreesAttendues(unittest.TestCase):
         finally:
             garde_fou.alertes.clear()
 
+
+class TestAucunSeuilMort(unittest.TestCase):
+    """La thèse de ce projet, appliquée à lui-même.
+
+    Le titre de la slide 6 dit : « a cap that isn't checked in code is a
+    policy, not a control ». Ajouté le 27/08 au soir, juste après avoir trouvé
+    exactement ça sur le fichier HALT — le README promettait que
+    check_gates() honorait la pause, et check_gates() ne la lisait pas.
+
+    Ce test généralise : toute constante de seuil définie au niveau module
+    doit être LUE quelque part. Une constante définie et jamais lue est une
+    politique écrite dans un fichier de code, ce qui est la forme la plus
+    trompeuse de toutes — elle a l'air d'être appliquée.
+
+    L'instrument est inter-modules à dessein. Ma première version balayait
+    fichier par fichier et ne regardait que l'intérieur des fonctions : elle a
+    signalé MIN_TRADING_DAYS_FOR_SWEEP comme mort, alors qu'il est la valeur
+    PAR DÉFAUT de get_daily_bars() dans un AUTRE module. Un test qui accuse à
+    tort s'apprend à ignorer aussi vite qu'un test qui rate."""
+
+    RACINE = Path(__file__).resolve().parent
+    PREFIXES = ("MAX_", "MIN_", "TAKE_", "STOP_", "CHEAP_", "RANK_", "COST_",
+                "STRIKE_", "IN_SAMPLE_", "HEARTBEAT_", "CONTRACTS_")
+
+    def _modules_du_depot(self):
+        return [f for f in sorted(self.RACINE.glob("*.py"))
+                if not f.name.startswith("test_")]
+
+    def _seuils_et_lectures(self):
+        import ast
+        declares, lectures = {}, {}
+        for f in self._modules_du_depot():
+            arbre = ast.parse(f.read_text(encoding="utf-8"), f.name)
+            for n in arbre.body:
+                if (isinstance(n, ast.Assign) and len(n.targets) == 1
+                        and isinstance(n.targets[0], ast.Name)
+                        and n.targets[0].id.startswith(self.PREFIXES)):
+                    declares[n.targets[0].id] = "%s:%d" % (f.name, n.lineno)
+        # Les LECTURES, tous modules confondus : un `Name` en contexte Load.
+        # Couvre les arguments par défaut et les usages inter-modules, que la
+        # première version de ce test ratait tous les deux.
+        for f in self._modules_du_depot():
+            arbre = ast.parse(f.read_text(encoding="utf-8"), f.name)
+            for n in ast.walk(arbre):
+                if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load):
+                    lectures.setdefault(n.id, set()).add(f.name)
+        return declares, lectures
+
+    def test_l_instrument_voit_bien_des_seuils(self):
+        """Contrôle d'instrument : sans lui, ce test passe au vert le jour où
+        les préfixes ne correspondent plus à rien."""
+        declares, _ = self._seuils_et_lectures()
+        self.assertGreaterEqual(
+            len(declares), 10,
+            "moins de 10 seuils trouvés (%d) : le balayage ne voit plus grand "
+            "chose et ce test ne vérifie presque rien" % len(declares))
+        for attendu in ("MAX_RISK_PCT_PER_TRADE", "MAX_TOTAL_RISK_PCT",
+                        "MAX_OPEN_POSITIONS", "STOP_LOSS_PCT"):
+            self.assertIn(attendu, declares,
+                          "%s n'est plus vu par le balayage" % attendu)
+
+    def test_chaque_seuil_declare_est_lu_quelque_part(self):
+        declares, lectures = self._seuils_et_lectures()
+        morts = ["%s (%s)" % (nom, ou) for nom, ou in sorted(declares.items())
+                 if nom not in lectures]
+        self.assertEqual(
+            morts, [],
+            "seuil(s) déclarés et JAMAIS LUS : %s — une limite qui n'est pas "
+            "vérifiée dans le code est une politique, pas un contrôle, et "
+            "celle-ci a en plus l'air d'être appliquée" % ", ".join(morts))
+
+    def test_les_plafonds_de_risque_sont_lus_par_la_porte_d_entree(self):
+        """Plus précis que « lu quelque part » : les cinq plafonds annoncés
+        dans le deck et le write-up doivent être lus par check_gates(), la
+        fonction qui décide d'ouvrir une position. Lus ailleurs, ils
+        n'empêcheraient rien."""
+        import ast
+        arbre = ast.parse((self.RACINE / "risk_gates.py").read_text(encoding="utf-8"))
+        porte = next((n for n in ast.walk(arbre)
+                      if isinstance(n, ast.FunctionDef) and n.name == "check_gates"), None)
+        self.assertIsNotNone(porte, "check_gates() est introuvable")
+        # RESSERRÉ : « lu » ne suffit pas. Un plafond cité uniquement dans un
+        # message d'erreur — f"... {MAX_TOTAL_RISK_PCT:.0%} ..." — satisfaisait
+        # la première version de ce test tout en n'empêchant RIEN. C'est
+        # exactement la forme que ce test existe pour attraper, et je l'avais
+        # laissée passer. On exige au moins une lecture HORS f-string.
+        decoratives = {(c.id, c.lineno)
+                       for n in ast.walk(porte) if isinstance(n, ast.JoinedStr)
+                       for c in ast.walk(n) if isinstance(c, ast.Name)}
+        calcul = {c.id for c in ast.walk(porte)
+                  if isinstance(c, ast.Name) and (c.id, c.lineno) not in decoratives}
+        for plafond in ("MAX_RISK_PCT_PER_TRADE", "MAX_TOTAL_RISK_PCT",
+                        "MAX_SECTOR_EXPOSURE_PCT", "MAX_OPEN_POSITIONS",
+                        "MAX_CONSECUTIVE_LOSSES"):
+            with self.subTest(plafond=plafond):
+                self.assertIn(plafond, calcul,
+                              "%s n'est lu par check_gates() que dans un "
+                              "MESSAGE, jamais dans un calcul : le deck "
+                              "l'annonce, la porte d'entrée ne l'applique pas"
+                              % plafond)
+
 class TestPlistsLivres(unittest.TestCase):
     """Ajouté le 27/08. Trouvé en essayant simplement de lire les trois plists
     avec plistlib : deux passent, le troisième lève « not well-formed
