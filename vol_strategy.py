@@ -117,7 +117,12 @@ def _sharpe(returns: Sequence[float]) -> float:
     non-fini (il le range dans `unscorable` et refuse de certifier), et une
     exception ferait tomber tout le symbole la ou une seule fenetre est en
     cause. Rendre le mecanisme PORTANT plutot que defensif etait tout l'objet
-    de ce garde."""
+    de ce garde.
+
+    Balayage apres correctif, 400 series synthetiques x 5 longueurs tronquees
+    (2000 combinaisons) : AUCUNE ne fait certifier une selection comportant une
+    fenetre non notee. Avant correctif, la toute PREMIERE essayee en produisait
+    une."""
     if len(returns) < 2:
         return float("nan")   # rien a mesurer, pas « mesure a zero »
     sd = pstdev(returns)
