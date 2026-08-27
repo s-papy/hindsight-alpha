@@ -1807,6 +1807,68 @@ def controle_aucun_identifiant_dans_les_fichiers_publies() -> None:
             )
 
 
+def controle_reveil_programme() -> None:
+    """Le Mac est-il programme pour se REVEILLER avant la seance ?
+
+    AJOUTE le 27/08/2026. Le README raconte un incident REEL : le moniteur de
+    sorties a echoue 11 fois de suite un apres-midi. Cause trouvee alors -- le
+    Mac dormait, et launchd ne declenchait le job que pendant de brefs reveils
+    de maintenance, trop courts pour que le Wi-Fi se reconnecte avant que
+    l'appel reseau expire. Chaque horodatage d'echec correspondait a la seconde
+    au journal de veille du systeme.
+
+    Le remede tient en une ligne, ecrite dans le README :
+
+        sudo pmset repeat wakeorpoweron MTWRF 15:15:00
+
+    Elle demande le mot de passe administrateur, donc elle ne peut pas etre
+    automatisee ici -- et RIEN ne verifiait qu'elle ait ete lancee. Mesure le
+    27/08 sur cette machine : aucun evenement recurrent programme. Le mecanisme
+    qui fait tenir toute la surveillance non surveillee etait absent, en
+    silence.
+
+    Le plist market-hours-awake garde la machine EVEILLEE de 15:20 a 22:05,
+    mais son propre commentaire le dit : « It can only keep the machine awake
+    -- it CANNOT wake a machine that is already asleep. » Les deux sont
+    necessaires, et un seul des deux etait verifiable.
+
+    ALERTE et non blocage : c'est un etat de machine, pas un defaut du dossier,
+    et un depot clone sur une autre machine n'a aucune raison d'echouer pour ca.
+    Silencieux hors macOS et en CI, ou pmset n'existe pas et n'aurait aucun sens.
+    """
+    if os.environ.get("GITHUB_ACTIONS") or os.environ.get("CI"):
+        return
+    if sys.platform != "darwin":
+        return
+    try:
+        proc = subprocess.run(["pmset", "-g", "sched"], capture_output=True,
+                              text=True, timeout=15)
+    except FileNotFoundError:
+        return
+    except Exception as exc:
+        alerte("pmset", "impossible de lire les evenements programmes (%s: %s) -- "
+                        "le reveil avant seance n'a PAS ete verifie."
+                        % (type(exc).__name__, exc))
+        return
+    if proc.returncode != 0:
+        alerte("pmset", "`pmset -g sched` a echoue (code %d) -- le reveil avant "
+                        "seance n'a PAS ete verifie. Une sortie vide est "
+                        "indistinguable d'une machine correctement programmee."
+                        % proc.returncode)
+        return
+    if re.search(r"repeating power events", proc.stdout, re.I):
+        return
+    alerte(
+        "pmset",
+        "AUCUN REVEIL RECURRENT programme sur cette machine. Si le Mac dort a "
+        "15:15, launchd ne declenchera le moniteur de sorties que pendant de "
+        "brefs reveils de maintenance -- l'incident des 11 echecs consecutifs "
+        "raconte dans le README. Le plist market-hours-awake garde la machine "
+        "eveillee mais NE PEUT PAS la reveiller. Corrige avec :  "
+        "sudo pmset repeat wakeorpoweron MTWRF 15:15:00",
+    )
+
+
 def main() -> int:
     print("=" * 74)
     print("GARDE-FOU — hindsight-alpha — %s" % datetime.now().strftime("%d/%m/%Y %H:%M"))
@@ -1829,6 +1891,7 @@ def main() -> int:
         controle_verrou_dit_hebdomadaire,
         controle_readme_decrit_les_agents,
         controle_aucun_identifiant_dans_les_fichiers_publies,
+        controle_reveil_programme,
     )
     for controle in CONTROLES:
         controle()

@@ -1474,5 +1474,81 @@ class TestAucunIdentifiantPublie(unittest.TestCase):
         self.assertNotIn("CONTIENT LA VALEUR", sortie)
 
 
+@unittest.skipUnless(sys.platform == "darwin", "pmset n'existe que sur macOS")
+class TestReveilProgramme(unittest.TestCase):
+    """Le README raconte un incident RÉEL : le moniteur de sorties a échoué 11
+    fois de suite un après-midi. Le Mac dormait, et launchd ne déclenchait le
+    job que pendant de brefs réveils de maintenance — trop courts pour que le
+    Wi-Fi se reconnecte avant que l'appel réseau expire.
+
+    Le remède tient en une ligne, écrite dans le README, qui demande le mot de
+    passe administrateur — donc elle ne peut pas être automatisée. Et RIEN ne
+    vérifiait qu'elle ait été lancée. Mesuré le 27/08 sur cette machine :
+    aucun événement récurrent programmé.
+
+    Le plist market-hours-awake garde la machine ÉVEILLÉE, mais son propre
+    commentaire le dit : « It can only keep the machine awake — it CANNOT wake
+    a machine that is already asleep. » Les deux sont nécessaires, un seul
+    était vérifiable.
+
+    On teste en fabriquant un faux `pmset` : c'est le vrai chemin du contrôle,
+    subprocess compris, pas sa logique isolée.
+    """
+
+    RACINE = Path(__file__).resolve().parent
+
+    SORTIE_SANS = ("Scheduled power events:\n"
+                   " [0]  wake at 08/26/2026 17:04:22 by 'com.apple.alarm'\n")
+    SORTIE_AVEC = (SORTIE_SANS + "Repeating power events:\n"
+                   "  wakeorpoweron at 3:15PM every Monday,Tuesday,Wednesday,"
+                   "Thursday,Friday\n")
+
+    def _sortie(self, sortie_pmset, code=0, env_ci=False):
+        d = Path(tempfile.mkdtemp(prefix="hindsight-pmset-"))
+        try:
+            shutil.copy(self.RACINE / "garde_fou.py", d / "garde_fou.py")
+            faux = d / "bin"
+            faux.mkdir()
+            (faux / "pmset").write_text(
+                "#!/bin/sh\ncat <<'EOF'\n%s\nEOF\nexit %d\n"
+                % (sortie_pmset, code), encoding="utf-8")
+            (faux / "pmset").chmod(0o755)
+            env = dict(os.environ)
+            env.pop("GITHUB_ACTIONS", None)
+            env.pop("CI", None)
+            if env_ci:
+                env["GITHUB_ACTIONS"] = "true"
+            env["PATH"] = "%s:%s" % (faux, env.get("PATH", ""))
+            proc = subprocess.run([sys.executable, "garde_fou.py"], cwd=str(d),
+                                  capture_output=True, text=True, timeout=120,
+                                  env=env)
+            return proc.stdout + proc.stderr
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
+    def test_aucun_reveil_recurrent_est_signale(self):
+        sortie = self._sortie(self.SORTIE_SANS)
+        self.assertIn("AUCUN REVEIL RECURRENT", sortie,
+                      "le mécanisme qui fait tenir la surveillance non "
+                      "surveillée est absent et rien ne le dit")
+        self.assertIn("sudo pmset repeat wakeorpoweron", sortie,
+                      "l'alerte ne donne pas la commande qui corrige")
+
+    def test_un_reveil_recurrent_ne_declenche_rien(self):
+        """Contrôle : sans lui, alerter TOUJOURS passerait le test du dessus."""
+        self.assertNotIn("AUCUN REVEIL RECURRENT", self._sortie(self.SORTIE_AVEC))
+
+    def test_un_pmset_qui_echoue_avoue_n_avoir_rien_verifie(self):
+        """Une sortie vide est indistinguable d'une machine bien programmée :
+        ne pas pouvoir vérifier n'est pas la preuve que tout va bien."""
+        sortie = self._sortie("", code=1)
+        self.assertIn("n'a PAS ete verifie", sortie)
+
+    def test_la_CI_ne_recoit_pas_cette_alerte(self):
+        """pmset n'a aucun sens sur un runner Linux, et alerter à chaque run
+        apprendrait à ignorer les 🟡."""
+        self.assertNotIn("REVEIL", self._sortie(self.SORTIE_SANS, env_ci=True))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
