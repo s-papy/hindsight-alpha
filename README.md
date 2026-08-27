@@ -307,7 +307,7 @@ cp .env.example .env
 # Alpaca dashboard, Home page -> API Keys widget). Never the live-account keys.
 
 # 4. Run
-python3 -m unittest discover   # 85 offline tests, no credentials needed
+python3 -m unittest discover   # 96 offline tests, no credentials needed
 python test_connection.py      # confirms CLI install + credentials + network
 python agent.py --dry-run      # runs the full leakage check, no order placed
 python agent.py                # if vetted, places a real (paper) options order
@@ -345,11 +345,21 @@ python agent.py                # if vetted, places a real (paper) options order
   build step, no framework, fetches `./data.json` and renders it. Meant to
   be served by GitHub Pages from this repo's `docs/` folder — see "Hosted
   dashboard" below.
-- `test_risk_gates.py` — regression tests for the exit chain and the
-  consecutive-loss breaker: threshold units, boundary, counter increment and
-  reset, per-position isolation when one close fails, unreadable P&L. Standard
-  library only, fully mocked — no network, no credentials, no order. Run with
-  `python3 -m unittest discover -v`; also run in CI on every push.
+- `test_risk_gates.py` — regression tests for the risk gates and the exit
+  chain: threshold units, boundary, exposure caps, the consecutive-loss
+  breaker, per-position isolation when one close fails, unreadable P&L,
+  contract selection, account switching.
+- `test_agent.py` — the orchestration: what happens when an order submission
+  times out (the order may have landed), what a startup refusal records, and
+  what the scheduled LaunchAgents are allowed to do unattended.
+- `test_dashboard.py` — the published page's own JavaScript, extracted from
+  `docs/index.html` and executed: verdict badges, the per-symbol line for every
+  record shape the committed log still contains, the monitor health banner, the
+  hindsight-leak counter. Skips cleanly when `node` is unavailable.
+
+  All three are standard library only and fully mocked — no network, no
+  credentials, no order. Run them with `python3 -m unittest discover -v`; CI
+  runs the same command on every push.
 - `test_connection.py` — run first; confirms CLI install + `.env` + network
   access all work.
 - `config.py` — loads `.env`, hard-refuses to run against anything that

@@ -196,6 +196,20 @@ class TestOrdreAuSortInconnu(BaseAgent):
                         "order_status_unknown : le fallback de outcomeBadge() "
                         "l'afficherait en gris discret")
 
+    def test_le_detail_par_symbole_dit_quoi_faire(self):
+        """Le badge de la run est rouge, mais c'est la ligne PAR SYMBOLE qui dit
+        de quel symbole il s'agit. Sans branche dédiée, renderTrade() tombait
+        dans son repli et affichait la chaîne machine « order_status_unknown »
+        au lieu d'une instruction."""
+        page = (Path(__file__).resolve().parent / "docs" / "index.html").read_text(
+            encoding="utf-8")
+        self.assertTrue("t.outcome === 'order_status_unknown'" in page,
+                        "renderTrade() n'a pas de branche pour "
+                        "order_status_unknown : la ligne par symbole afficherait "
+                        "la chaîne machine")
+        self.assertTrue("ORDER MAY HAVE BEEN SUBMITTED" in page,
+                        "la ligne par symbole ne dit pas quoi faire")
+
     def test_une_soumission_normale_n_est_pas_affectee(self):
         """Contrôle : sans lui, tout marquer « inconnu » passerait les tests
         ci-dessus."""

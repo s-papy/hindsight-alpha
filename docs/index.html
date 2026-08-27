@@ -571,7 +571,16 @@ function renderTrade(d) {
       if (t.order_id) {
         lines.push(`${t.symbol} ${t.direction || ''} · qty ${t.qty || '?'} · order ${t.order_id}`);
       } else {
-        const why = t.outcome === 'risk_gate_blocked' ? (t.risk_gate_reason || 'blocked')
+        // order_status_unknown ajoute le 27/08 en meme temps que le badge rouge
+        // du meme nom plus haut. Sans cette branche, la ligne tombait dans le
+        // repli `(t.outcome || 'not submitted')` et affichait la chaine machine
+        // « order_status_unknown » -- or c'est ICI, sur la ligne par symbole,
+        // qu'un lecteur voit DE QUEL symbole il s'agit. Le badge de la run
+        // criait, le detail marmonnait.
+        const why = t.outcome === 'order_status_unknown'
+            ? 'ORDER MAY HAVE BEEN SUBMITTED — the CLI timed out before answering. '
+              + 'Verify open orders and positions with Alpaca before re-running.'
+          : t.outcome === 'risk_gate_blocked' ? (t.risk_gate_reason || 'blocked')
           : t.outcome === 'no_contract_found' ? 'no contract found'
           : t.outcome === 'error' ? (t.error || 'error')
           : (t.outcome || 'not submitted');
