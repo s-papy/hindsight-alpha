@@ -889,6 +889,68 @@ class TestPositionNonReconnueALaSortie(BaseExit):
         self.assertEqual(actions[0].kind, risk_gates.ExitKind.WOULD_CLOSE)
 
 
+
+class TestPauseManuelleDansLaPorte(HarnaisPlafonds, BaseExit):
+    """Ajouté le 27/08 au soir, la veille du kickoff — donc sur l'arrêt
+    d'urgence que l'opérateur utilisera peut-être demain matin.
+
+    Le README affirme, mot pour mot : « Creating a file named HALT at the repo
+    root makes check_gates() refuse every new entry ». C'ÉTAIT FAUX. La pause
+    était consultée par agent.py (ligne ~357), jamais par check_gates().
+
+    Le comportement était correct — agent.py est aujourd'hui le seul appelant,
+    et la pause fonctionnait bien de bout en bout. Mais la règle était
+    appliquée par L'APPELANT et non par la porte censée l'appliquer : c'est la
+    thèse de ce projet retournée contre lui, « une limite qui n'est pas
+    vérifiée dans le code est une politique, pas un contrôle » (slide 6). Une
+    pause qui dépend du fait que chaque appelant pense à la vérifier est une
+    politique.
+
+    La phrase est rendue VRAIE plutôt qu'affaiblie. agent.py garde sa
+    vérification précoce — elle évite tout le travail d'évaluation — et la
+    porte la refait, pour que tout appelant futur en hérite."""
+
+    def _avec_halt(self, contenu):
+        halt = self.tmp / "HALT"
+        vrai = risk_gates.HALT_FILE
+        risk_gates.HALT_FILE = halt
+        try:
+            if contenu is None:
+                halt.unlink(missing_ok=True)
+            else:
+                halt.write_text(contenu, encoding="utf-8")
+            return self._decide()
+        finally:
+            risk_gates.HALT_FILE = vrai
+
+    def test_la_porte_refuse_quand_la_pause_est_posee(self):
+        for contenu, etiquette in (("", "fichier vide"),
+                                   ("incident réseau", "avec un motif"),
+                                   ("   \n", "espaces seulement")):
+            with self.subTest(cas=etiquette):
+                d = self._avec_halt(contenu)
+                self.assertFalse(
+                    self._autorise(d),
+                    "HALT présent (%s) et check_gates autorise quand même : "
+                    "la pause n'est appliquée que par l'appelant" % etiquette)
+                self.assertIn("HALT", d.reason or "",
+                              "le refus ne nomme pas la pause : %s" % d.reason)
+
+    def test_sans_pause_la_porte_laisse_passer(self):
+        """Témoin : une porte qui refuse toujours ne protège rien."""
+        d = self._avec_halt(None)
+        self.assertTrue(self._autorise(d),
+                        "aucun HALT et le trade est refusé : %s" % d.reason)
+
+    def test_le_refus_dit_que_les_sorties_continuent(self):
+        """L'asymétrie que ce projet promet partout : une pause bloque les
+        NOUVELLES entrées, jamais la gestion des positions déjà ouvertes. Si
+        le message ne le dit pas, un opérateur inquiet retire le HALT pour
+        « débloquer les sorties » — et rouvre les entrées sans le vouloir."""
+        d = self._avec_halt("incident")
+        self.assertIn("xit", d.reason or "",
+                      "le refus ne rassure pas sur les sorties : %s" % d.reason)
+
 class TestIdentiteDeCompteInconnue(BaseExit):
     """Ajouté le 27/08, la veille du kickoff — donc sur le code qui ne
     s'exécutera qu'UNE fois, sans personne devant, à la bascule de compte.

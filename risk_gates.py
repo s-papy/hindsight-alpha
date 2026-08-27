@@ -1218,6 +1218,35 @@ def check_gates(
     Duplicate-underlying isn't at the same risk either way: the loop only
     ever visits each universe symbol once per run, so it can't attempt the
     same underlying twice in a single run by construction."""
+    # AJOUTE le 27/08/2026 au soir. Le README affirme, mot pour mot :
+    # « Creating a file named HALT at the repo root makes check_gates() refuse
+    # every new entry ». C'etait FAUX : la pause etait consultee par agent.py
+    # (ligne ~357), jamais par cette fonction. Le comportement etait correct --
+    # agent.py est aujourd'hui le seul appelant -- mais la regle etait
+    # appliquee par L'APPELANT et non par la porte censee l'appliquer.
+    #
+    # C'est exactement la these de ce projet retournee contre lui : « une
+    # limite qui n'est pas verifiee dans le code est une politique, pas un
+    # controle » (titre de la slide 6). Une pause qui depend du fait que
+    # chaque appelant pense a la verifier est une politique.
+    #
+    # On la rend vraie plutot que d'affaiblir la phrase. agent.py garde sa
+    # verification precoce -- elle evite tout le travail d'evaluation et donne
+    # un message clair -- et cette porte-ci la refait, pour que tout appelant
+    # futur en herite sans y penser. Le fichier est relu a chaque appel : une
+    # pause posee EN COURS d'execution prend effet des le symbole suivant.
+    #
+    # Place avant le premier appel reseau : refuser vite coute moins cher, et
+    # is_halted() echoue deja FERME sur toute erreur de lecture autre que
+    # « le fichier n'existe pas » (corrige le 26/08, sur un lien symbolique
+    # casse qui rendait la pause inoperante).
+    en_pause, motif_pause = is_halted()
+    if en_pause:
+        return RiskDecision(
+            False,
+            "manual pause active (HALT file present): %s -- no new entry. "
+            "Exits keep running; remove the HALT file to resume." % motif_pause)
+
     account = alpaca_cli.get_account()
     equity = float(account.get("equity", account.get("portfolio_value", 0)))
     if equity <= 0:
