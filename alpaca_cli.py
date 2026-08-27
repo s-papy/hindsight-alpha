@@ -407,10 +407,33 @@ def _check_bar_quality(symbol: str, rows: List[dict], minimum_usable: Optional[i
             f"sweeping on it."
         )
 
+    # AJOUTE le 27/08/2026. Un prix de cloture NUL OU NEGATIF est impossible
+    # pour un ETF : c'est une donnee corrompue, sans ambiguite.
+    #
+    # Personne ne le signalait, et deux endroits l'evitaient chacun de leur
+    # cote sans le dire :
+    #   - la boucle ci-dessous fait `if prev == 0: continue`, donc un zero
+    #     n'est jamais compare a son voisin ;
+    #   - vol_strategy.daily_returns() filtre `if closes[i-1] != 0`, donc le
+    #     point est ECARTE de la serie de rendements.
+    # Resultat : une barre a zero traversait le controle qualite, puis
+    # disparaissait de la serie en recollant artificiellement les deux jours qui
+    # l'entourent -- un rendement invente, sur des donnees dont on sait qu'elles
+    # sont fausses.
+    #
+    # On refuse, plutot que d'eviter chacun dans son coin.
+    for i, c in enumerate(closes):
+        if c <= 0:
+            raise DataQualityError(
+                f"{symbol}: bar {i} has a close of {c} -- a non-positive price is "
+                f"impossible for a tradable ETF, so this feed is corrupted. Refusing "
+                f"rather than silently dropping the point from the return series."
+            )
+
     for i in range(1, len(closes)):
         prev = closes[i - 1]
         if prev == 0:
-            continue
+            continue  # inatteignable depuis le controle ci-dessus ; garde-fou
         jump = abs(closes[i] - prev) / prev
         if jump > MAX_DAILY_JUMP_PCT:
             raise DataQualityError(

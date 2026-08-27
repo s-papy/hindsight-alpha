@@ -1340,6 +1340,31 @@ class TestQualiteDesBarres(unittest.TestCase):
             alpaca_cli._check_bar_quality("SPY", lignes, minimum_usable=592)
         self.assertIn("0 usable", str(ctx.exception))
 
+    def test_un_prix_nul_est_refuse(self):
+        """Un prix de clôture nul ou négatif est impossible pour un ETF.
+
+        Personne ne le signalait, et deux endroits l'évitaient chacun de leur
+        côté sans le dire : la boucle de saut fait `if prev == 0: continue`, et
+        vol_strategy.daily_returns() filtre `closes[i-1] != 0`. Une barre à
+        zéro traversait donc le contrôle qualité puis disparaissait de la série
+        de rendements, recollant artificiellement les deux jours qui
+        l'entouraient — un rendement inventé sur des données fausses."""
+        lignes = self._lignes(10)
+        lignes[4]["c"] = 0.0
+        with self.assertRaises(alpaca_cli.DataQualityError) as ctx:
+            alpaca_cli._check_bar_quality("SPY", lignes)
+        self.assertIn("non-positive", str(ctx.exception))
+
+    def test_un_prix_negatif_est_refuse(self):
+        lignes = self._lignes(10)
+        lignes[7]["c"] = -3.5
+        with self.assertRaises(alpaca_cli.DataQualityError):
+            alpaca_cli._check_bar_quality("SPY", lignes)
+
+    def test_des_prix_normaux_passent(self):
+        """Contrôle : sans lui, refuser tout passerait les deux tests ci-dessus."""
+        alpaca_cli._check_bar_quality("SPY", self._lignes(10))
+
     def test_sans_minimum_le_controle_ne_s_applique_pas(self):
         """get_last_price() demande 5 barres ; les autres appelants passent
         leur propre horizon. Un minimum non fourni ne doit rien refuser."""
@@ -1630,6 +1655,39 @@ class TestCoupeCircuit(unittest.TestCase):
         """Contrôle : sans lui, « tout compte comme une pause » passerait les
         quatre tests ci-dessus et l'agent ne traderait plus jamais."""
         self.assertEqual(self._halt(self.tmp / "jamais_cree"), (False, ""))
+
+
+class TestCoherenceDesTables(unittest.TestCase):
+    """Deux tables doivent rester d'accord, et rien ne le vérifiait."""
+
+    def test_chaque_symbole_de_l_univers_a_un_secteur(self):
+        """sector_of() retombe sur le symbole LUI-MÊME pour un inconnu. Chaque
+        symbole hors table devient donc son propre secteur, et le plafond
+        sectoriel se dégrade en silence vers la simple règle « un seul par
+        sous-jacent ».
+
+        Le README annonce pourtant que ce plafond « stops being a no-op the
+        moment the universe grows past one symbol per sector ». Ajouter un
+        symbole sans l'inscrire dans SECTOR_MAP le laisserait no-op, sans un
+        mot. L'univers actuel est couvert ; ce test garantit qu'il le reste."""
+        import agent
+        manquants = [s for s in agent.DEFAULT_UNIVERSE
+                     if s.upper() not in risk_gates.SECTOR_MAP]
+        self.assertEqual(manquants, [],
+                         "symbole(s) de DEFAULT_UNIVERSE absent(s) de "
+                         "SECTOR_MAP : %s — le plafond sectoriel ne s'applique "
+                         "pas à eux" % ", ".join(manquants))
+
+    def test_sector_of_est_insensible_a_la_casse(self):
+        self.assertEqual(risk_gates.sector_of("spy"), risk_gates.sector_of("SPY"))
+
+    def test_un_symbole_inconnu_ne_partage_le_secteur_de_personne(self):
+        """Le repli est délibéré : un symbole inconnu ne doit pas être rangé
+        dans un mauvais secteur. Ce test fige ce choix plutôt que de le laisser
+        implicite."""
+        a = risk_gates.sector_of("ZZZZ")
+        self.assertEqual(a, "ZZZZ")
+        self.assertNotIn(a, set(risk_gates.SECTOR_MAP.values()))
 
 
 if __name__ == "__main__":
