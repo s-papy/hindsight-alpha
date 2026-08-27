@@ -496,7 +496,39 @@ def find_near_the_money_contract(
     if not contracts:
         return None
 
-    closest = min(contracts, key=lambda c: abs(float(c["strike_price"]) - spot))
+    # AJOUTE le 27/08/2026. Cette cle ne regardait QUE le strike. La requete
+    # ci-dessus couvre 7 a 21 jours, et un sous-jacent liquide comme SPY a des
+    # echeances lundi/mercredi/vendredi : une demi-douzaine de contrats
+    # partagent donc EXACTEMENT le meme strike. min() rend alors le premier de
+    # la liste, c'est-a-dire ce que l'ordre de la reponse decide.
+    #
+    # Mesure, meme spot, memes contrats, meme strike retenu (500.00) :
+    #     ordre API croissant   -> echeance 2026-09-02   (2 jours)
+    #     ordre API inverse     -> echeance 2026-09-15   (15 jours)
+    #     ordre API quelconque  -> echeance 2026-09-11   (11 jours)
+    #
+    # L'API documente un tri par strike CROISSANT ; elle ne dit rien de l'ordre
+    # a strike egal. La valeur temps de ce qui est achete -- donc le theta paye
+    # chaque jour -- dependait d'un detail non specifie, sur CHAQUE transaction.
+    #
+    # DECISION A CONFIRMER PAR UN HUMAIN, ecrite ici plutot que subie : a
+    # egalite de strike on prend l'echeance la PLUS PROCHE. C'est ce que l'ordre
+    # naturel des symboles produisait deja en pratique (donc le changement de
+    # comportement attendu est nul dans le cas courant), et c'est ce qui colle
+    # le mieux au modele que backtest.py simule -- un payoff a UN JOUR
+    # (`abs(rets[next_day_ret_index])`). Le revers est assume : echeance proche
+    # = gamma eleve mais theta le plus rapide. Si la strategie doit privilegier
+    # le temps plutot que la convexite, c'est ICI que ca se change, et ce doit
+    # etre un choix explicite -- pas un effet de bord de l'ordre de pagination.
+    #
+    # `symbol` en dernier rang garantit un resultat totalement deterministe meme
+    # si deux contrats partageaient strike ET echeance.
+    closest = min(
+        contracts,
+        key=lambda c: (abs(float(c["strike_price"]) - spot),
+                       str(c.get("expiration_date", "")),
+                       str(c.get("symbol", ""))),
+    )
     return closest["symbol"]
 
 

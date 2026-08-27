@@ -1306,5 +1306,83 @@ class TestQualiteDesBarres(unittest.TestCase):
                          "qualité : le contrôle ne s'appliquerait jamais")
 
 
+class TestChoixDuContrat(unittest.TestCase):
+    """find_near_the_money_contract choisissait le strike délibérément et
+    l'échéance pas du tout.
+
+    Sa clé de tri ne regardait que |strike - spot|. La requête couvre 7 à 21
+    jours, et un sous-jacent liquide a des échéances lundi/mercredi/vendredi :
+    une demi-douzaine de contrats partagent donc exactement le même strike, et
+    min() rendait le premier de la liste.
+
+    Mesuré le 27/08, même spot, mêmes contrats, même strike retenu :
+        ordre API croissant   -> échéance à  2 jours
+        ordre API inverse     -> échéance à 15 jours
+        ordre API quelconque  -> échéance à 11 jours
+
+    La valeur temps de ce qui est acheté dépendait d'un détail que l'API ne
+    spécifie pas, sur CHAQUE transaction.
+    """
+
+    SPOT = 500.0
+    ECHEANCES = ["2026-09-02", "2026-09-04", "2026-09-08", "2026-09-11", "2026-09-15"]
+
+    def setUp(self):
+        self._vrai_run = alpaca_cli.run
+
+    def tearDown(self):
+        alpaca_cli.run = self._vrai_run
+
+    def _contrats(self, echeances, strikes=(495.0, 500.0, 505.0)):
+        out = []
+        for exp in echeances:
+            for k in strikes:
+                out.append({
+                    "symbol": "SPY%sC%08d" % (exp.replace("-", "")[2:], int(k * 1000)),
+                    "strike_price": str(k),
+                    "expiration_date": exp,
+                })
+        return out
+
+    def _choisir(self, contrats):
+        alpaca_cli.run = lambda args: {"option_contracts": contrats}
+        return alpaca_cli.find_near_the_money_contract("SPY", +1, spot=self.SPOT)
+
+    def test_le_choix_ne_depend_pas_de_l_ordre_de_la_reponse(self):
+        ordres = [
+            self.ECHEANCES,
+            list(reversed(self.ECHEANCES)),
+            [self.ECHEANCES[3], self.ECHEANCES[0], self.ECHEANCES[4],
+             self.ECHEANCES[1], self.ECHEANCES[2]],
+        ]
+        choix = {self._choisir(self._contrats(o)) for o in ordres}
+        self.assertEqual(len(choix), 1,
+                         "le contrat acheté change avec le seul ordre de la "
+                         "réponse de l'API : %r" % sorted(choix))
+
+    def test_le_strike_prime_toujours_sur_l_echeance(self):
+        """Sans ceci, départager d'abord par échéance passerait le test du
+        dessus tout en achetant un strike plus éloigné du spot."""
+        contrats = (
+            self._contrats(["2026-09-02"], strikes=(520.0,))   # proche, mais loin du spot
+            + self._contrats(["2026-09-15"], strikes=(500.0,))  # lointain, pile au spot
+        )
+        choisi = self._choisir(contrats)
+        self.assertIn("C00500000", choisi,
+                      "un strike plus éloigné du spot a été retenu parce que "
+                      "son échéance était plus proche")
+
+    def test_a_strike_egal_l_echeance_la_plus_proche_gagne(self):
+        """Le sens du départage est une décision de stratégie, écrite dans
+        alpaca_cli.py et verrouillée ici : à égalité de strike, l'échéance la
+        plus proche. Si quelqu'un décide l'inverse, ce test doit tomber et
+        forcer la discussion, pas laisser le changement passer inaperçu."""
+        choisi = self._choisir(self._contrats(list(reversed(self.ECHEANCES))))
+        self.assertIn("260902", choisi)
+
+    def test_aucun_contrat_rend_None(self):
+        self.assertIsNone(self._choisir([]))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
