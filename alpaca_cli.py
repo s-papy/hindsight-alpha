@@ -624,6 +624,43 @@ def get_daily_bars(symbol: str, lookback_days: int = MIN_TRADING_DAYS_FOR_SWEEP)
              - timedelta(days=int(lookback_days * 1.6) + 10)).strftime("%Y-%m-%d")
     data = run(["data", "bars", "--symbol", symbol, "--start", start, "--timeframe", "1Day"])
     rows = _extract_bars(data, expected_symbol=symbol)
+
+    # AJOUTE le 27/08/2026, en suite directe du controle d'ordre : celui-ci
+    # tolere DELIBEREMENT deux horodatages egaux -- un doublon n'est pas un
+    # desordre -- mais rien d'autre ne les attrapait. Mesure sur 700 jours :
+    #
+    #     aucun doublon        -> 700 lignes / 700 jours reels
+    #     100 barres doublees  -> 800 lignes / 700 jours reels, ACCEPTE
+    #
+    # Deux consequences, et la seconde touche le signal lui-meme :
+    #   . `minimum_usable` compte des LIGNES, pas des jours distincts : un flux
+    #     tres duplique franchit le seuil d'historique tout en ayant beaucoup
+    #     moins d'histoire -- exactement la panne que
+    #     MIN_TRADING_DAYS_FOR_SWEEP existe pour empecher ;
+    #   . un doublon insere un rendement de 0% (meme cloture deux fois), ce qui
+    #     fait BAISSER la volatilite mesuree. Or « la volatilite est bon
+    #     marche » est le signal d'entree de cette strategie : des doublons la
+    #     poussent donc a trader davantage.
+    #
+    # On deduplique AVANT le controle de qualite, une seule fois, pour que la
+    # porte et le constructeur voient la meme serie -- les faire dedupliquer
+    # chacun de leur cote serait la meme regle ecrite deux fois.
+    vus, dedupliquees = set(), []
+    for ligne in rows:
+        cle = ligne.get("t")
+        if cle is not None and cle in vus:
+            continue
+        if cle is not None:
+            vus.add(cle)
+        dedupliquees.append(ligne)
+    if len(dedupliquees) != len(rows):
+        print("  WARNING: %s: %d duplicate daily bar(s) removed before "
+              "scoring. Duplicates lower measured volatility (a repeated close "
+              "is a 0%% return), and this strategy enters when volatility looks "
+              "cheap."
+              % (symbol, len(rows) - len(dedupliquees)), flush=True)
+    rows = dedupliquees
+
     _check_bar_quality(symbol, rows, minimum_usable=lookback_days)
     # Le constructeur applique la MEME definition d'« exploitable » que la
     # porte de qualite juste au-dessus : un nombre FINI. Avant le 27/08 les

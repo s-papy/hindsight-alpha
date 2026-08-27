@@ -51,7 +51,7 @@ import tempfile
 import threading
 import time
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -1822,10 +1822,17 @@ class TestQualiteDesBarres(unittest.TestCase):
 
     @staticmethod
     def _lignes(n, avec_cloture=True, prix=100.0):
-        maintenant = datetime.now(timezone.utc).isoformat()
+        # Horodatages DISTINCTS, un par ligne, la plus recente etant maintenant.
+        # Corrige le 27/08 : cette fixture donnait le MEME instant a ses n
+        # lignes -- n copies d'un seul jour. C'etait sans effet tant que rien
+        # ne regardait `t` pour l'identite, mais get_daily_bars deduplique
+        # desormais par horodatage, et 600 copies d'un instant valent bien UN
+        # jour de bourse. C'est la fixture qui etait fausse : elle modelisait
+        # exactement le flux que le nouveau controle existe pour refuser.
+        maintenant = datetime.now(timezone.utc)
         lignes = []
         for i in range(n):
-            ligne = {"t": maintenant}
+            ligne = {"t": (maintenant - timedelta(days=n - 1 - i)).isoformat()}
             if avec_cloture:
                 ligne["c"] = prix + (i % 3) * 0.01   # variation minime, aucun saut
             lignes.append(ligne)
@@ -2303,6 +2310,60 @@ class TestQualiteDesBarresFaceAuNaN(unittest.TestCase):
                              ("ordre normal", base)):
             with self.subTest(cas=etiquette):
                 alpaca_cli._check_bar_quality("SPY", r, minimum_usable=600)
+
+    def test_les_barres_dupliquees_sont_retirees(self):
+        """Suite directe du contrôle d'ordre, qui tolère DÉLIBÉRÉMENT deux
+        horodatages égaux — un doublon n'est pas un désordre. Mais rien
+        d'autre ne les attrapait. Mesuré sur 700 jours :
+
+            aucun doublon        -> 700 lignes / 700 jours réels
+            100 barres doublées  -> 800 lignes / 700 jours réels, ACCEPTÉ
+
+        Deux conséquences, et la seconde touche le SIGNAL lui-même :
+
+          · `minimum_usable` compte des LIGNES, pas des jours distincts : un
+            flux très dupliqué franchit le seuil d'historique tout en ayant
+            beaucoup moins d'histoire — exactement la panne que
+            MIN_TRADING_DAYS_FOR_SWEEP existe pour empêcher ;
+          · un doublon insère un rendement de 0% (même clôture deux fois), ce
+            qui fait BAISSER la volatilité mesurée. Or « la volatilité est bon
+            marché » est le signal d'entrée de cette stratégie : des doublons
+            la poussent donc à trader davantage."""
+        from unittest import mock
+        base = self._lignes(lambda i: 100.0 + i * 0.01)
+        avec = list(base)
+        for k in range(100):
+            avec.insert(100 + k, dict(avec[100 + k]))
+        with mock.patch.object(alpaca_cli, "run",
+                               lambda a: {"bars": {"SPY": avec}}):
+            barres = alpaca_cli.get_daily_bars("SPY", lookback_days=600)
+        self.assertEqual(len(barres), 700,
+                         "les 100 doublons sont encore comptés comme des jours "
+                         "de bourse (%d barres)" % len(barres))
+
+    def test_des_doublons_ne_masquent_plus_un_historique_trop_court(self):
+        """Le cas qui compte : 700 lignes dont 100 doublons, soit 600 jours
+        RÉELS, contre un seuil de 650. Avant, le compte de lignes suffisait à
+        franchir la porte."""
+        from unittest import mock
+        court = self._lignes(lambda i: 100.0 + i * 0.01, n=600)
+        for k in range(100):
+            court.insert(100 + k, dict(court[100 + k]))
+        with mock.patch.object(alpaca_cli, "run",
+                               lambda a: {"bars": {"SPY": court}}):
+            with self.assertRaises(alpaca_cli.DataQualityError,
+                                   msg="700 lignes pour 600 jours réels ont "
+                                       "franchi un seuil de 650"):
+                alpaca_cli.get_daily_bars("SPY", lookback_days=650)
+
+    def test_un_flux_sans_doublon_n_est_pas_touche(self):
+        """Témoin : la déduplication ne doit rien retirer d'un flux sain."""
+        from unittest import mock
+        base = self._lignes(lambda i: 100.0 + i * 0.01)
+        with mock.patch.object(alpaca_cli, "run",
+                               lambda a: {"bars": {"SPY": base}}):
+            barres = alpaca_cli.get_daily_bars("SPY", lookback_days=600)
+        self.assertEqual(len(barres), 700)
 
     def test_les_controles_existants_ne_regressent_pas(self):
         """Témoins : la porte doit toujours attraper ce qu'elle attrapait."""
