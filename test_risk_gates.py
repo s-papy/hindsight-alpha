@@ -1901,6 +1901,61 @@ class TestQualiteDesBarres(unittest.TestCase):
                          "qualité : le contrôle ne s'appliquerait jamais")
 
 
+
+class TestHorlogeDeMarche(unittest.TestCase):
+    """Ajouté le 27/08 au soir, la veille du kickoff.
+
+    `clock.get("is_open", False)` — dans agent.py ET monitor_exits.py. Une
+    réponse JSON parfaitement valide mais dépourvue du champ `is_open` fait
+    donc conclure « marché fermé ». L'agent saute alors la journée entière,
+    journalise `market_closed`, et le tableau de bord affiche un badge gris
+    parfaitement routinier.
+
+    Sur une semaine jugée qui ne compte que cinq jours de bourse, une journée
+    perdue en silence est chère — et rien ne dirait pourquoi.
+
+    C'est exactement le raisonnement qui a durci list_positions() le 26/08 :
+    « je n'ai pas compris la réponse » n'est pas « il n'y a rien ». L'horloge
+    a la même forme et n'avait pas été durcie. `run()` lève désormais sur un
+    CORPS d'erreur, mais pas sur une réponse valide dont le champ a été
+    renommé — et ce fichier documente DEUX surprises de nommage de ce CLI.
+
+    Le sens de l'échec compte : lever fait journaliser `error`, VISIBLE, au
+    lieu de `market_closed`, invisible. On préfère un agent qui s'arrête en
+    disant pourquoi à un agent qui ne trade pas sans le dire."""
+
+    def _horloge(self, reponse):
+        from unittest import mock
+        with mock.patch.object(alpaca_cli, "run", lambda a: reponse):
+            return alpaca_cli.get_clock()
+
+    def test_une_horloge_sans_is_open_ne_veut_pas_dire_ferme(self):
+        for reponse, cas in (
+                ({"next_open": "2026-08-31T13:30:00Z"}, "champ absent"),
+                ({"isOpen": True}, "champ renommé en camelCase"),
+                ({"is_open": "true"}, "booléen rendu comme une chaîne"),
+                ([], "liste au lieu d'un dict")):
+            with self.subTest(cas=cas):
+                with self.assertRaises(alpaca_cli.AlpacaCLIError,
+                                       msg="%s : accepté en silence, donc lu "
+                                           "comme « marché fermé »" % cas):
+                    self._horloge(reponse)
+
+    def test_le_message_dit_ce_qui_a_ete_recu(self):
+        try:
+            self._horloge({"next_open": "2026-08-31T13:30:00Z"})
+        except alpaca_cli.AlpacaCLIError as e:
+            self.assertIn("is_open", str(e))
+            self.assertIn("next_open", str(e),
+                          "le message ne montre pas ce qui a été reçu : %s" % e)
+
+    def test_une_horloge_normale_passe(self):
+        """Témoin : ouvert ET fermé sont deux réponses légitimes."""
+        for ouvert in (True, False):
+            with self.subTest(is_open=ouvert):
+                d = self._horloge({"is_open": ouvert, "next_open": "x"})
+                self.assertEqual(d["is_open"], ouvert)
+
 class TestBarresDuBonSymbole(unittest.TestCase):
     """Ajouté le 27/08. _extract_bars() gère deux formes de réponse connues :
     {"bars": [...]} et {"bars": {"SYMBOLE": [...]}}. Dans le second cas elle

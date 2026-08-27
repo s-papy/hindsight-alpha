@@ -205,8 +205,40 @@ def get_account() -> dict:
 def get_clock() -> dict:
     """Market clock: {"is_open": bool, "next_open": ..., "next_close": ...}
     (standard Alpaca /v2/clock shape). Used to skip gracefully instead of
-    erroring when the market is closed (weekends, holidays)."""
-    return run(["clock"])
+    erroring when the market is closed (weekends, holidays).
+
+    DURCI le 27/08/2026, la veille du kickoff. Les deux appelants faisaient
+    `clock.get("is_open", False)` -- agent.py ligne ~334, monitor_exits.py.
+    Une reponse JSON parfaitement VALIDE mais depourvue de ce champ faisait
+    donc conclure « marche ferme » : l'agent sautait la journee entiere,
+    journalisait `market_closed`, et le tableau de bord affichait un badge
+    gris parfaitement routinier.
+
+    Sur une semaine jugee qui ne compte que cinq jours de bourse, une journee
+    perdue en silence est chere -- et rien ne dirait pourquoi.
+
+    Meme raisonnement que list_positions() le 26/08 : « je n'ai pas compris
+    la reponse » n'est pas « il n'y a rien ». run() leve deja sur un CORPS
+    d'erreur, mais pas sur une reponse valide dont le champ aurait ete
+    renomme -- et ce fichier documente DEUX surprises de nommage de ce CLI en
+    « Alpha Preview » (--symbols au pluriel, --symbol-or-asset-id).
+
+    Le SENS de l'echec compte : lever fait journaliser `error`, VISIBLE, au
+    lieu de `market_closed`, invisible. Un agent qui s'arrete en disant
+    pourquoi vaut mieux qu'un agent qui ne trade pas sans le dire.
+
+    Un booleen est exige, pas une valeur « vraie » : la chaine "false" est
+    vraie en Python, et l'accepter transformerait un marche ferme en marche
+    ouvert."""
+    data = run(["clock"])
+    if not isinstance(data, dict) or not isinstance(data.get("is_open"), bool):
+        raise AlpacaCLIError(
+            "could not read the market clock: expected a dict with a boolean "
+            "'is_open', got %s. Refusing to read this as 'the market is "
+            "closed' -- that would silently skip a whole trading day."
+            % (sorted(data)[:6] if isinstance(data, dict) else type(data).__name__)
+        )
+    return data
 
 
 def list_positions() -> List[dict]:
