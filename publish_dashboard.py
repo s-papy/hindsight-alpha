@@ -64,6 +64,47 @@ def _read_monitor_status() -> dict | None:
         return None
 
 
+# AJOUTE le 27/08/2026. Le commentaire de `account` ci-dessous enonce le
+# principe -- « le payload d'Alpaca est recopie ici, et il grandira » -- et
+# c'est pour cela que `account` a ete reduit a six champs choisis. `positions`,
+# une ligne plus bas, recopiait pourtant le payload ENTIER.
+#
+# Mesure sur la position reellement ouverte, chacun des 19 champs publies
+# croise contre docs/index.html ET test_dashboard.py :
+#
+#   consommes (7)  asset_class, cost_basis, qty, side, symbol,
+#                  unrealized_pl, unrealized_plpc
+#   personne (12)  asset_id, asset_marginable, avg_entry_price, change_today,
+#                  current_price, exchange, lastday_price, market_value,
+#                  qty_available, unrealized_intraday_pl,
+#                  unrealized_intraday_plpc, usd
+#
+# `asset_id` est un UUID interne : exactement la nature du champ retire de
+# `account` le meme jour, pour exactement ce motif. Le probleme n'est pas
+# qu'un de ces champs soit dangereux -- aucun n'autorise quoi que ce soit
+# sans les cles -- c'est que DOUZE champs partaient sans que personne ne
+# l'ait decide, dans un fichier suivi par git et servi publiquement.
+#
+# La liste ci-dessous est donc une DECISION, pas un reste. Y ajouter un champ
+# doit rester un acte volontaire : un test refuse tout champ publie que la
+# page n'utilise pas.
+CHAMPS_DE_POSITION_PUBLIES = (
+    "symbol", "qty", "side", "asset_class",
+    "cost_basis", "unrealized_pl", "unrealized_plpc",
+)
+
+
+def _position_publiable(position: dict) -> dict:
+    """Ne publie que les champs que la page affiche reellement.
+
+    `.get()` plutot qu'une indexation : un champ absent du payload devient
+    None, ce que la page sait deja rendre. L'inverse -- lever ici -- ferait
+    echouer toute la publication a cause d'un seul champ manquant sur une
+    seule position, alors que ce fichier n'a qu'un role d'affichage.
+    """
+    return {champ: position.get(champ) for champ in CHAMPS_DE_POSITION_PUBLIES}
+
+
 def build_snapshot() -> dict:
     config.require_credentials()
     account = alpaca_cli.get_account()
@@ -117,7 +158,7 @@ def build_snapshot() -> dict:
             "buying_power": account.get("buying_power"),
             "portfolio_value": account.get("portfolio_value"),
         },
-        "positions": positions,
+        "positions": [_position_publiable(p) for p in positions],
         "recent_decisions": recent,
         "monitor_status": monitor_status,
     }

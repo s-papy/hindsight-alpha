@@ -3827,5 +3827,110 @@ class TestStatutDuMoniteurDitSIlAAgi(unittest.TestCase):
                               "d'un booléen" % (valeur,))
 
 
+class TestAucunChampMortDansLesDonneesPubliees(unittest.TestCase):
+    """`account` avait été réduit à six champs choisis, avec ce motif écrit
+    noir sur blanc : « le payload d'Alpaca est recopié ici, et il grandira ».
+    Une ligne plus bas, `positions` recopiait pourtant le payload ENTIER.
+
+    Mesuré sur la position réellement ouverte : 19 champs publiés, **12 sans
+    aucun consommateur** — ni page, ni tests — dont `asset_id`, un UUID
+    interne, exactement la nature du champ retiré d'`account` le même jour et
+    pour le même motif.
+
+    Aucun de ces champs n'autorise quoi que ce soit sans les clés. Le défaut
+    n'est pas là : c'est que douze champs partaient dans un fichier suivi par
+    git et servi publiquement **sans que personne ne l'ait décidé**."""
+
+    @staticmethod
+    def _page():
+        return (Path(__file__).parent / "docs" / "index.html").read_text(
+            encoding="utf-8")
+
+    def test_chaque_champ_publie_est_utilise_par_la_page(self):
+        """La règle qui ne peut pas pourrir : un champ ajouté plus tard devra
+        être utilisé, ou retiré. Un simple gel de la liste actuelle ne dirait
+        rien du prochain."""
+        import publish_dashboard
+        page = self._page()
+        morts = [c for c in publish_dashboard.CHAMPS_DE_POSITION_PUBLIES
+                 if c not in page]
+        self.assertEqual(morts, [],
+                         "champ(s) publié(s) que la page n'utilise pas : %s — "
+                         "publier ce que personne ne lit, c'est publier sans "
+                         "l'avoir décidé" % ", ".join(morts))
+
+    def test_build_snapshot_APPLIQUE_reellement_le_filtre(self):
+        """LE test qui manquait, et son absence était instructive : une
+        première version de cette classe vérifiait la liste blanche et la
+        fonction de filtrage, mais jamais que `build_snapshot` s'en serve.
+        Mutation-testé : retirer entièrement le filtre laissait tout au vert.
+
+        Un contrôle qui existe sans jamais être branché est exactement la
+        forme d'échec que ce projet traque ailleurs — et elle venait d'être
+        reproduite ici, dans le test censé la prévenir."""
+        from unittest import mock
+        import publish_dashboard
+
+        brute = {"symbol": "SPY 260831P00764000", "qty": "1", "side": "long",
+                 "asset_class": "us_option", "cost_basis": "764",
+                 "unrealized_pl": "-12", "unrealized_plpc": "-0.0157",
+                 "asset_id": "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415",
+                 "exchange": "OPRA", "qty_available": "1", "usd": {}}
+
+        with mock.patch.object(publish_dashboard.config, "require_credentials"), \
+             mock.patch.object(publish_dashboard.alpaca_cli, "get_account",
+                               return_value={"account_number": "PA0",
+                                             "status": "ACTIVE"}), \
+             mock.patch.object(publish_dashboard.alpaca_cli, "list_positions",
+                               return_value=[brute]), \
+             mock.patch.object(publish_dashboard.decision_log, "read_log",
+                               return_value=[]):
+            instantane = publish_dashboard.build_snapshot()
+
+        publiee = instantane["positions"][0]
+        surplus = set(publiee) - set(publish_dashboard.CHAMPS_DE_POSITION_PUBLIES)
+        self.assertEqual(surplus, set(),
+                         "build_snapshot publie des champs hors liste blanche "
+                         "(%s) — le filtre existe mais n'est pas branché"
+                         % ", ".join(sorted(surplus)))
+        self.assertNotIn("asset_id", publiee)
+        self.assertEqual(publiee["symbol"], brute["symbol"],
+                         "le filtre a aussi emporté ce qu'il fallait garder")
+
+    def test_les_champs_que_la_page_affiche_sont_bien_publies(self):
+        """TÉMOIN, et il compte : sans lui, publier une liste VIDE passerait le
+        test ci-dessus tout en cassant le tableau de bord."""
+        import publish_dashboard
+        attendus = {"symbol", "qty", "asset_class", "cost_basis",
+                    "unrealized_plpc"}
+        manquants = attendus - set(publish_dashboard.CHAMPS_DE_POSITION_PUBLIES)
+        self.assertEqual(manquants, set(),
+                         "la page affiche %s mais ils ne sont plus publiés"
+                         % ", ".join(sorted(manquants)))
+
+    def test_l_uuid_interne_n_est_plus_publie(self):
+        """Le cas nommé, parce qu'il s'était déjà produit une fois sur
+        `account` et qu'il était reparti par l'autre porte."""
+        import publish_dashboard
+        brut = {"symbol": "SPY 260831P00764000", "qty": "1", "side": "long",
+                "asset_class": "us_option", "cost_basis": "764",
+                "unrealized_pl": "-12", "unrealized_plpc": "-0.0157",
+                "asset_id": "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415",
+                "exchange": "OPRA"}
+        publie = publish_dashboard._position_publiable(brut)
+        self.assertNotIn("asset_id", publie)
+        self.assertNotIn("exchange", publie)
+        self.assertEqual(publie["symbol"], brut["symbol"],
+                         "le témoin utile doit survivre au filtre")
+
+    def test_un_champ_absent_du_payload_ne_casse_pas_la_publication(self):
+        """Ce fichier n'a qu'un rôle d'affichage : un champ manquant sur UNE
+        position ne doit pas faire échouer toute la publication."""
+        import publish_dashboard
+        publie = publish_dashboard._position_publiable({"symbol": "SPY"})
+        self.assertIsNone(publie["cost_basis"])
+        self.assertEqual(publie["symbol"], "SPY")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
