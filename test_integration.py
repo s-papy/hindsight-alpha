@@ -4028,6 +4028,58 @@ class TestAucunChampMortDansLesDonneesPubliees(unittest.TestCase):
         self.assertEqual(publiee["symbol"], brute["symbol"],
                          "le filtre a aussi emporté ce qu'il fallait garder")
 
+    def test_aucun_champ_de_COMPTE_publie_n_est_ignore_par_la_page(self):
+        """La même discipline, appliquée au bloc `account` — elle ne l'était
+        pas. Mesuré : `portfolio_value` était publié et lu par personne (ni
+        page, ni tests). Il sert bien de repli à `equity` dans `risk_gates`,
+        mais celui-là lit l'API en direct, pas ce fichier."""
+        from unittest import mock
+        import publish_dashboard
+        with mock.patch.object(publish_dashboard.config, "require_credentials"), \
+             mock.patch.object(publish_dashboard.config,
+                               "raison_de_refus_du_compte", return_value=None), \
+             mock.patch.object(publish_dashboard.alpaca_cli, "get_account",
+                               return_value={"account_number": "PA0",
+                                             "status": "ACTIVE",
+                                             "equity": "1", "cash": "1",
+                                             "buying_power": "1",
+                                             "portfolio_value": "1",
+                                             "id": "uuid-interne"}), \
+             mock.patch.object(publish_dashboard.alpaca_cli, "list_positions",
+                               return_value=[]), \
+             mock.patch.object(publish_dashboard.decision_log, "read_log",
+                               return_value=[]):
+            compte = publish_dashboard.build_snapshot()["account"]
+
+        page = self._page()
+        morts = [c for c in compte if ("account.%s" % c) not in page]
+        self.assertEqual(morts, [],
+                         "champ(s) de compte publié(s) que la page ne lit "
+                         "pas : %s" % ", ".join(morts))
+
+    def test_l_uuid_interne_du_compte_reste_hors_de_la_publication(self):
+        """TÉMOIN du choix du 27/08, et il compte : la page avait un repli
+        `account.account_number || account.id`, vers un champ délibérément
+        retiré. Il ne pouvait plus jamais se déclencher, mais il invitait un
+        futur lecteur à « réparer » la page en republiant l'UUID."""
+        from unittest import mock
+        import publish_dashboard
+        with mock.patch.object(publish_dashboard.config, "require_credentials"), \
+             mock.patch.object(publish_dashboard.config,
+                               "raison_de_refus_du_compte", return_value=None), \
+             mock.patch.object(publish_dashboard.alpaca_cli, "get_account",
+                               return_value={"account_number": "PA0",
+                                             "id": "uuid-interne"}), \
+             mock.patch.object(publish_dashboard.alpaca_cli, "list_positions",
+                               return_value=[]), \
+             mock.patch.object(publish_dashboard.decision_log, "read_log",
+                               return_value=[]):
+            compte = publish_dashboard.build_snapshot()["account"]
+        self.assertNotIn("id", compte)
+        self.assertNotIn("account.id", self._page(),
+                         "la page garde un repli vers un champ qu'on a "
+                         "délibérément cessé de publier")
+
     def test_les_champs_que_la_page_affiche_sont_bien_publies(self):
         """TÉMOIN, et il compte : sans lui, publier une liste VIDE passerait le
         test ci-dessus tout en cassant le tableau de bord."""

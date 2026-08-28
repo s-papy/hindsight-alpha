@@ -183,7 +183,12 @@ def build_snapshot() -> dict:
             "equity": account.get("equity"),
             "cash": account.get("cash"),
             "buying_power": account.get("buying_power"),
-            "portfolio_value": account.get("portfolio_value"),
+            # `portfolio_value` RETIRE le 28/08 : publie, lu par
+            # personne -- ni la page, ni les tests. Il sert bien de
+            # repli a `equity` dans risk_gates, mais celui-la lit
+            # l'API en direct, pas ce fichier. Meme discipline que
+            # celle appliquee aux positions le meme matin : ce qui est
+            # publie doit etre lu.
         },
         "positions": [_position_publiable(p) for p in positions],
         "recent_decisions": recent,

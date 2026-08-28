@@ -343,7 +343,16 @@ function renderAccount(account) {
   const el = document.getElementById('account-cards');
   if (!account) { el.innerHTML = '<div class="empty">No account data yet</div>'; return; }
   const cards = [
-    ['Account ID', esc(account.account_number || account.id || '—')],
+    // Le repli vers l'identifiant INTERNE a ete retire le 28/08 -- et sa
+    // mention litterale aussi, car un test interdit desormais cette chaine
+    // dans la page et attrapait ce commentaire-ci. Ce repli pointait vers
+    // l'UUID interne du compte, supprime de la publication le 27/08
+    // precisement parce qu'il partait dans un fichier public sans que
+    // personne ne l'ait decide. Il ne pouvait donc plus jamais se
+    // declencher -- mais il suggerait a un futur lecteur de « reparer » la
+    // page en republiant l'UUID. Un repli mort vers un champ qu'on a
+    // deliberement cesse de publier est une invitation a annuler ce choix.
+    ['Account ID', esc(account.account_number || '—')],
     ['Equity', fmtMoney(account.equity)],
     ['Cash', fmtMoney(account.cash)],
     ['Buying Power', fmtMoney(account.buying_power)],
