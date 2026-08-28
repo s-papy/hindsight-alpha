@@ -4616,6 +4616,104 @@ class TestDecalageDInformationEntreLesDeuxStrategies(unittest.TestCase):
                       "entre les deux stratégies")
 
 
+class TestChaqueDependanceTierceEstDECLAREE(unittest.TestCase):
+    """La CI a échoué toute la soirée sur une dépendance qu'elle n'installait
+    pas.
+
+    `requirements.txt` déclare `python-dotenv` depuis toujours ; le workflow
+    ne faisait AUCUN `pip install`. La suite passait en local uniquement
+    parce que la machine de l'opérateur a la bibliothèque — et un test
+    affirmait « la divergence n'est pas signalée » alors que rien ne pouvait
+    la signaler.
+
+    Ces deux tests gardent les deux moitiés du correctif :
+      . la CI installe bien les dépendances déclarées ;
+      . tout module tiers importé est bien déclaré — sinon le prochain
+        `import quelquechose` passerait chez qui l'a déjà, et nulle part
+        ailleurs.
+    """
+
+    RACINE = Path(__file__).parent
+
+    def _modules_tiers(self):
+        """(nom, fichiers) pour chaque import de premier niveau qui n'est ni
+        local, ni la bibliothèque standard.
+
+        Classé par le CHEMIN du module trouvé, pas par une liste écrite à la
+        main : une liste de noms stdlib vieillirait, et vieillir en silence
+        est précisément ce qu'on essaie d'empêcher ici."""
+        import ast
+        import importlib.util
+        import sysconfig
+        locaux = {f.stem for f in self.RACINE.glob("*.py")}
+        stdlib = sysconfig.get_paths()["stdlib"]
+        vus = {}
+        for f in sorted(self.RACINE.glob("*.py")):
+            arbre = ast.parse(f.read_text(encoding="utf-8"))
+            for n in ast.walk(arbre):
+                if isinstance(n, ast.Import):
+                    noms = [a.name for a in n.names]
+                elif isinstance(n, ast.ImportFrom) and n.level == 0 and n.module:
+                    noms = [n.module]
+                else:
+                    continue
+                for nom in noms:
+                    racine = nom.split(".")[0]
+                    if racine in locaux or racine == "__future__":
+                        continue
+                    if racine in sys.builtin_module_names:
+                        continue
+                    try:
+                        spec = importlib.util.find_spec(racine)
+                    except Exception:
+                        spec = None
+                    origine = getattr(spec, "origin", None) or ""
+                    if spec is not None and origine.startswith(stdlib):
+                        continue
+                    vus.setdefault(racine, set()).add(f.name)
+        return vus
+
+    def test_tout_module_tiers_importe_est_declare(self):
+        declare = (self.RACINE / "requirements.txt").read_text(
+            encoding="utf-8").lower()
+        manquants = []
+        for nom, fichiers in sorted(self._modules_tiers().items()):
+            if nom.lower() not in declare and nom.replace("_", "-").lower() not in declare:
+                manquants.append("%s (importé par %s)" % (nom, ", ".join(sorted(fichiers))))
+        self.assertEqual(
+            manquants, [],
+            "des modules tiers ne sont pas dans requirements.txt : ils "
+            "marcheront chez qui les a déjà, et nulle part ailleurs — le "
+            "défaut exact qui a fait échouer la CI le 28/08.\n    %s"
+            % "\n    ".join(manquants))
+
+    def test_le_detecteur_voit_bien_un_module_tiers(self):
+        """TÉMOIN d'instrument, et il est indispensable : un détecteur qui ne
+        trouverait plus RIEN passerait le test ci-dessus pour toujours.
+        `dotenv` est aujourd'hui le seul module tiers du dépôt — mesuré."""
+        self.assertIn(
+            "dotenv", self._modules_tiers(),
+            "le détecteur ne voit plus dotenv : il ne classe plus rien comme "
+            "tiers, donc il ne peut plus rien attraper")
+
+    def test_la_CI_installe_les_dependances_declarees(self):
+        ci = (self.RACINE / ".github" / "workflows" / "garde-fou.yml").read_text(
+            encoding="utf-8")
+        self.assertIn(
+            "requirements.txt", ci,
+            "la CI n'installe pas les dépendances du projet : elle teste une "
+            "configuration que personne ne fait tourner")
+        self.assertIn("pip install", ci)
+
+    def test_la_CI_lance_toujours_les_deux_verifications(self):
+        """TÉMOIN : ajouter une étape d'installation ne doit pas avoir
+        remplacé ce qu'elle sert à préparer."""
+        ci = (self.RACINE / ".github" / "workflows" / "garde-fou.yml").read_text(
+            encoding="utf-8")
+        self.assertIn("unittest discover", ci)
+        self.assertIn("garde_fou.py", ci)
+
+
 class TestLaVersionDePythonEstDeclareeEtVerifiee(unittest.TestCase):
     """Le dossier ne déclarait AUCUNE version minimale de Python — ni le
     README, ni `requirements.txt`, ni la CI, qui ne testait que « 3.x », la
