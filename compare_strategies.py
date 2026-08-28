@@ -92,11 +92,40 @@ def cellule_de_verdict(report) -> str:
             "CANNOT CONCLUDE": "unscored"}[report.verdict_label()]
 
 
-def _win_rate(rets: List[float]) -> float:
-    nonzero = [r for r in rets if r != 0.0]
-    if not nonzero:
+def _win_rate(rets: List[float], ignorer_les_zeros: bool) -> float:
+    """Part de journees gagnantes. Le denominateur est un CHOIX, pas une
+    deduction -- d'ou le parametre obligatoire.
+
+    CORRIGE le 28/08/2026. Cette fonction filtrait toujours les zeros, et les
+    deux appelants ne veulent pas la meme chose :
+
+      vol_strategy : `0.0` est un MARQUEUR, pose par _vol_strategy_returns()
+                     les jours ou la regle reste a l'ecart. Le filtrer est
+                     juste : ces jours ne sont pas des trades.
+      momentum     : `0.0` est une MESURE -- la strategie est investie tous
+                     les jours (le rapport l'ecrit lui-meme : « 596 days
+                     traded, always in the market »). Un rendement nul est
+                     une journee tenue sans gain, pas une journee sans
+                     position. La filtrer retire du denominateur des jours
+                     qui y appartiennent.
+
+    Le rapport publie annoncait donc un denominateur (« 596 days traded »)
+    et en utilisait un autre dans la meme phrase (« 54.4% win rate »).
+
+    Ampleur reelle : petite. Il faut un rendement quotidien EXACTEMENT nul,
+    ce qui suppose deux clotures identiques au centime -- rare sur un ETF
+    liquide, mais mesure comme possible plus tot dans cette meme session.
+    Demonstration du mecanisme sur 10 jours dont 4 nuls : 50.0% publie contre
+    30.0% reel, 20 points d'ecart. Le defaut n'est pas dans l'ampleur, il est
+    dans le fait qu'un chiffre publie ne compte pas ce que sa phrase annonce.
+
+    Meme confusion que celle ecartee dans backtest.py, ou le meme filtre est
+    JUSTE parce qu'il n'y sert qu'a vol_strategy (verifie).
+    """
+    denominateur = [r for r in rets if r != 0.0] if ignorer_les_zeros else list(rets)
+    if not denominateur:
         return 0.0
-    return 100 * sum(1 for r in nonzero if r > 0) / len(nonzero)
+    return 100 * sum(1 for r in denominateur if r > 0) / len(denominateur)
 
 
 def compare_symbol(symbol: str, bars) -> dict:
@@ -117,7 +146,8 @@ def compare_symbol(symbol: str, bars) -> dict:
         "in_sample_sharpe_of_winner": round(score_hv_window(vol_window, "in_sample", bars), 3),
         "trade_days": len(vol_trade_rets),
         "total_days_scored": len(vol_rets),
-        "win_rate_pct": round(_win_rate(vol_rets), 1),
+        # `0.0` est un marqueur « pas de position » ici : on l'ecarte.
+        "win_rate_pct": round(_win_rate(vol_rets, ignorer_les_zeros=True), 1),
         "avg_payoff_per_trade": round(mean(vol_trade_rets), 5) if vol_trade_rets else 0.0,
         "cumulative_proxy_payoff": round(sum(vol_rets), 4),
         # Per-CALENDAR-day mean and sd -- the two numbers the Sharpe is built
@@ -140,7 +170,9 @@ def compare_symbol(symbol: str, bars) -> dict:
         "hindsight_guard_verdict": cellule_de_verdict(mom_report),
         "in_sample_sharpe_of_winner": round(score_lookback(mom_lookback, "in_sample", bars), 3),
         "trade_days": len(mom_rets),  # always "in the market" -- every day is a trade day
-        "win_rate_pct": round(_win_rate(mom_rets), 1),
+        # Investi TOUS les jours (cf. trade_days juste au-dessus) : un
+        # rendement nul est une journee tenue, elle reste au denominateur.
+        "win_rate_pct": round(_win_rate(mom_rets, ignorer_les_zeros=False), 1),
         "avg_return_per_day": round(mean(mom_rets), 5) if mom_rets else 0.0,
         "cumulative_return_pct": round(100 * sum(mom_rets), 2),
         "mean_daily": round(mean(mom_rets), 5) if mom_rets else 0.0,

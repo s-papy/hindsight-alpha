@@ -4216,5 +4216,138 @@ class TestLesBancsEmploientLeSeuilDuProjet(unittest.TestCase):
                                  % (nom, ", ".join(morts)))
 
 
+class TestLeDenominateurDuTauxDeSucces(unittest.TestCase):
+    """`0.0` ne veut pas dire la même chose dans les deux stratégies, et
+    `_win_rate` les traitait pareil.
+
+      vol_strategy : `0.0` est un MARQUEUR posé les jours où la règle reste à
+                     l'écart. Le filtrer est juste.
+      momentum     : `0.0` est une MESURE — la stratégie est investie tous les
+                     jours, le rapport l'écrit lui-même (« 596 days traded,
+                     always in the market »). Un rendement nul est une journée
+                     tenue sans gain, pas une journée sans position.
+
+    Le rapport publié annonçait donc un dénominateur et en utilisait un autre
+    dans la même phrase : « 596 days traded (always in the market) …
+    54.4% win rate ».
+
+    AMPLEUR RÉELLE PETITE, et dite comme telle : il faut un rendement
+    quotidien EXACTEMENT nul, donc deux clôtures identiques au centime. Le
+    défaut n'est pas dans l'ampleur, il est dans le fait qu'un chiffre publié
+    ne compte pas ce que sa phrase annonce."""
+
+    SERIE = [0.01, -0.02, 0.0, 0.015, -0.005, 0.0, 0.0, -0.01, 0.02, 0.0]
+
+    def test_momentum_garde_les_journees_nulles_au_denominateur(self):
+        import compare_strategies
+        self.assertAlmostEqual(
+            compare_strategies._win_rate(self.SERIE, ignorer_les_zeros=False),
+            30.0, places=6,
+            msg="les journées à rendement nul sortent du dénominateur alors "
+                "que la position était tenue")
+
+    def test_vol_strategy_ecarte_bien_les_journees_sans_position(self):
+        """TÉMOIN : le filtre reste JUSTE là où 0.0 est un marqueur. Sans ce
+        test, supprimer le filtre partout passerait le test ci-dessus."""
+        import compare_strategies
+        self.assertAlmostEqual(
+            compare_strategies._win_rate(self.SERIE, ignorer_les_zeros=True),
+            50.0, places=6)
+
+    def test_le_choix_du_denominateur_est_obligatoire(self):
+        """Le paramètre n'a délibérément PAS de valeur par défaut : un défaut
+        redeviendrait une déduction silencieuse, et c'est la déduction qui
+        était fausse."""
+        import inspect
+        import compare_strategies
+        p = inspect.signature(compare_strategies._win_rate).parameters
+        self.assertIs(p["ignorer_les_zeros"].default, inspect.Parameter.empty,
+                      "un défaut ramène la déduction silencieuse qu'on vient "
+                      "de retirer")
+
+    def test_les_deux_appels_declarent_leur_choix(self):
+        """Les deux appelants doivent NOMMER leur choix : un appel positionnel
+        rendrait l'hypothèse invisible à la relecture, ce qui est exactement
+        comment elle avait survécu."""
+        source = (Path(__file__).parent / "compare_strategies.py").read_text(
+            encoding="utf-8")
+        self.assertIn("_win_rate(vol_rets, ignorer_les_zeros=True)", source)
+        self.assertIn("_win_rate(mom_rets, ignorer_les_zeros=False)", source)
+
+    def test_compare_symbol_APPLIQUE_le_bon_denominateur(self):
+        """LE test qui manquait. Les deux mutations « appelant inversé »
+        n'étaient attrapées que par un test de CHAÎNES — exactement le défaut
+        relevé une heure plus tôt sur `build_snapshot` : la fonction est
+        testée, son branchement ne l'est pas.
+
+        Ici on passe de vraies barres, dont plusieurs clôtures répétées (donc
+        des rendements exactement nuls), et on vérifie que le taux publié pour
+        momentum se recalcule bien sur TOUS les jours tenus."""
+        import math
+        import random
+        import compare_strategies
+        from momentum_strategy import _tsmom_returns
+        from vol_strategy import Bar
+
+        rng = random.Random(11)
+        barres, prix = [], 100.0
+        for i in range(700):
+            if i % 37 == 0 and i:
+                pass                      # clôture répétée : rendement nul
+            else:
+                ampl = 0.004 + 0.012 * (0.5 + 0.5 * math.sin(i / 41.0))
+                prix *= 1.0 + rng.gauss(0.0, ampl)
+            barres.append(Bar(close=prix))
+
+        resultat = compare_strategies.compare_symbol("SONDE", barres)
+        mom = resultat["momentum_strategy"]
+
+        rendements = _tsmom_returns(barres, mom["vetted_lookback_days"])
+        nuls = sum(1 for r in rendements if r == 0.0)
+        self.assertGreater(nuls, 0,
+                           "la fixture ne produit aucun rendement nul : le "
+                           "test ne distinguerait rien")
+
+        attendu = round(100 * sum(1 for r in rendements if r > 0)
+                        / len(rendements), 1)
+        self.assertEqual(mom["win_rate_pct"], attendu,
+                         "le taux publié pour momentum n'est pas calculé sur "
+                         "les %d jours tenus (%d à rendement nul) : il "
+                         "annonce un dénominateur et en utilise un autre"
+                         % (len(rendements), nuls))
+        self.assertEqual(mom["trade_days"], len(rendements),
+                         "le dénominateur annoncé et la série ne coïncident "
+                         "même pas")
+
+        # Et l'autre côté, dans le même run : vol_strategy doit TOUJOURS
+        # écarter ses journées sans position. Sans cette moitié, une
+        # sur-correction qui retirerait le filtre partout ne serait attrapée
+        # que par un test de chaînes.
+        from vol_strategy import _vol_strategy_returns
+        vol = resultat["vol_strategy"]
+        vol_rets = _vol_strategy_returns(barres, vol["vetted_window_days"])
+        tenus = [r for r in vol_rets if r != 0.0]
+        self.assertLess(len(tenus), len(vol_rets),
+                        "la fixture ne laisse vol_strategy à l'écart aucun "
+                        "jour : le test ne distinguerait rien")
+        self.assertEqual(
+            vol["win_rate_pct"],
+            round(100 * sum(1 for r in tenus if r > 0) / len(tenus), 1),
+            "le taux de vol_strategy compte des journées où elle n'avait "
+            "aucune position")
+
+    def test_backtest_utilise_le_filtre_la_ou_il_est_juste(self):
+        """SECOND TÉMOIN, mesuré : le même filtre existe dans backtest.py et il
+        y est CORRECT — il n'y sert qu'à vol_strategy, où 0.0 est un marqueur.
+        Sans ce test, on pourrait « corriger » un endroit qui n'a rien de
+        cassé."""
+        source = (Path(__file__).parent / "backtest.py").read_text(
+            encoding="utf-8")
+        self.assertIn("trade_days = [r for r in strat_rets if r != 0.0]", source)
+        self.assertNotIn("_tsmom_returns", source,
+                         "backtest.py ne doit pas noter momentum : le filtre "
+                         "y deviendrait faux")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
