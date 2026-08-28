@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-08-28T19:30:05.152392+00:00",
+  "generated_at": "2026-08-28T20:00:05.832086+00:00",
   "team": "Hindsight Alpha",
   "source": "https://github.com/s-papy/hindsight-alpha",
   "author": "Spap",
@@ -7,12 +7,75 @@
   "account": {
     "account_number": "PA3K8MP3MF0U",
     "status": "ACTIVE",
-    "equity": "100000",
-    "cash": "100000",
-    "buying_power": "400000"
+    "equity": "99961.95",
+    "cash": "99221.95",
+    "buying_power": "396887.8"
   },
-  "positions": [],
+  "positions": [
+    {
+      "symbol": "SPY260904P00769000",
+      "qty": "2",
+      "side": "long",
+      "asset_class": "us_option",
+      "cost_basis": "778",
+      "unrealized_pl": "-38",
+      "unrealized_plpc": "-0.04884"
+    }
+  ],
   "recent_decisions": [
+    {
+      "timestamp": "2026-08-28T19:37:13.327671+00:00",
+      "dry_run": false,
+      "symbols": [
+        "SPY",
+        "GLD",
+        "XLK",
+        "XLV"
+      ],
+      "outcome": "order_submitted",
+      "market_open": true,
+      "next_close": "2026-08-28T16:00:00-04:00",
+      "minutes_before_close": 22,
+      "exit_actions": [],
+      "verdicts": [
+        {
+          "symbol": "SPY",
+          "tradeable": true,
+          "reason": "cheap-vol regime confirmed, hindsight_guard clean",
+          "direction": -1
+        },
+        {
+          "symbol": "GLD",
+          "tradeable": false,
+          "reason": "volatility not cheap today (HV rank 46.4)",
+          "direction": null
+        },
+        {
+          "symbol": "XLK",
+          "tradeable": false,
+          "reason": "hindsight_guard: full-window winner (90) and in-sample winner (10) disagree",
+          "direction": null
+        },
+        {
+          "symbol": "XLV",
+          "tradeable": false,
+          "reason": "volatility not cheap today (HV rank 99.6)",
+          "direction": null
+        }
+      ],
+      "trades": [
+        {
+          "symbol": "SPY",
+          "direction": "bearish (put)",
+          "contract": "SPY260904P00769000",
+          "risk_gate_reason": "cleared all gates: sizing 2 contract(s) at ~$390.00 each",
+          "outcome": "order_submitted",
+          "order_id": "5a2d414d-8f76-414a-8b42-0915deaacd0f",
+          "qty": 2
+        }
+      ],
+      "orders_submitted": 1
+    },
     {
       "timestamp": "2026-08-28T15:00:06.729440+00:00",
       "run_type": "exit_monitor",
@@ -667,60 +730,16 @@
       "tradeable_symbols": [
         "SPY"
       ]
-    },
-    {
-      "timestamp": "2026-08-24T19:25:18.148637+00:00",
-      "dry_run": true,
-      "symbols": [
-        "SPY",
-        "GLD",
-        "XLK",
-        "XLV"
-      ],
-      "outcome": "dry_run_tradeable",
-      "market_open": true,
-      "exit_actions": [
-        "SPY260831P00764000: holding (-2.1%, thresholds are +50%/-50%)"
-      ],
-      "verdicts": [
-        {
-          "symbol": "SPY",
-          "tradeable": true,
-          "reason": "cheap-vol regime confirmed, hindsight_guard clean",
-          "direction": -1
-        },
-        {
-          "symbol": "GLD",
-          "tradeable": false,
-          "reason": "volatility not cheap today (HV rank 57.9)",
-          "direction": null
-        },
-        {
-          "symbol": "XLK",
-          "tradeable": false,
-          "reason": "hindsight_guard: winning HV window doesn't hold up in-sample",
-          "direction": null
-        },
-        {
-          "symbol": "XLV",
-          "tradeable": false,
-          "reason": "volatility not cheap today (HV rank 98.4)",
-          "direction": null
-        }
-      ],
-      "tradeable_symbols": [
-        "SPY"
-      ]
     }
   ],
   "monitor_status": {
-    "last_run_at": "2026-08-28T19:30:05.150904+00:00",
+    "last_run_at": "2026-08-28T19:58:06.599506+00:00",
     "outcome": "checked",
     "market_open": true,
     "dry_run": false
   },
   "agent_status": {
-    "last_run_at": "2026-08-27T19:30:13.766818+00:00",
+    "last_run_at": "2026-08-28T19:37:13.327671+00:00",
     "outcome": "order_submitted",
     "dry_run": false,
     "symbols_evaluated": 4,
