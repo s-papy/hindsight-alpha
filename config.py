@@ -82,7 +82,27 @@ try:
     load_dotenv(_CHEMIN_CONFIG)
     _signaler_precedence(_CHEMIN_CONFIG)
 except ImportError:
-    pass  # fall back to real environment variables if python-dotenv isn't installed
+    # ON LE DIT, on ne se tait pas. Corrige le 28/08/2026 au soir, apres que
+    # la CI a echoue sur ce cas precis.
+    #
+    # Sans python-dotenv, le fichier de configuration n'est JAMAIS lu : les
+    # identifiants ne peuvent venir que de l'environnement reel. Deux
+    # consequences, et la seconde est la grave :
+    #
+    #   . si rien n'est exporte, require_credentials() refuse bruyamment --
+    #     ce cas se voit tout seul ;
+    #   . si quelque chose EST exporte, l'agent tourne dessus pendant que
+    #     l'operateur croit que son fichier gouverne. Et _signaler_precedence,
+    #     le garde ecrit exactement pour cette confusion, ne tourne pas non
+    #     plus : il disparait en meme temps que ce qu'il surveille.
+    #
+    # Un `pass` muet transformait donc l'absence d'une dependance en absence
+    # de protection, sans un mot. C'est le defaut que ce depot traque partout.
+    print("WARNING: python-dotenv is not installed, so the .env file was NOT "
+          "read -- credentials can only come from the real environment, and "
+          "the precedence check that warns about a stale exported variable is "
+          "NOT running. Install it with: pip install -r requirements.txt",
+          file=sys.stderr, flush=True)
 
 
 API_KEY = os.environ.get("ALPACA_API_KEY")

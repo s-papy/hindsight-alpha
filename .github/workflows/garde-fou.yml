@@ -89,6 +89,16 @@ jobs:
       # `discover` plutot que de nommer test_risk_gates : le 27/08, test_agent.py
       # a ete ajoute et la CI ne l'aurait PAS lance -- un test que la CI ignore
       # ne protege rien. discover ramasse tout test_*.py, y compris ceux a venir.
+      # AJOUTE le 28/08/2026 au soir. Cette CI n'installait RIEN : elle
+      # testait donc un dossier sans sa seule dependance, python-dotenv, que
+      # requirements.txt declare pourtant depuis toujours. La suite passait en
+      # local uniquement parce que la machine de l'operateur l'a -- exactement
+      # le defaut corrige le meme jour pour ALPACA_ACCOUNT_ID, mais sur la
+      # dependance. Une CI qui teste une configuration que personne ne fait
+      # tourner ne verifie pas grand-chose.
+      - name: pip install -r requirements.txt
+        run: python3 -m pip install --quiet -r requirements.txt
+
       - name: python3 -m unittest discover
         run: python3 -m unittest discover -v
 

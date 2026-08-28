@@ -2477,6 +2477,13 @@ class TestVerdictPublieDansLesRapports(unittest.TestCase):
 
 
 
+try:
+    import dotenv as _dotenv_sonde  # noqa: F401
+    _DOTENV_PRESENT = True
+except ImportError:
+    _DOTENV_PRESENT = False
+
+
 class TestPrecedenceDesIdentifiants(unittest.TestCase):
     """Ajouté le 27/08. Mesuré sur python-dotenv : load_dotenv() n'écrase PAS,
     par défaut, une variable déjà présente dans l'environnement.
@@ -2510,6 +2517,24 @@ class TestPrecedenceDesIdentifiants(unittest.TestCase):
         finally:
             shutil.rmtree(dossier, ignore_errors=True)
 
+    # SAUTE PROPREMENT SANS python-dotenv, et le DIT. Ajouté le 28/08/2026
+    # au soir, après un échec de CI qui a mis quatre exécutions à être
+    # compris.
+    #
+    # `_signaler_precedence` lit le fichier avec `dotenv_values` et rend []
+    # quand la bibliothèque manque. La CI n'installait RIEN : ces tests y
+    # échouaient donc en affirmant « la divergence n'est pas signalée »,
+    # alors que le vrai fait était « rien ne peut la signaler ici ».
+    #
+    # Un test qui ne peut pas s'exécuter doit le DIRE, pas rougir sur une
+    # conclusion qu'il n'a pas mesurée — le motif de tout ce dépôt, appliqué
+    # à la suite elle-même. La CI installe désormais requirements.txt, donc
+    # ce saut ne devrait plus se produire nulle part ; il reste pour un
+    # clone sans dépendances, où il énonce ce qui n'est PAS vérifié.
+    @unittest.skipUnless(
+        _DOTENV_PRESENT,
+        "python-dotenv absent : la préséance des identifiants ne peut PAS "
+        "être vérifiée ici — ce n'est pas qu'elle fonctionne")
     def test_une_divergence_est_signalee_et_nomme_la_variable(self):
         div, texte = self._appeler(
             "ALPACA_API_KEY=VALEUR_DU_FICHIER\n",
