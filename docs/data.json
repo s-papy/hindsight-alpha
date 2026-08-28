@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-08-28T14:00:04.563593+00:00",
+  "generated_at": "2026-08-28T15:00:05.609263+00:00",
   "team": "Hindsight Alpha",
   "source": "https://github.com/s-papy/hindsight-alpha",
   "author": "Spap",
@@ -7,7 +7,7 @@
   "account": {
     "account_number": "PA3I2OIKF5F4",
     "status": "ACTIVE",
-    "equity": "99029.52",
+    "equity": "98847.52",
     "cash": "98473.52",
     "buying_power": "393894.08"
   },
@@ -18,11 +18,18 @@
       "side": "long",
       "asset_class": "us_option",
       "cost_basis": "832",
-      "unrealized_pl": "-274",
-      "unrealized_plpc": "-0.32933"
+      "unrealized_pl": "-458",
+      "unrealized_plpc": "-0.55048"
     }
   ],
   "recent_decisions": [
+    {
+      "timestamp": "2026-08-28T14:55:45.758782+00:00",
+      "run_type": "exit_monitor",
+      "dry_run": false,
+      "outcome": "error",
+      "error": "AlpacaCLIError: alpaca clock failed (exit 1): {\n  \"code\": 0,\n  \"error\": \"could not reach https://paper-api.alpaca.markets/v2/clock: Get \\\"https://paper-api.alpaca.markets/v2/clock\\\": dial tcp: lookup paper-api.alpaca.markets: no such host\",\n  \"hint\": \"check your internet connection and base URL. Run `alpaca doctor` to verify configuration\",\n  \"status\": 0\n}"
+    },
     {
       "timestamp": "2026-08-27T19:30:13.766818+00:00",
       "dry_run": false,
@@ -748,28 +755,12 @@
         }
       ],
       "orders_submitted": 0
-    },
-    {
-      "timestamp": "2026-08-24T19:05:24.778737+00:00",
-      "dry_run": true,
-      "symbols": [
-        "SPY",
-        "GLD",
-        "XLK",
-        "XLV"
-      ],
-      "outcome": "halted",
-      "market_open": true,
-      "exit_actions": [
-        "SPY260831P00764000: holding (-0.4%, thresholds are +50%/-50%)"
-      ],
-      "halt_reason": "HALT file present (no reason given)"
     }
   ],
   "monitor_status": {
-    "last_run_at": "2026-08-28T14:00:04.562249+00:00",
-    "outcome": "checked",
-    "market_open": true,
+    "last_run_at": "2026-08-28T14:55:45.754009+00:00",
+    "outcome": "error",
+    "market_open": null,
     "dry_run": false
   }
 }
