@@ -4830,5 +4830,52 @@ class TestLaProvenanceEstVerifiable(unittest.TestCase):
                              "clé privée committée dans %s" % nom)
 
 
+class TestUnRefusDePublierNeGelePasLHistorique(unittest.TestCase):
+    """Effet de bord du garde de compte, mesuré après coup.
+
+    `git_publish()` est la SEULE poussée automatique de ce dépôt. Si
+    `build_snapshot()` refuse — mauvais compte, identité illisible —
+    l'exception remontait et `main()` n'atteignait jamais `git_publish` :
+    plus rien n'était poussé, ni le tableau de bord, NI LES COMMITS DE CODE.
+
+    Or l'historique public horodaté est précisément la preuve d'antériorité
+    que `PROVENANCE.md` revendique. Un refus de publier des DONNÉES ne doit
+    pas geler la publication de l'HISTOIRE : seule la première est douteuse
+    quand le compte ne correspond pas."""
+
+    def _lancer(self, snapshot_leve):
+        from unittest import mock
+        import publish_dashboard
+        poussees = []
+        with mock.patch.object(publish_dashboard, "write_snapshot",
+                               side_effect=(RuntimeError("mauvais compte")
+                                            if snapshot_leve else None)), \
+             mock.patch.object(publish_dashboard, "git_publish"), \
+             mock.patch.object(publish_dashboard, "pousser_les_commits_en_attente",
+                               side_effect=lambda: poussees.append("push")), \
+             mock.patch("sys.argv", ["publish_dashboard.py", "--git-push"]):
+            try:
+                publish_dashboard.main()
+                leve = False
+            except RuntimeError:
+                leve = True
+        return leve, poussees
+
+    def test_un_refus_pousse_quand_meme_les_commits(self):
+        leve, poussees = self._lancer(snapshot_leve=True)
+        self.assertTrue(leve, "le refus doit rester FATAL et visible dans le "
+                              "log launchd")
+        self.assertEqual(poussees, ["push"],
+                         "le refus de publier a gelé aussi l'historique — "
+                         "donc la preuve d'antériorité")
+
+    def test_un_run_normal_ne_declenche_pas_ce_repli(self):
+        """TÉMOIN : le chemin normal doit passer par git_publish(), pas par la
+        poussée de secours — sinon on pousserait sans jamais publier."""
+        leve, poussees = self._lancer(snapshot_leve=False)
+        self.assertFalse(leve)
+        self.assertEqual(poussees, [])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -337,12 +337,47 @@ def git_publish() -> None:
         return
 
 
+def pousser_les_commits_en_attente() -> None:
+    """Pousse ce qui est deja COMMITE, sans rien publier de neuf.
+
+    AJOUTE le 28/08/2026, en mesurant l'effet de bord du garde de compte pose
+    le matin meme. `git_publish()` est la SEULE poussee automatique de ce
+    depot. Si build_snapshot() refuse -- mauvais compte, identite illisible --
+    l'exception remonte et main() n'atteint jamais git_publish : plus rien
+    n'est pousse, ni le tableau de bord, NI LES COMMITS DE CODE.
+
+    Or l'historique public horodate est precisement la preuve d'anteriorite
+    que PROVENANCE.md revendique. Un refus de publier des DONNEES ne doit pas
+    geler la publication de l'HISTOIRE : ce sont deux choses differentes, et
+    seule la premiere est douteuse quand le compte ne correspond pas.
+
+    Best-effort et jamais fatal : si la poussee echoue, on le dit et on
+    laisse remonter l'erreur d'origine, qui est plus interessante.
+    """
+    try:
+        subprocess.run(["git", "push"], check=True,
+                       timeout=_DELAI_RESEAU, env=_ENV_GIT)
+        print("  (les commits deja faits ont ete pousses, meme si "
+              "l'instantane a ete refuse)", flush=True)
+    except Exception as e:
+        print("  WARNING: les commits en attente n'ont pas pu etre pousses "
+              "non plus (%s: %s)." % (type(e).__name__, e), flush=True)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--git-push", action="store_true", help="also commit and push docs/data.json")
     args = parser.parse_args()
 
-    path = write_snapshot()
+    try:
+        path = write_snapshot()
+    except Exception:
+        # Le refus reste FATAL -- il doit se voir dans le log launchd et la
+        # banniere de la page doit vieillir. Mais l'historique, lui, continue
+        # d'etre publie : voir pousser_les_commits_en_attente().
+        if args.git_push:
+            pousser_les_commits_en_attente()
+        raise
     print(f"Wrote {path}")
 
     if args.git_push:
