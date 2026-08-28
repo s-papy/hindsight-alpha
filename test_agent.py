@@ -500,6 +500,72 @@ class TestAgentsPlanifies(unittest.TestCase):
                     "%s lance un script du dépôt sans fixer WorkingDirectory" % f.name)
 
 
+class TestLeChiffreDeTestsAnnonceEstMESURE(unittest.TestCase):
+    """Un chiffre public qui ne tient plus est une fausse mesure.
+
+    Le README annonçait « 12 offline regression tests » — et, plus loin,
+    « 206 offline tests ». Mesure du 28/08/2026 : 495. Deux chiffres
+    périmés DIFFÉRENTS dans le même document : la dérive s'était donc
+    produite plus d'une fois. Et il ne s'agissait pas d'une exagération
+    mais de l'inverse — le README sous-estimait le travail d'un facteur 40,
+    sur la ligne « Proof it runs » qu'un jury lit en premier.
+
+    `controle_chiffres_perimes()` existait déjà, mais c'est une LISTE NOIRE
+    de valeurs connues : il ne peut attraper « 12 » que si quelqu'un pense à
+    l'y inscrire — c'est-à-dire au moment précis où il ne l'a pas fait.
+
+    Le contrôle ajouté ici MESURE LES DEUX CÔTÉS, donc il ne peut pas
+    devenir périmé à son tour. Ce test le vérifie en cassant le README pour
+    de bon, comme TestGardeFouMordVraiment le fait pour le garde
+    live-trading."""
+
+    RACINE = Path(__file__).resolve().parent
+
+    def _lancer_avec_readme(self, contenu_readme):
+        d = Path(tempfile.mkdtemp(prefix="hindsight-chiffres-"))
+        try:
+            for nom in ("garde_fou.py", "config.py"):
+                shutil.copy(self.RACINE / nom, d / nom)
+            # trois tests reels, comptes par l'arbre syntaxique
+            (d / "test_faux.py").write_text(
+                "import unittest\n"
+                "class T(unittest.TestCase):\n"
+                "    def test_a(self): pass\n"
+                "    def test_b(self): pass\n"
+                "    def test_c(self): pass\n", encoding="utf-8")
+            (d / "README.md").write_text(contenu_readme, encoding="utf-8")
+            r = subprocess.run([sys.executable, str(d / "garde_fou.py")],
+                               cwd=str(d), capture_output=True, text=True,
+                               timeout=120)
+            return r.stdout + r.stderr
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
+    def test_un_chiffre_FAUX_est_signale(self):
+        sortie = self._lancer_avec_readme(
+            "# Projet\n\nCovered by 12 offline regression tests.\n")
+        self.assertIn(
+            "alors que le depot en contient 3", sortie,
+            "le garde-fou laisse passer un chiffre de tests faux — un jury "
+            "le lit pourtant comme une mesure :\n%s" % sortie[-600:])
+
+    def test_le_BON_chiffre_ne_declenche_RIEN(self):
+        """TÉMOIN, et c'est lui qui compte : sans lui, un contrôle qui
+        alerterait sur TOUT chiffre passerait le test ci-dessus, et le
+        README ne pourrait plus jamais citer un nombre de tests."""
+        sortie = self._lancer_avec_readme(
+            "# Projet\n\nCovered by 3 offline regression tests.\n")
+        self.assertNotIn(
+            "alors que le depot en contient", sortie,
+            "un chiffre EXACT est signalé comme périmé :\n%s" % sortie[-600:])
+
+    def test_un_README_SANS_chiffre_ne_declenche_RIEN(self):
+        """Ne rien annoncer n'est pas une faute — c'est annoncer FAUX qui
+        l'est."""
+        sortie = self._lancer_avec_readme("# Projet\n\nAucun chiffre ici.\n")
+        self.assertNotIn("alors que le depot en contient", sortie)
+
+
 class TestGardeFouMordVraiment(unittest.TestCase):
     """garde_fou.py est lancé par le hook de commit ET par la CI. CLAUDE.md le
     présente comme LE mécanisme qui garantit le paper-trading. Ce test vérifie

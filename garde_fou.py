@@ -37,6 +37,7 @@ import hashlib
 import json
 import math
 import os
+import ast
 import re
 import subprocess
 import sys
@@ -1579,6 +1580,68 @@ def controle_hooks_actifs() -> None:
         )
 
 
+def controle_nombre_de_tests_annonce() -> None:
+    """Le chiffre de tests annonce aux livrables correspond-il a la realite ?
+
+    AJOUTE le 28/08/2026. Le README annoncait « 12 offline regression tests ».
+    Mesure le meme soir : 495. Le chiffre ne se contentait pas d'etre faux --
+    il SOUS-ESTIMAIT le travail d'un facteur 40, sur la ligne « Proof it
+    runs » qu'un jury lit en premier.
+
+    POURQUOI UN CONTROLE ET PAS SEULEMENT UNE CORRECTION. controle_chiffres_
+    perimes() existe deja, mais c'est une LISTE NOIRE de valeurs connues : il
+    ne peut attraper « 12 » que si quelqu'un pense a l'y inscrire, c'est-a-dire
+    au moment precis ou il ne l'a pas fait. Celui-ci MESURE LES DEUX COTES --
+    ce que le document dit, et ce que le depot contient -- donc il ne peut pas
+    devenir perime a son tour.
+
+    Le comptage est STATIQUE (methodes `test_*` lues dans l'arbre syntaxique),
+    pas une execution de la suite : garde_fou.py tourne en moins d'une seconde
+    et doit le rester. Verifie le 28/08 : le comptage statique rend 495, et
+    `unittest discover` en rend 495 aussi -- ecart nul.
+
+    ALERTE et non blocage : c'est un chiffre dans un document, pas une valeur
+    fausse dans le code. Choisir de le reformuler appartient a l'auteur ; ne
+    pas etre au courant, non.
+    """
+    reel = 0
+    # RACINE est une CHAINE dans ce fichier, pas un Path -- verifie avant de
+    # corriger, pas suppose : `RACINE.glob` levait AttributeError.
+    # os seulement : ce fichier n'importe pas pathlib, et RACINE est une
+    # CHAINE. Verifie dans les imports plutot que suppose -- mes deux essais
+    # precedents ont leve AttributeError puis NameError.
+    for nom in sorted(os.listdir(RACINE)):
+        if not (nom.startswith("test_") and nom.endswith(".py")):
+            continue
+        try:
+            with open(os.path.join(RACINE, nom), encoding="utf-8") as fh:
+                arbre = ast.parse(fh.read())
+        except (OSError, SyntaxError):
+            # On ne peut pas compter : on se tait plutot que d'annoncer un
+            # chiffre faux. « Je n'ai pas su lire » n'est pas « il y en a
+            # zero » -- ce serait exactement le defaut que ce controle traque.
+            return
+        for noeud in ast.walk(arbre):
+            if isinstance(noeud, ast.FunctionDef) and noeud.name.startswith("test"):
+                reel += 1
+    if not reel:
+        return
+
+    ANNONCE = re.compile(
+        r"(\d+)\s+(?:offline\s+)?(?:regression\s+|unit\s+|automated\s+)?tests?\b",
+        re.I)
+    for rel, texte in _charger_textes_livrables().items():
+        for m in ANNONCE.finditer(texte):
+            annonce = int(m.group(1))
+            if annonce != reel:
+                alerte(
+                    rel,
+                    "annonce « %s » alors que le depot en contient %d. Un jury "
+                    "lit ce chiffre comme une mesure. (Comptage statique des "
+                    "methodes test_* ; verifie egal a `unittest discover`.)"
+                    % (m.group(0).strip(), reel))
+
+
 def controle_verrou_dit_hebdomadaire() -> None:
     """Les livrables decrivent-ils le verrou de perte comme HEBDOMADAIRE ?
 
@@ -2693,6 +2756,7 @@ def main() -> int:
         controle_source_de_verite,
         controle_dependances_scellees,
         controle_hooks_actifs,
+        controle_nombre_de_tests_annonce,
         controle_verrou_dit_hebdomadaire,
         controle_readme_decrit_les_agents,
         controle_aucun_identifiant_dans_les_fichiers_publies,
