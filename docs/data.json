@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-08-28T17:30:05.671795+00:00",
+  "generated_at": "2026-08-28T18:00:05.282944+00:00",
   "team": "Hindsight Alpha",
   "source": "https://github.com/s-papy/hindsight-alpha",
   "author": "Spap",
@@ -714,7 +714,7 @@
     }
   ],
   "monitor_status": {
-    "last_run_at": "2026-08-28T17:30:05.670039+00:00",
+    "last_run_at": "2026-08-28T18:00:05.272540+00:00",
     "outcome": "checked",
     "market_open": true,
     "dry_run": false
