@@ -3205,5 +3205,82 @@ class TestCoherenceDesTables(unittest.TestCase):
         self.assertNotIn(a, set(risk_gates.SECTOR_MAP.values()))
 
 
+class TestMauvaisCompteRefuseLEntree(unittest.TestCase):
+    """`config.ACCOUNT_ID` existe et `test_connection.py` le compare bien au
+    compte réel, avec un verdict « MAUVAIS COMPTE » qui sort en erreur. Mais
+    c'est un script LANCÉ À LA MAIN : ni `agent.py` ni `monitor_exits.py` ne
+    faisaient cette comparaison — vérifié par recherche, zéro occurrence de
+    `ACCOUNT_ID` ni de `account_number` dans les deux.
+
+    L'agent planifié de 21:37 tradait donc sur le compte que désignent les
+    identifiants, quel qu'il soit. Or CLAUDE.md pose que le compte du
+    hackathon est « intouchable avant le kickoff — zéro trade, zéro test […]
+    un compte réutilisé disqualifie », et la bascule est manuelle. Un oubli,
+    dans un sens ou dans l'autre, n'était rattrapé par rien d'automatique.
+
+    Le garde est posé dans `check_gates` et non dans `agent.py` : c'est le
+    passage unique de toute entrée, et une règle écrite deux fois n'est vraie
+    qu'à un seul endroit."""
+
+    def _decider(self, numero_reel, attendu):
+        from unittest import mock
+        compte = {"account_number": numero_reel, "equity": "100000",
+                  "id": "uuid-quelconque"}
+        # Les positions sont neutralisees AUSSI : sans cela, le garde passe
+        # puis check_gates continue et appelle le VRAI reseau. Mesure : le
+        # test partait chercher paper-api.alpaca.markets et echouait sur le
+        # certificat. Un test qui sort sur le reseau ne teste pas ce qu'il
+        # croit, et ne tournerait pas en CI.
+        with mock.patch.object(risk_gates.config, "ACCOUNT_ID", attendu), \
+             mock.patch.object(risk_gates.alpaca_cli, "get_account",
+                               return_value=compte), \
+             mock.patch.object(risk_gates.alpaca_cli,
+                               "list_open_option_positions", return_value=[]), \
+             mock.patch.object(risk_gates.alpaca_cli, "list_positions",
+                               return_value=[]), \
+             mock.patch.object(risk_gates.alpaca_cli, "get_option_ask_price",
+                               return_value=1.50), \
+             mock.patch.object(risk_gates, "is_halted", return_value=(False, "")):
+            return risk_gates.check_gates("SPY", "SPY260831P00764000")
+
+    def test_un_compte_different_refuse_l_entree(self):
+        d = self._decider("PA0000DEV", "PA3K8MP3MF0U")
+        self.assertFalse(d.allowed)
+        self.assertIn("WRONG ACCOUNT", d.reason)
+        self.assertIn("PA0000DEV", d.reason,
+                      "le refus ne nomme pas le compte réellement utilisé")
+        self.assertIn("PA3K8MP3MF0U", d.reason,
+                      "le refus ne nomme pas le compte attendu")
+
+    def test_un_numero_illisible_refuse_aussi(self):
+        """« Je ne peux pas prouver sur quel compte je suis » n'est pas « c'est
+        le bon »."""
+        for absent in (None, "", "   "):
+            with self.subTest(valeur=absent):
+                d = self._decider(absent, "PA3K8MP3MF0U")
+                self.assertFalse(d.allowed)
+                self.assertIn("unverified", d.reason)
+
+    def test_le_bon_compte_passe_ce_garde(self):
+        """TÉMOIN, et il est essentiel : sans lui, refuser TOUT passerait les
+        deux tests ci-dessus et l'agent ne traderait plus de la semaine."""
+        d = self._decider("PA3K8MP3MF0U", "PA3K8MP3MF0U")
+        self.assertNotIn("WRONG ACCOUNT", d.reason or "")
+        self.assertNotIn("unverified", d.reason or "")
+
+    def test_les_espaces_ne_font_pas_un_faux_refus(self):
+        """Un numéro recopié avec une espace parasite ne doit pas passer pour
+        un autre compte."""
+        d = self._decider(" PA3K8MP3MF0U ", "PA3K8MP3MF0U")
+        self.assertNotIn("WRONG ACCOUNT", d.reason or "")
+
+    def test_sans_compte_declare_on_avertit_mais_on_laisse_passer(self):
+        """SECOND TÉMOIN : rien à comparer n'est pas une faute. Refuser ici
+        empêcherait tout dossier sans ACCOUNT_ID de trader — le même choix que
+        le contrôle d'identifiants du garde-fou fait dans le même cas."""
+        d = self._decider("PA0000DEV", None)
+        self.assertNotIn("WRONG ACCOUNT", d.reason or "")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

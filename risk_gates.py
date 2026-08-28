@@ -87,6 +87,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 import alpaca_cli
+import config
 
 class StateNotPersisted(Exception):
     """Raised by the bookkeeping writers when _save_state() refused to write
@@ -1309,6 +1310,65 @@ def check_gates(
             "Exits keep running; remove the HALT file to resume." % motif_pause)
 
     account = alpaca_cli.get_account()
+
+    # AJOUTE le 28/08/2026, le matin du kickoff. `config.ACCOUNT_ID` existe,
+    # et `test_connection.py` le compare bien au compte reel avec un verdict
+    # « MAUVAIS COMPTE » qui sort en erreur. Mais c'est un script LANCE A LA
+    # MAIN : ni agent.py ni monitor_exits.py ne faisaient cette comparaison.
+    # Verifie par recherche : zero occurrence de ACCOUNT_ID ou
+    # account_number dans les deux.
+    #
+    # Consequence concrete : l'agent planifie de 21:37 tradait sur le compte
+    # que designent les identifiants, quel qu'il soit. Or CLAUDE.md pose que
+    # le compte du hackathon est « intouchable avant le kickoff -- zero trade,
+    # zero test [...] un compte reutilise disqualifie », et l'operateur doit
+    # basculer a la main le soir meme. Un oubli, dans un sens ou dans l'autre,
+    # n'etait rattrape par rien d'automatique.
+    #
+    # Meme forme que le reste de la journee : le controle existait, mais pas
+    # sur le chemin qui agit. Il est pose ICI parce que check_gates est le
+    # passage unique de toute entree -- l'ecrire dans agent.py obligerait a
+    # l'ecrire aussi ailleurs, et une regle ecrite deux fois n'est vraie qu'a
+    # un seul endroit.
+    #
+    # Trois etats, comme test_connection.py, et surtout PAS deux :
+    #   . attendu declare et DIFFERENT -> refus net ;
+    #   . attendu declare et illisible -> refus aussi : on ne peut pas
+    #     prouver l'identite du compte sur lequel on s'apprete a engager de
+    #     l'argent ;
+    #   . aucun attendu declare        -> rien a comparer. On AVERTIT et on
+    #     laisse passer, sinon un dossier sans ACCOUNT_ID ne traderait plus
+    #     du tout -- le meme choix que le controle d'identifiants du
+    #     garde-fou fait dans le meme cas.
+    attendu = getattr(config, "ACCOUNT_ID", None)
+    reel = account.get("account_number")
+    # `.strip()` AVANT le test de presence : une chaine d'espaces est vraie en
+    # Python, donc `not reel` la laissait passer jusqu'a la comparaison, ou
+    # elle etait diagnostiquee « WRONG ACCOUNT » au lieu de « identite
+    # illisible ». Le refus etait deja juste ; c'est la RAISON qui mentait --
+    # la meme faute que celle corrigee ce matin dans le hook pre-commit.
+    reel = str(reel).strip() if reel is not None else ""
+    if attendu:
+        if not reel:
+            return RiskDecision(
+                False,
+                "the account response carried no account_number, so this run "
+                "cannot prove it is on the declared account (%r). Refusing to "
+                "open new risk on an account whose identity is unverified."
+                % (attendu,))
+        if reel != str(attendu).strip():
+            return RiskDecision(
+                False,
+                "WRONG ACCOUNT: this run is on %r but the configuration "
+                "declares %r. No new entry. Check which credentials are "
+                "loaded before trading -- the hackathon account must not "
+                "carry trades meant for another one, and vice versa."
+                % (reel, str(attendu).strip()))
+    else:
+        print("  WARNING: no ALPACA_ACCOUNT_ID declared, so this run cannot "
+              "check which account it is trading on. Nothing verifies that "
+              "the credentials loaded are the intended ones.", flush=True)
+
     # ELARGI le 27/08/2026. Le garde `equity <= 0` ci-dessous couvrait deja le
     # champ ABSENT et la valeur ZERO -- les deux cas les plus probables -- mais
     # pas une valeur NON NUMERIQUE. Mesure :
