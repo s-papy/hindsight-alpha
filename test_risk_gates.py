@@ -3288,5 +3288,95 @@ class TestMauvaisCompteRefuseLEntree(unittest.TestCase):
         self.assertNotIn("WRONG ACCOUNT", d.reason or "")
 
 
+class TestMauvaisCompteRefuseLaCloture(unittest.TestCase):
+    """L'autre moitié du garde de compte. `check_gates` refuse une ENTRÉE sur
+    un compte non déclaré ; les SORTIES n'avaient pas d'équivalent.
+
+    Le précédent du HALT ne s'applique pas ici, et c'est ce qui a fait
+    pencher : une pause bloque le risque NOUVEAU mais laisse protéger le
+    risque EXISTANT. Sur un mauvais compte, il n'y a aucun risque existant
+    qui soit le nôtre — les positions vues appartiennent à l'autre compte, et
+    chaque clôture est un ordre non voulu. Ne rien faire ne laisse aucune
+    position de ce dossier sans protection : on n'y est même pas connecté."""
+
+    POSITION = {"symbol": "SPY   260831P00764000", "asset_class": "us_option",
+                "qty": "1", "unrealized_plpc": "-0.60", "cost_basis": "764"}
+
+    def _sortir(self, numero_reel, attendu):
+        from unittest import mock
+        fermetures = []
+        with mock.patch.object(risk_gates.config, "ACCOUNT_ID", attendu), \
+             mock.patch.object(risk_gates.alpaca_cli, "get_account",
+                               return_value={"account_number": numero_reel,
+                                             "id": "u", "equity": "100000"}), \
+             mock.patch.object(risk_gates.alpaca_cli, "list_positions",
+                               return_value=[self.POSITION]), \
+             mock.patch.object(risk_gates.alpaca_cli,
+                               "list_open_option_positions",
+                               return_value=[self.POSITION]), \
+             mock.patch.object(risk_gates.alpaca_cli, "close_position",
+                               side_effect=lambda s: fermetures.append(s)):
+            actions = risk_gates.manage_exits(dry_run=False)
+        return actions, fermetures
+
+    def test_une_perte_de_60pc_sur_un_autre_compte_n_est_PAS_fermee(self):
+        actions, fermetures = self._sortir("PAAUTRE", "PAFAUXCOMPTE")
+        self.assertEqual(fermetures, [],
+                         "une position d'un AUTRE compte a été fermée : "
+                         "c'est un ordre non voulu")
+        self.assertTrue(any("refused to close" in (a.error or "")
+                            for a in actions),
+                        "le refus n'est pas rapporté : %r"
+                        % [a.error for a in actions])
+
+    def test_le_refus_nomme_les_deux_comptes(self):
+        actions, _ = self._sortir("PAAUTRE", "PAFAUXCOMPTE")
+        message = " ".join(a.error or "" for a in actions)
+        self.assertIn("PAAUTRE", message)
+        self.assertIn("PAFAUXCOMPTE", message)
+
+    def test_un_compte_illisible_ne_ferme_rien(self):
+        """La branche « je ne peux pas vérifier » — trouvée non couverte par
+        mutation : neutraliser son `continue` laissait la clôture se faire
+        quand même, et aucun test ne bronchait.
+
+        Ne pas pouvoir lire sur quel compte on est n'est pas « c'est le
+        bon ». Même règle que du côté des entrées."""
+        from unittest import mock
+        fermetures = []
+        with mock.patch.object(risk_gates.config, "ACCOUNT_ID", "PAFAUXCOMPTE"), \
+             mock.patch.object(risk_gates.alpaca_cli, "get_account",
+                               side_effect=RuntimeError("API muette")), \
+             mock.patch.object(risk_gates.alpaca_cli, "list_positions",
+                               return_value=[self.POSITION]), \
+             mock.patch.object(risk_gates.alpaca_cli,
+                               "list_open_option_positions",
+                               return_value=[self.POSITION]), \
+             mock.patch.object(risk_gates.alpaca_cli, "close_position",
+                               side_effect=lambda x: fermetures.append(x)):
+            actions = risk_gates.manage_exits(dry_run=False)
+        self.assertEqual(fermetures, [],
+                         "la clôture a eu lieu alors que le compte n'a pas pu "
+                         "être vérifié")
+        self.assertTrue(any("could not verify" in (a.error or "")
+                            for a in actions),
+                        "le refus ne dit pas qu'il n'a PAS PU vérifier : %r"
+                        % [a.error for a in actions])
+
+    def test_sur_le_BON_compte_la_cloture_a_bien_lieu(self):
+        """TÉMOIN, et c'est le plus important de tous : sans lui, refuser
+        toute clôture passerait le test ci-dessus et laisserait une vraie
+        position perdante ouverte toute la semaine."""
+        actions, fermetures = self._sortir("PAFAUXCOMPTE", "PAFAUXCOMPTE")
+        self.assertEqual(fermetures, ["SPY   260831P00764000"],
+                         "la position n'est plus fermée sur le bon compte")
+
+    def test_sans_compte_declare_la_cloture_a_lieu(self):
+        """SECOND TÉMOIN : rien à comparer ne doit pas paralyser les
+        sorties — même choix que du côté des entrées."""
+        _, fermetures = self._sortir("PAQUELCONQUE", None)
+        self.assertEqual(len(fermetures), 1)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

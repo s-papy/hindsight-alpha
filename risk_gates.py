@@ -1158,6 +1158,46 @@ def manage_exits(dry_run: bool = False) -> List[ExitAction]:
                 if dry_run:
                     actions.append(ExitAction(symbol, ExitKind.WOULD_CLOSE, pnl_pct=plpc, label=label))
                 else:
+                    # AJOUTE le 28/08/2026, matin du kickoff. check_gates
+                    # refuse desormais une ENTREE sur un compte qui n'est pas
+                    # celui declare ; les SORTIES n'avaient pas d'equivalent.
+                    #
+                    # Le precedent du HALT ne s'applique pas ici, et c'est ce
+                    # qui a fait pencher : une pause bloque le risque NOUVEAU
+                    # mais laisse proteger le risque EXISTANT. Sur un mauvais
+                    # compte, il n'y a AUCUN risque existant a nous : les
+                    # positions vues appartiennent a l'autre compte, et chaque
+                    # cloture est un ordre non voulu. Ne rien faire ne laisse
+                    # aucune position de ce dossier sans protection -- on n'y
+                    # est meme pas connecte.
+                    #
+                    # L'appel est paye ICI et pas en tete de manage_exits() :
+                    # il n'a lieu que quand une cloture se declenche
+                    # reellement, ce qui est rare. La minimalite par tick que
+                    # le docstring de monitor_exits.py revendique est donc
+                    # intacte -- verifie : ce bloc est sous
+                    # `if would_close_profit or would_close_loss`.
+                    attendu = getattr(config, "ACCOUNT_ID", None)
+                    if attendu:
+                        try:
+                            reel = str(alpaca_cli.get_account().get(
+                                "account_number") or "").strip()
+                        except Exception as e:
+                            actions.append(ExitAction(
+                                symbol, ExitKind.ERROR,
+                                error="refused to close: could not verify which "
+                                      "account this run is on (%s: %s)"
+                                      % (type(e).__name__, e)))
+                            continue
+                        if reel != str(attendu).strip():
+                            actions.append(ExitAction(
+                                symbol, ExitKind.ERROR,
+                                error="refused to close: this run is on account "
+                                      "%r but the configuration declares %r. "
+                                      "Closing here would place an unintended "
+                                      "order on another account."
+                                      % (reel, str(attendu).strip())))
+                            continue
                     alpaca_cli.close_position(symbol)
                     # _record_exit_outcome() is bookkeeping AFTER the close
                     # already succeeded -- wrapped in its own inner
