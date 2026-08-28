@@ -4616,6 +4616,83 @@ class TestDecalageDInformationEntreLesDeuxStrategies(unittest.TestCase):
                       "entre les deux stratégies")
 
 
+class TestAucuneECRITURE_ne_depend_du_ramassage(unittest.TestCase):
+    """Une écriture non fermée compte sur le ramasse-miettes pour être vidée
+    sur le disque.
+
+    Trouvé le 28/08/2026 au soir en lisant les `ResourceWarning` du journal
+    de CI — le bruit disait quelque chose. TROIS écritures de `garde_fou.py`
+    étaient concernées, et ce ne sont pas n'importe lesquelles : ce sont les
+    registres d'empreintes qui détectent l'altération d'un fichier scellé,
+    dont celui des identifiants du hackathon.
+
+    En CPython l'objet est collecté tout de suite et la donnée part bien.
+    « Presque toujours » ne convient pas pour la pièce qui prouve qu'un
+    secret n'a pas bougé : si l'objet survivait à une exception, le registre
+    resterait tronqué — et un registre illisible se fait RECRÉER quelques
+    lignes plus haut, donc l'altération passerait pour un premier
+    scellement.
+
+    LA RÈGLE NE VISE QUE LES ÉCRITURES, délibérément. Il reste dix-huit
+    `open(...).read()` sans `with` dans ce dépôt : une lecture qui fuit est
+    du bruit, une écriture qui fuit peut perdre la donnée. Élargir la règle
+    aux lectures ferait échouer ce test sur du code sans enjeu, et un test
+    qui crie sur du bruit finit désarmé.
+    """
+
+    RACINE = Path(__file__).parent
+
+    def _ecritures_nues(self):
+        import ast
+        trouves = []
+        for f in sorted(self.RACINE.glob("*.py")):
+            arbre = ast.parse(f.read_text(encoding="utf-8"))
+            surs = set()
+            for n in ast.walk(arbre):
+                if isinstance(n, (ast.With, ast.AsyncWith)):
+                    for item in n.items:
+                        for x in ast.walk(item.context_expr):
+                            if isinstance(x, ast.Call) and getattr(x.func, "id", "") == "open":
+                                surs.add((x.lineno, x.col_offset))
+            for n in ast.walk(arbre):
+                if not (isinstance(n, ast.Call) and getattr(n.func, "id", "") == "open"):
+                    continue
+                if (n.lineno, n.col_offset) in surs:
+                    continue
+                mode = ""
+                if len(n.args) > 1 and isinstance(n.args[1], ast.Constant):
+                    mode = str(n.args[1].value)
+                for kw in n.keywords:
+                    if kw.arg == "mode" and isinstance(kw.value, ast.Constant):
+                        mode = str(kw.value.value)
+                if any(c in mode for c in ("w", "a", "x", "+")):
+                    trouves.append("%s:%d" % (f.name, n.lineno))
+        return trouves
+
+    # Le verrou d'état de risk_gates ouvre en "a+" et le GARDE ouvert tant
+    # qu'il est tenu — c'est la définition d'un verrou. Il est refermé dans un
+    # `finally`, vérifié. L'exempter par son nom, pas par une règle vague.
+    EXEMPTES = {"risk_gates.py"}
+
+    def test_aucune_ecriture_ne_compte_sur_le_ramassage(self):
+        nues = [x for x in self._ecritures_nues()
+                if x.split(":")[0] not in self.EXEMPTES]
+        self.assertEqual(
+            nues, [],
+            "des fichiers sont ouverts en ÉCRITURE sans être fermés : la "
+            "donnée ne part sur le disque qu'au ramassage.\n    %s"
+            % "\n    ".join(nues))
+
+    def test_le_detecteur_verrait_une_ecriture_nue(self):
+        """TÉMOIN d'instrument. Sans lui, un détecteur qui ne trouverait plus
+        rien passerait le test ci-dessus pour toujours — c'est le verrou de
+        risk_gates, ouvert en « a+ », qui prouve qu'il regarde encore."""
+        self.assertTrue(
+            any(x.startswith("risk_gates.py") for x in self._ecritures_nues()),
+            "le détecteur ne voit plus l'ouverture en écriture connue : il ne "
+            "classe plus rien, donc il ne peut plus rien attraper")
+
+
 class TestChaqueDependanceTierceEstDECLAREE(unittest.TestCase):
     """La CI a échoué toute la soirée sur une dépendance qu'elle n'installait
     pas.

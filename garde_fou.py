@@ -305,7 +305,16 @@ def controle_env_hackathon_scelle() -> None:
         empreinte_connue = connues.get(".env.hackathon")
         if empreinte_connue is None:
             connues[".env.hackathon"] = empreinte_actuelle
-            open(registre, "w", encoding="utf-8").write(json.dumps(connues, indent=2))
+            # ECRITURE FERMEE EXPLICITEMENT. Corrige le 28/08/2026 au soir, en
+            # lisant les ResourceWarning du journal de CI. Ces registres sont la
+            # LIGNE DE BASE qui detecte l'alteration d'un fichier scelle. Une
+            # ecriture non fermee compte sur le ramassage de CPython pour etre
+            # videe sur le disque : ca marche presque toujours, et « presque » ne
+            # convient pas pour la piece qui prouve qu'un fichier n'a pas bouge.
+            # Un registre tronque se fait RECREER quelques lignes plus haut --
+            # donc une alteration passerait pour un premier scellement.
+            with open(registre, "w", encoding="utf-8") as fh:
+                fh.write(json.dumps(connues, indent=2))
             alerte(".env.hackathon", _message_premier_scelle(
                 registre_existait, empreinte_actuelle))
         elif empreinte_connue != empreinte_actuelle:
@@ -1504,12 +1513,30 @@ def controle_dependances_scellees() -> None:
     empreinte_connue = connues.get("requirements.txt")
     if empreinte_connue is None:
         connues["requirements.txt"] = empreinte_actuelle
-        open(registre, "w", encoding="utf-8").write(json.dumps(connues, indent=2))
+        # ECRITURE FERMEE EXPLICITEMENT. Corrige le 28/08/2026 au soir, en
+        # lisant les ResourceWarning du journal de CI. Ces registres sont la
+        # LIGNE DE BASE qui detecte l'alteration d'un fichier scelle. Une
+        # ecriture non fermee compte sur le ramassage de CPython pour etre
+        # videe sur le disque : ca marche presque toujours, et « presque » ne
+        # convient pas pour la piece qui prouve qu'un fichier n'a pas bouge.
+        # Un registre tronque se fait RECREER quelques lignes plus haut --
+        # donc une alteration passerait pour un premier scellement.
+        with open(registre, "w", encoding="utf-8") as fh:
+            fh.write(json.dumps(connues, indent=2))
         alerte("requirements.txt", _message_premier_scelle(
             registre_existait, empreinte_actuelle))
     elif empreinte_connue != empreinte_actuelle:
         connues["requirements.txt"] = empreinte_actuelle
-        open(registre, "w", encoding="utf-8").write(json.dumps(connues, indent=2))
+        # ECRITURE FERMEE EXPLICITEMENT. Corrige le 28/08/2026 au soir, en
+        # lisant les ResourceWarning du journal de CI. Ces registres sont la
+        # LIGNE DE BASE qui detecte l'alteration d'un fichier scelle. Une
+        # ecriture non fermee compte sur le ramassage de CPython pour etre
+        # videe sur le disque : ca marche presque toujours, et « presque » ne
+        # convient pas pour la piece qui prouve qu'un fichier n'a pas bouge.
+        # Un registre tronque se fait RECREER quelques lignes plus haut --
+        # donc une alteration passerait pour un premier scellement.
+        with open(registre, "w", encoding="utf-8") as fh:
+            fh.write(json.dumps(connues, indent=2))
         alerte(
             "requirements.txt",
             "A CHANGÉ depuis la dernière empreinte connue (%s… → %s…) — "
