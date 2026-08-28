@@ -21,7 +21,7 @@ says so itself when it goes stale.
 | **The mechanism** | scores each parameter twice — full history vs. yesterday-only — and refuses the symbol when the two winners disagree |
 | **Does it catch anything real?** | yes: XLK is refused live, every run, on real bars |
 | **Risk** | paper trading only, enforced in code; per-trade, total-exposure, sector, drawdown and consecutive-loss caps |
-| **Proof it runs** | real paper order filled and closed; 498 offline regression tests; CI green on every push |
+| **Proof it runs** | real paper order filled and closed; 500+ offline regression tests; CI green on every push |
 
 ### TL;DR
 
@@ -321,7 +321,7 @@ cp .env.example .env
 # Alpaca dashboard, Home page -> API Keys widget). Never the live-account keys.
 
 # 4. Run
-python3 -m unittest discover   # 498 offline tests, no credentials needed
+python3 -m unittest discover   # 500+ offline tests, no credentials needed
 python test_connection.py      # confirms CLI install + credentials + network
 python agent.py --dry-run      # runs the full leakage check, no order placed
 python agent.py                # if vetted, places a real (paper) options order

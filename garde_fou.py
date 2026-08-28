@@ -1627,13 +1627,29 @@ def controle_nombre_de_tests_annonce() -> None:
     if not reel:
         return
 
+    # `~` et `+` sont acceptes comme APPROXIMATION ASSUMEE. Ajoute dans la
+    # foulee : la version stricte a signale trois fois de suite un README que
+    # je venais de corriger, parce que chaque test ajoute changeait le total.
+    # Exiger un chiffre exact dans un document, c est le condamner a etre faux
+    # entre deux commits -- et pousser l auteur a desarmer le controle.
+    #
+    # « 500+ tests » reste VRAI tant qu il y en a au moins 500 ; « ~500 » tant
+    # qu on est a 5 % pres. Un chiffre nu, lui, doit toujours etre exact : on
+    # ne relache rien sur l affirmation precise, on autorise seulement de ne
+    # pas en faire une.
     ANNONCE = re.compile(
-        r"(\d+)\s+(?:offline\s+)?(?:regression\s+|unit\s+|automated\s+)?tests?\b",
+        r"(~)?(\d+)(\+)?\s+(?:offline\s+)?(?:regression\s+|unit\s+|automated\s+)?tests?\b",
         re.I)
     for rel, texte in _charger_textes_livrables().items():
         for m in ANNONCE.finditer(texte):
-            annonce = int(m.group(1))
-            if annonce != reel:
+            annonce = int(m.group(2))
+            if m.group(3):        # « 500+ » : un minorant
+                juste = reel >= annonce
+            elif m.group(1):      # « ~500 » : a 5 % pres
+                juste = abs(reel - annonce) <= max(1, annonce * 0.05)
+            else:                 # un chiffre nu doit etre EXACT
+                juste = (annonce == reel)
+            if not juste:
                 alerte(
                     rel,
                     "annonce « %s » alors que le depot en contient %d. Un jury "

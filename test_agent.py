@@ -559,6 +559,43 @@ class TestLeChiffreDeTestsAnnonceEstMESURE(unittest.TestCase):
             "alors que le depot en contient", sortie,
             "un chiffre EXACT est signalé comme périmé :\n%s" % sortie[-600:])
 
+    def test_un_minorant_explicite_reste_vrai(self):
+        """« 3+ tests » avec 3 tests reels : VRAI, donc aucune alerte.
+
+        Ajoute dans la foulee du controle lui-meme : la version stricte a
+        signale TROIS FOIS de suite un README que je venais de corriger,
+        parce que chaque test ajoute changeait le total. Exiger un chiffre
+        exact dans un document, c'est le condamner a etre faux entre deux
+        commits — et pousser l'auteur a desarmer le controle."""
+        # « 2+ » et NON « 3+ » : avec 3 tests reels, « 3+ » passerait aussi
+        # bien si le signe + etait ignore (3 == 3), donc ce test ne
+        # distinguerait RIEN. Trouve par mutation : neutraliser la branche du
+        # minorant ne faisait tomber aucun test. Un minorant STRICT, lui,
+        # echoue des que le + n'est plus honore.
+        sortie = self._lancer_avec_readme(
+            "# Projet\n\nCovered by 2+ offline regression tests.\n")
+        self.assertNotIn("alors que le depot en contient", sortie,
+                         "« 2+ tests » avec 3 tests reels est VRAI, et pourtant "
+                         "signale :\n%s" % sortie[-400:])
+
+    def test_un_minorant_FAUX_est_quand_meme_signale(self):
+        """TEMOIN. Sans lui, il suffirait d'ecrire « 9000+ » pour que
+        n'importe quelle affirmation passe. Un minorant reste une
+        affirmation : elle doit etre vraie."""
+        sortie = self._lancer_avec_readme(
+            "# Projet\n\nCovered by 9000+ offline regression tests.\n")
+        self.assertIn(
+            "alors que le depot en contient 3", sortie,
+            "« 9000+ tests » passe alors qu'il y en a 3 : le signe + sert "
+            "d'echappatoire a toute verification.\n%s" % sortie[-500:])
+
+    def test_un_chiffre_NU_doit_rester_EXACT(self):
+        """TEMOIN : on relache sur l'approximation ASSUMEE, jamais sur
+        l'affirmation precise. « 4 tests » quand il y en a 3 reste faux."""
+        sortie = self._lancer_avec_readme(
+            "# Projet\n\nCovered by 4 offline regression tests.\n")
+        self.assertIn("alors que le depot en contient 3", sortie)
+
     def test_un_README_SANS_chiffre_ne_declenche_RIEN(self):
         """Ne rien annoncer n'est pas une faute — c'est annoncer FAUX qui
         l'est."""
