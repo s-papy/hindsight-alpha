@@ -3705,6 +3705,57 @@ class TestUneEntreeAbsenteBloque(unittest.TestCase):
         self.assertIn("plus rien ne verifie", message)
 
 
+class TestLaReferenceDuGelEstAJour(unittest.TestCase):
+    """Le piège introduit par le contrôle 16 lui-même, trouvé en simulant la
+    CI d'après-kickoff.
+
+    AVANT le kickoff, `garde_fou` réécrit `kickoff_freeze.json` dès qu'une
+    constante bouge et se contente d'un jaune « à committer ». Si ce fichier
+    n'est pas committé, un clone neuf — la CI — voit l'ANCIENNE référence et
+    le NOUVEAU code. Après le kickoff, ça devient un blocage rouge, pour une
+    raison purement comptable et non une vraie dérive de paramètre.
+
+    Ce test transforme ce piège en échec immédiat et lisible, AVANT le
+    kickoff, au lieu d'un rouge inexplicable après.
+
+    Vérifié par ailleurs, et c'était l'inquiétude qui a mené ici : après le
+    kickoff, sans identifiants et sans `.git`, `garde_fou.py` sort en 0 — la
+    référence committée correspond bien à ce qu'un environnement propre
+    calcule."""
+
+    def test_le_fichier_de_gel_correspond_aux_constantes_actuelles(self):
+        import garde_fou
+        chemin = Path(garde_fou.RACINE) / garde_fou.FICHIER_GEL
+        self.assertTrue(chemin.exists(),
+                        "la référence du gel est absente du dépôt")
+        with open(chemin, encoding="utf-8") as fh:
+            reference = json.load(fh)["valeurs"]
+        actuelles = garde_fou._valeurs_gelees()
+
+        derives = sorted(
+            "%s : %r != %r" % (c, reference.get(c, "<absente>"),
+                               actuelles.get(c, "<absente>"))
+            for c in set(reference) | set(actuelles)
+            if reference.get(c, "<absente>") != actuelles.get(c, "<absente>"))
+        self.assertEqual(derives, [],
+                         "kickoff_freeze.json ne reflète plus les constantes : "
+                         "%s — régénère-le (python3 garde_fou.py) ET COMMITTE-LE, "
+                         "sinon la CI bloquera après le kickoff sur une dérive "
+                         "qui n'en est pas une" % " | ".join(derives))
+
+    def test_la_reference_couvre_bien_les_seize_constantes(self):
+        """TÉMOIN : une référence vide correspondrait trivialement à
+        « aucune dérive » et passerait le test ci-dessus."""
+        import garde_fou
+        with open(Path(garde_fou.RACINE) / garde_fou.FICHIER_GEL,
+                  encoding="utf-8") as fh:
+            valeurs = json.load(fh)["valeurs"]
+        self.assertEqual(len(valeurs), len(garde_fou._valeurs_gelees()))
+        self.assertGreaterEqual(len(valeurs), 16,
+                                "la référence ne couvre plus les 16 constantes "
+                                "de décision")
+
+
 class TestGelDesParametresAuKickoff(unittest.TestCase):
     """Le contrôle 16, et surtout la propriété sans laquelle il ne vaut rien.
 
