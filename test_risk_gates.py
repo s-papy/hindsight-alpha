@@ -486,6 +486,49 @@ class TestHindsightGuard(unittest.TestCase):
             list(full), lambda c, w: (full if w == "full" else in_sample)[c],
             threshold=seuil)
 
+    def test_un_seuil_NON_FINI_est_refuse_et_non_lu_comme_NO_EDGE(self):
+        """« NO EDGE » est une affirmation sur le MARCHÉ, pas sur la config.
+
+        Mesure avant correctif, avec `threshold=NaN` :
+
+            verdict_label() -> "NO EDGE"
+
+        Toute comparaison avec NaN rend False, donc aucun candidat ne
+        « franchit le seuil » ni en in-sample ni sur la fenêtre pleine, et la
+        cascade tombe sur NO EDGE — c'est-à-dire « rien ne gagne nulle
+        part ». La vérité était « le seuil est inutilisable ».
+
+        ATTEIGNABLE, vérifié : argparse accepte « nan » et « inf » pour un
+        `type=float`. `agent.py --sharpe-threshold nan` aurait donc produit ce
+        verdict sur CHAQUE symbole, CHAQUE jour, en le présentant comme un
+        résultat de marché.
+
+        On lève, comme pour les doublons : c'est une erreur d'appel, pas un
+        état du monde. `evaluate_symbol` l'attrape et en fait un motif qui
+        NOMME la cause — vérifié de bout en bout."""
+        from hindsight_guard import check_selection_leakage
+        for nom, seuil in (("NaN", float("nan")),
+                           ("+inf", float("inf")),
+                           ("-inf", float("-inf"))):
+            with self.subTest(seuil=nom):
+                with self.assertRaises(ValueError) as ctx:
+                    check_selection_leakage([10, 20], lambda c, w: 1.0,
+                                            threshold=seuil)
+                self.assertIn("non-finite threshold", str(ctx.exception))
+
+    def test_les_seuils_REELS_du_projet_passent_toujours(self):
+        """TÉMOIN. 0.0 est le seuil de production ; 0.30 celui que
+        HINDSIGHT_BENCHMARK.md mesure comme meilleur et que Spap a décidé de
+        revoir après le 04/09. Les refuser casserait le pipeline entier —
+        c'est le risque exact d'une validation trop large."""
+        from hindsight_guard import check_selection_leakage
+        for seuil in (0.0, 0.30, -1.0, 1e9):
+            with self.subTest(seuil=seuil):
+                r = check_selection_leakage([10, 20],
+                                            lambda c, w: {10: 2.0, 20: 1.0}[c],
+                                            threshold=seuil)
+                self.assertIsNotNone(r.verdict_label())
+
     def test_UN_SEUL_candidat_ne_certifie_RIEN(self):
         """Un candidat ne peut pas être en désaccord avec lui-même.
 

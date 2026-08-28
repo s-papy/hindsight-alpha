@@ -358,6 +358,35 @@ def check_selection_leakage(
             "reports. De-duplicate before calling."
         )
 
+    # UN SEUIL NON FINI N'EST PAS UN SEUIL. Ajoute le 28/08/2026 au soir.
+    # Mesure avant correctif, avec threshold=NaN :
+    #
+    #     verdict_label() -> "NO EDGE"
+    #
+    # « NO EDGE » est une affirmation de FOND : rien ne gagne nulle part. La
+    # verite etait « le seuil est inutilisable, je ne peux rien conclure ».
+    # Le mecanisme : toute comparaison avec NaN rend False, donc
+    # `score > threshold` est faux partout, donc ni l'in-sample ni la fenetre
+    # pleine ne « franchissent le seuil » -- et la cascade tombe sur NO EDGE.
+    #
+    # ATTEIGNABLE, verifie : argparse accepte « nan » et « inf » pour un
+    # `type=float`, donc `agent.py --sharpe-threshold nan` produirait ce
+    # verdict sur CHAQUE symbole, CHAQUE jour, en le presentant comme un
+    # resultat de marche.
+    #
+    # On LEVE, comme pour les doublons : c'est une erreur d'appel, pas un
+    # etat du monde. evaluate_symbol() l'attrape par symbole et en fait un
+    # motif qui NOMME la cause -- « error evaluating symbol: ValueError: ... »
+    # -- ce qui est exactement ce qu'un operateur doit lire.
+    if not math.isfinite(threshold):
+        raise ValueError(
+            "check_selection_leakage() got a non-finite threshold (%r). Every "
+            "comparison with NaN is False and every score is below infinity, so "
+            "no candidate could ever clear the bar -- the report would say "
+            "'NO EDGE', which claims something about the market rather than "
+            "about the configuration." % (threshold,)
+        )
+
     def _noter(c: Any, fenetre: str) -> float:
         """Note un candidat en refusant tout ce qui n'est pas un nombre.
 
