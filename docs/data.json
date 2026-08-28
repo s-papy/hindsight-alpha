@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-08-28T19:00:06.548203+00:00",
+  "generated_at": "2026-08-28T19:30:05.152392+00:00",
   "team": "Hindsight Alpha",
   "source": "https://github.com/s-papy/hindsight-alpha",
   "author": "Spap",
@@ -714,9 +714,16 @@
     }
   ],
   "monitor_status": {
-    "last_run_at": "2026-08-28T19:00:06.543761+00:00",
+    "last_run_at": "2026-08-28T19:30:05.150904+00:00",
     "outcome": "checked",
     "market_open": true,
     "dry_run": false
+  },
+  "agent_status": {
+    "last_run_at": "2026-08-27T19:30:13.766818+00:00",
+    "outcome": "order_submitted",
+    "dry_run": false,
+    "symbols_evaluated": 4,
+    "trades": 1
   }
 }
