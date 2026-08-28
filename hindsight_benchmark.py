@@ -69,9 +69,20 @@ from hindsight_guard import check_selection_leakage
 
 CANDIDATS = [10, 20, 30, 60, 90]
 
-# Seuil de Sharpe : celui du projet. Il compte enormement pour le jeu D, ou il
-# est le SEUL mecanisme qui attrape une selection sans edge.
-SEUIL = 0.3
+# Seuil de Sharpe. CORRIGE le 28/08/2026 : cette constante valait 0.3 et se
+# disait « celui du projet ». Verification faite, le projet utilise 0.0 PARTOUT
+# -- agent.py (defaut de --sharpe-threshold), backtest.py, et les deux appels
+# de compare_strategies.py. Le chiffre etait invente et l'etiquette fausse.
+#
+# Ce n'est pas un detail ici : le jeu D mesure precisement QUI protege contre
+# une selection sans edge, le garde-fou ou le seuil. Mesurer avec un seuil que
+# le projet n'emploie pas rendait ce resultat sans objet -- et c'est le
+# resultat que j'avais presente comme le plus important des quatre.
+#
+# Exactement l'erreur que ce projet existe pour attraper -- un chiffre publie
+# qui repose sur une constante que personne n'a verifiee -- commise dans
+# l'outil ecrit pour l'auditer.
+SEUIL = 0.0
 
 # Bruit d'estimation sur un Sharpe mesure sur un echantillon fini. Les deux
 # fenetres (pleine / in-sample) sont notees sur des donnees qui se recouvrent
@@ -83,7 +94,14 @@ RHO = 0.70
 N_ESSAIS = 4000
 GRAINE = 20260827
 
-VERDICTS = ["agrees", "LEAK DETECTED", "NO EDGE", "CANNOT CONCLUDE"]
+# Les quatre verdicts possibles sont ceux de LeakageReport.verdict_label().
+# Ils ne sont PAS recopies dans une constante ici : une liste declaree a
+# cote de la vraie regle, jamais lue, ne fait que promettre une
+# synchronisation qui n'existe pas. Une `VERDICTS = [...]` morte trainait
+# ici -- retiree le 28/08 par le test qui traque justement ca, deux minutes
+# apres que le meme test eut attrape une constante morte dans le banc
+# jumeau. Les colonnes du rapport nomment les quatre verdicts la ou elles
+# les lisent, avec _pct(), donc a un seul endroit.
 
 
 def _bruits_correles(rng: random.Random) -> Tuple[float, float]:
@@ -353,11 +371,31 @@ def construire_rapport() -> str:
              "cas. Seuil neutralisé, ce chiffre monte à **%.1f%%**."
              % (_pct(d, "agrees"), _pct(d2, "agrees")))
     L.append("")
-    L.append("La conclusion est nette, et elle limite la promesse du projet : "
-             "**ce n'est pas `hindsight_guard` qui protège contre une sélection "
-             "sans edge, c'est le seuil de Sharpe.** Les deux mécanismes sont "
-             "distincts et il ne faut pas créditer le premier du travail du "
-             "second.")
+    ecart_du_seuil = _pct(d2, "agrees") - _pct(d, "agrees")
+    L.append("**Avec le seuil réellement utilisé par ce projet — 0.0 — le seuil "
+             "ne protège de rien : le neutraliser complètement ne déplace le "
+             "chiffre que de %.1f point.** Sur une sélection sans le moindre "
+             "edge, rien dans la chaîne ne s'y oppose : ni le garde-fou, qui "
+             "n'est pas conçu pour ça et le dit, ni le seuil, qui est à zéro."
+             % ecart_du_seuil)
+    L.append("")
+    L.append("*Correction du 28/08/2026, et elle porte sur ce même paragraphe.* "
+             "Une première version de ce banc employait un seuil de **0.3** en "
+             "le présentant comme « celui du projet ». Vérification faite, le "
+             "projet utilise **0.0** partout — `agent.py`, `backtest.py`, et "
+             "les deux appels de `compare_strategies.py`. Avec le faux seuil, "
+             "`NO EDGE` couvrait 27.4 % des cas et la conclusion publiée ici "
+             "était que « c'est le seuil de Sharpe qui protège ». C'était faux, "
+             "et faux parce que la mesure reposait sur une constante que "
+             "personne n'avait vérifiée — exactement l'erreur que ce projet "
+             "existe pour attraper, commise dans l'outil écrit pour l'auditer.")
+    L.append("")
+    L.append("Ce que la correction change, en clair : le résultat est **plus "
+             "sévère**, pas moins. Le garde-fou certifie une sélection sans "
+             "valeur une fois sur deux, et aucun autre mécanisme ne rattrape "
+             "ça. C'est un argument mesuré en faveur d'un seuil de Sharpe non "
+             "nul — décision de méthode qui appartient à l'opérateur, pas une "
+             "modification à faire en douce à huit jours du rendu.")
     L.append("")
     L.append("## Courbe de détection (jeu C)")
     L.append("")

@@ -68,7 +68,12 @@ HOLDOUTS = (5, 10, 20, 40, 80)
 K_FUITE = 2.6                 # facteur de volatilite applique a la queue
 N_ESSAIS = 500          # 120 laissait l'avance de 20 j sous le plancher
 GRAINE = 20260827
-SEUIL = 0.3
+# Pas de constante de seuil ici, et c'est deliberé : ce banc mesure le
+# DESACCORD DE GAGNANTS (_gagnant), pas le verdict du garde-fou, donc aucun
+# seuil n'intervient. Une constante `SEUIL = 0.3` trainait a cet endroit sans
+# etre lue une seule fois -- retiree le 28/08. C'est precisement ce que
+# TestAucunSeuilMort existe pour attraper, et elle etait dans un fichier que
+# j'avais ecrit moi-meme.
 
 
 def _serie(graine: int, k_queue: float) -> List[Bar]:

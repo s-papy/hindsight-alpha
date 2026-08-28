@@ -4,7 +4,7 @@
 
 Ce banc ne mesure pas si la stratégie gagne de l'argent. Il mesure **ce que le détecteur détecte**, avec quel taux de fausse alerte, à partir de quelle taille d'effet, et surtout **ce qu'il ne détecte pas**.
 
-Paramètres : seuil de Sharpe **0.30**, bruit d'estimation σ=**0.30**, corrélation des deux fenêtres ρ=**0.70** (elles sont notées sur des données qui se recouvrent — les traiter comme indépendantes gonflerait artificiellement le taux de fausse alerte).
+Paramètres : seuil de Sharpe **0.00**, bruit d'estimation σ=**0.30**, corrélation des deux fenêtres ρ=**0.70** (elles sont notées sur des données qui se recouvrent — les traiter comme indépendantes gonflerait artificiellement le taux de fausse alerte).
 
 ## Les quatre jeux
 
@@ -12,7 +12,7 @@ Paramètres : seuil de Sharpe **0.30**, bruit d'estimation σ=**0.30**, corréla
 |---|---|---|---|---|---|
 | **A** — edge réel, aucune fuite | *pas de fuite* | 69.8% | 30.2% | 0.0% | 0.0% |
 | **B** — fuite évidente (δ=1.20) | *fuite* | 11.8% | 88.2% | 0.0% | 0.0% |
-| **D** — aucun edge, aucune fuite | *surapprentissage seul* | 34.6% | 38.0% | 27.4% | 0.0% |
+| **D** — aucun edge, aucune fuite | *surapprentissage seul* | 52.0% | 47.4% | 0.6% | 0.0% |
 | **D-bis** — idem, seuil neutralisé | *surapprentissage seul* | 53.0% | 47.0% | 0.0% | 0.0% |
 
 ## Ce que ces chiffres disent
@@ -27,16 +27,20 @@ Paramètres : seuil de Sharpe **0.30**, bruit d'estimation σ=**0.30**, corréla
 
 Aucun candidat n'a d'edge, et il n'y a **aucune fuite** : le gagnant est désigné par le seul bruit. C'est du surapprentissage pur, sans look-ahead — précisément ce que le garde-fou **n'est pas conçu pour attraper**.
 
-Avec le seuil du projet, il certifie `agrees` dans **34.6%** des cas. Seuil neutralisé, ce chiffre monte à **53.0%**.
+Avec le seuil du projet, il certifie `agrees` dans **52.0%** des cas. Seuil neutralisé, ce chiffre monte à **53.0%**.
 
-La conclusion est nette, et elle limite la promesse du projet : **ce n'est pas `hindsight_guard` qui protège contre une sélection sans edge, c'est le seuil de Sharpe.** Les deux mécanismes sont distincts et il ne faut pas créditer le premier du travail du second.
+**Avec le seuil réellement utilisé par ce projet — 0.0 — le seuil ne protège de rien : le neutraliser complètement ne déplace le chiffre que de 1.0 point.** Sur une sélection sans le moindre edge, rien dans la chaîne ne s'y oppose : ni le garde-fou, qui n'est pas conçu pour ça et le dit, ni le seuil, qui est à zéro.
+
+*Correction du 28/08/2026, et elle porte sur ce même paragraphe.* Une première version de ce banc employait un seuil de **0.3** en le présentant comme « celui du projet ». Vérification faite, le projet utilise **0.0** partout — `agent.py`, `backtest.py`, et les deux appels de `compare_strategies.py`. Avec le faux seuil, `NO EDGE` couvrait 27.4 % des cas et la conclusion publiée ici était que « c'est le seuil de Sharpe qui protège ». C'était faux, et faux parce que la mesure reposait sur une constante que personne n'avait vérifiée — exactement l'erreur que ce projet existe pour attraper, commise dans l'outil écrit pour l'auditer.
+
+Ce que la correction change, en clair : le résultat est **plus sévère**, pas moins. Le garde-fou certifie une sélection sans valeur une fois sur deux, et aucun autre mécanisme ne rattrape ça. C'est un argument mesuré en faveur d'un seuil de Sharpe non nul — décision de méthode qui appartient à l'opérateur, pas une modification à faire en douce à huit jours du rendu.
 
 ## Courbe de détection (jeu C)
 
 | taille de fuite δ | `LEAK DETECTED` | `agrees` | `NO EDGE` |
 |---|---|---|---|
 | 0.00 | 31.6% | 68.4% | 0.0% |
-| 0.15 | 33.6% | 66.4% | 0.0% |
+| 0.15 | 33.5% | 66.5% | 0.0% |
 | 0.30 | 38.4% | 61.6% | 0.0% |
 | 0.45 | 45.8% | 54.2% | 0.0% |
 | 0.60 | 54.2% | 45.8% | 0.0% |
@@ -53,11 +57,11 @@ Le 30.2% du jeu A dépend de l'écart que j'ai mis entre le meilleur candidat et
 
 | écart réel meilleur − suivant | fausse alerte | `agrees` |
 |---|---|---|
-| 0.00 | 45.2% | 54.8% |
-| 0.10 | 44.7% | 55.3% |
-| 0.20 | 41.2% | 58.8% |
-| 0.30 | 35.7% | 64.3% |
-| 0.40 | 32.0% | 68.0% |
+| 0.00 | 45.0% | 55.0% |
+| 0.10 | 44.5% | 55.5% |
+| 0.20 | 41.1% | 58.9% |
+| 0.30 | 35.6% | 64.4% |
+| 0.40 | 31.8% | 68.2% |
 | 0.60 | 18.1% | 81.9% |
 | 0.80 | 7.8% | 92.2% |
 | 1.20 | 0.7% | 99.3% |
@@ -66,7 +70,7 @@ Le 30.2% du jeu A dépend de l'écart que j'ai mis entre le meilleur candidat et
 
 ## Une réserve sur le mot « LEAK »
 
-Dans le jeu D il n'y a **aucune fuite** — et le garde-fou imprime pourtant `LEAK DETECTED` dans 38.0% des cas. Ce qu'il mesure réellement, c'est l'**instabilité du gagnant entre les deux fenêtres**. Une fuite en est la cause la plus intéressante, pas la seule : le bruit d'estimation produit la même signature.
+Dans le jeu D il n'y a **aucune fuite** — et le garde-fou imprime pourtant `LEAK DETECTED` dans 47.4% des cas. Ce qu'il mesure réellement, c'est l'**instabilité du gagnant entre les deux fenêtres**. Une fuite en est la cause la plus intéressante, pas la seule : le bruit d'estimation produit la même signature.
 
 C'est une limite de vocabulaire, pas de code, et elle est assumée ici plutôt que corrigée en silence.
 

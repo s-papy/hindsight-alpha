@@ -4143,5 +4143,78 @@ class TestLeJournalNeRendQueDesEnregistrements(unittest.TestCase):
         self.assertEqual([r["run_type"] for r in self.d.read_log()], ["b", "a"])
 
 
+class TestLesBancsEmploientLeSeuilDuProjet(unittest.TestCase):
+    """Un banc qui mesure le projet doit le mesurer AVEC SES PARAMÈTRES.
+
+    `hindsight_benchmark.py` employait `SEUIL = 0.3` en le présentant comme
+    « celui du projet ». Le projet utilise 0.0 partout — `agent.py` (défaut de
+    `--sharpe-threshold`), `backtest.py`, et les deux appels de
+    `compare_strategies.py`.
+
+    Ce n'était pas cosmétique : le jeu D mesure précisément QUI protège contre
+    une sélection sans edge. Avec le faux seuil, `NO EDGE` couvrait 27.4 % des
+    cas et le banc concluait « c'est le seuil de Sharpe qui protège ». Avec le
+    vrai, `NO EDGE` tombe à 0.6 % et cette conclusion s'effondre.
+
+    Exactement l'erreur que ce projet existe pour attraper — un chiffre publié
+    qui repose sur une constante que personne n'a vérifiée — commise dans
+    l'outil écrit pour l'auditer."""
+
+    @staticmethod
+    def _seuil_du_projet():
+        """Lu dans agent.py, la source : le défaut de --sharpe-threshold."""
+        import ast
+        arbre = ast.parse((Path(__file__).parent / "agent.py").read_text(
+            encoding="utf-8"))
+        for n in ast.walk(arbre):
+            if (isinstance(n, ast.Call)
+                    and getattr(n.func, "attr", None) == "add_argument"
+                    and any(isinstance(a, ast.Constant)
+                            and a.value == "--sharpe-threshold" for a in n.args)):
+                for kw in n.keywords:
+                    if kw.arg == "default":
+                        return kw.value.value
+        raise AssertionError("--sharpe-threshold introuvable dans agent.py")
+
+    def test_le_banc_emploie_le_meme_seuil_que_l_agent(self):
+        import hindsight_benchmark
+        self.assertEqual(hindsight_benchmark.SEUIL, self._seuil_du_projet(),
+                         "le banc mesure le garde-fou avec un seuil que "
+                         "l'agent n'emploie pas — le résultat ne dit alors "
+                         "rien du projet")
+
+    def test_backtest_emploie_le_meme_seuil_que_l_agent(self):
+        """TÉMOIN d'un autre chemin : si backtest.py et agent.py divergeaient,
+        les chiffres publiés ne décriraient pas la stratégie tradée."""
+        source = (Path(__file__).parent / "backtest.py").read_text(
+            encoding="utf-8")
+        attendu = "threshold=%r" % self._seuil_du_projet()
+        self.assertIn(attendu, source,
+                      "backtest.py n'emploie pas le seuil de l'agent (%s)"
+                      % attendu)
+
+    def test_aucun_seuil_mort_dans_les_bancs(self):
+        """`hindsight_holdout.py` portait un `SEUIL = 0.3` jamais lu une seule
+        fois. C'est ce que TestAucunSeuilMort existe pour attraper — et cette
+        constante était dans un fichier écrit pour auditer le projet."""
+        import ast
+        for nom in ("hindsight_holdout.py", "hindsight_benchmark.py"):
+            with self.subTest(fichier=nom):
+                source = (Path(__file__).parent / nom).read_text(
+                    encoding="utf-8")
+                arbre = ast.parse(source)
+                assignes = {t.id for n in ast.walk(arbre)
+                            if isinstance(n, ast.Assign)
+                            for t in n.targets if isinstance(t, ast.Name)
+                            and t.id.isupper()}
+                lus = {n.id for n in ast.walk(arbre)
+                       if isinstance(n, ast.Name)
+                       and isinstance(n.ctx, ast.Load)}
+                morts = sorted(assignes - lus)
+                self.assertEqual(morts, [],
+                                 "constante(s) jamais lue(s) dans %s : %s"
+                                 % (nom, ", ".join(morts)))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
