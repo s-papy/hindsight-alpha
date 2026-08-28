@@ -3222,6 +3222,12 @@ class TestMauvaisCompteRefuseLEntree(unittest.TestCase):
     passage unique de toute entrée, et une règle écrite deux fois n'est vraie
     qu'à un seul endroit."""
 
+    # Numeros FICTIFS. La premiere version de ces tests employait le vrai
+    # numero du compte hackathon : le garde-fou l'a signale dans la minute
+    # (« contient la valeur de ALPACA_ACCOUNT_ID [...] pour que ce soit un
+    # choix, pas un oubli »). Il n'est pas secret -- le tableau de bord le
+    # publie -- mais il n'apporte rien ici, et la regle du projet est de
+    # corriger le dossier plutot que de faire taire l'alerte.
     def _decider(self, numero_reel, attendu):
         from unittest import mock
         compte = {"account_number": numero_reel, "equity": "100000",
@@ -3244,12 +3250,12 @@ class TestMauvaisCompteRefuseLEntree(unittest.TestCase):
             return risk_gates.check_gates("SPY", "SPY260831P00764000")
 
     def test_un_compte_different_refuse_l_entree(self):
-        d = self._decider("PA0000DEV", "PA3K8MP3MF0U")
+        d = self._decider("PA0000DEV", "PAFAUXCOMPTE")
         self.assertFalse(d.allowed)
         self.assertIn("WRONG ACCOUNT", d.reason)
         self.assertIn("PA0000DEV", d.reason,
                       "le refus ne nomme pas le compte réellement utilisé")
-        self.assertIn("PA3K8MP3MF0U", d.reason,
+        self.assertIn("PAFAUXCOMPTE", d.reason,
                       "le refus ne nomme pas le compte attendu")
 
     def test_un_numero_illisible_refuse_aussi(self):
@@ -3257,21 +3263,21 @@ class TestMauvaisCompteRefuseLEntree(unittest.TestCase):
         le bon »."""
         for absent in (None, "", "   "):
             with self.subTest(valeur=absent):
-                d = self._decider(absent, "PA3K8MP3MF0U")
+                d = self._decider(absent, "PAFAUXCOMPTE")
                 self.assertFalse(d.allowed)
                 self.assertIn("unverified", d.reason)
 
     def test_le_bon_compte_passe_ce_garde(self):
         """TÉMOIN, et il est essentiel : sans lui, refuser TOUT passerait les
         deux tests ci-dessus et l'agent ne traderait plus de la semaine."""
-        d = self._decider("PA3K8MP3MF0U", "PA3K8MP3MF0U")
+        d = self._decider("PAFAUXCOMPTE", "PAFAUXCOMPTE")
         self.assertNotIn("WRONG ACCOUNT", d.reason or "")
         self.assertNotIn("unverified", d.reason or "")
 
     def test_les_espaces_ne_font_pas_un_faux_refus(self):
         """Un numéro recopié avec une espace parasite ne doit pas passer pour
         un autre compte."""
-        d = self._decider(" PA3K8MP3MF0U ", "PA3K8MP3MF0U")
+        d = self._decider(" PAFAUXCOMPTE ", "PAFAUXCOMPTE")
         self.assertNotIn("WRONG ACCOUNT", d.reason or "")
 
     def test_sans_compte_declare_on_avertit_mais_on_laisse_passer(self):
