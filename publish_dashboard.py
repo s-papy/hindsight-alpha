@@ -91,13 +91,27 @@ def _dernier_passage_de_l_agent(entrees) -> "dict | None":
     existe, elle n'etait simplement pas publiee. On la lit donc la, sans
     rien changer au chemin de trading.
 
-    LIMITE ASSUMEE, et elle est reelle : les entrees de l'agent n'ont pas de
-    `run_type`, alors que celles du moniteur en ont un. On identifie donc
-    l'agent par la NEGATIVE. C'est fragile -- un futur `run_type` inconnu
-    serait pris pour l'agent -- et c'est pourquoi un marqueur explicite
-    `run_type: "agent"` sera pose des que le passage de ce soir sera
-    termine.
+    CORRECTION DE CE COMMENTAIRE, le meme soir. J'y avais ecrit que l'agent
+    etait identifie « par la NEGATIVE » et qu'« un futur run_type inconnu
+    serait pris pour l'agent ». C'est FAUX, et le test le montre : la
+    condition liste des valeurs EXPLICITES (None, "", "agent"), donc
+    'backtest' ou 'inconnu' sont ignores -- verifie, pas relu. J'avais decrit
+    un risque qui n'existait pas ; le laisser aurait fait chercher un
+    probleme ailleurs qu'ou il est.
+
+    Ce qui etait vrai, en revanche : l'agent n'ecrivait AUCUN marqueur, et
+    l'absence de `run_type` servait de signature. C'est repare depuis --
+    agent.py ecrit `run_type: "agent"`. On accepte encore l'absence pour les
+    21 entrees ANTERIEURES du journal, sinon tout l'historique d'avant le
+    kickoff disparaitrait du tableau de bord.
     """
+    # `run_type: "agent"` est pose depuis le 28/08/2026 au soir. Les entrees
+    # ANTERIEURES -- 21 dans le journal a cette date -- n en ont pas : on
+    # accepte donc aussi l absence de marqueur, sinon l historique d avant le
+    # kickoff disparaitrait du tableau de bord. Ce qu on n accepte plus, c est
+    # un type INCONNU : « ce n est pas le moniteur » ne veut pas dire « c est
+    # l agent », et prendre un futur type pour un passage d agent ferait
+    # paraitre vivant un agent mort.
     for e in entrees:
         if not isinstance(e, dict):
             continue

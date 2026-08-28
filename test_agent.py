@@ -238,6 +238,41 @@ class TestOrdreAuSortInconnu(BaseAgent):
             self.assertEqual(self._trade(record, s)["outcome"], "order_submitted")
 
 
+class TestLAgentNOMME_ce_qu_il_ecrit(BaseAgent):
+    """monitor_exits.py marquait ses entrées `run_type: "exit_monitor"`
+    depuis toujours. L'agent n'écrivait AUCUN marqueur : le tableau de bord
+    devait donc le reconnaître à l'ABSENCE de type.
+
+    Posé le 28/08/2026 au soir, une fois le premier passage live terminé —
+    le suivant n'étant que lundi, la fenêtre était sûre. On ne touche pas au
+    chemin de trading une demi-heure avant qu'il serve."""
+
+    def test_chaque_passage_est_marque_comme_agent(self):
+        # On passe par main(), PAS par le helper _lance : celui-ci construit
+        # son propre dictionnaire et court-circuite l'endroit meme ou le
+        # marqueur est pose. Ma premiere version testait donc le harnais, pas
+        # le code -- elle est tombee, et elle avait raison de tomber.
+        argv = sys.argv
+        sys.argv = ["agent.py", "--symbols", "SPY"]
+        try:
+            with contextlib.redirect_stdout(io.StringIO()):
+                try:
+                    agent.main()
+                except SystemExit:
+                    pass
+        finally:
+            sys.argv = argv
+        lignes = [l for l in decision_log.LOG_FILE.read_text(
+            encoding="utf-8").splitlines() if l.strip()]
+        self.assertTrue(lignes, "aucune entree de journal ecrite")
+        record = json.loads(lignes[-1])
+        self.assertEqual(
+            record.get("run_type"), "agent",
+            "un passage de l'agent n'est pas nommé : le tableau de bord doit "
+            "alors le deviner, et devinera mal le jour où un troisième type "
+            "d'entrée apparaîtra")
+
+
 class TestLaMargeEstECRITEDansLeJournal(BaseAgent):
     """Mesurer sans écrire ne servirait à rien : la marge doit être
     VÉRIFIABLE APRÈS COUP, dans l'enregistrement du passage.

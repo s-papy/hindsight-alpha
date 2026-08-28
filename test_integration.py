@@ -5020,6 +5020,23 @@ class TestLaSantePubliqueDeLAgent(unittest.TestCase):
             {"run_type": "exit_monitor", "timestamp": "2026-08-28T18:00:00Z"}]))
         self.assertIsNone(self._extraire([]))
 
+    def test_un_type_INCONNU_n_est_PAS_pris_pour_l_agent(self):
+        """TÉMOIN. Un futur `run_type` — un backtest journalisé, par exemple —
+        ne doit pas se faire passer pour un passage de l'agent : ce serait
+        faire paraître VIVANT un agent mort, c'est-à-dire exactement le
+        défaut que cette bannière existe pour empêcher."""
+        self.assertIsNone(self._extraire([
+            {"run_type": "backtest", "timestamp": "2026-08-28T18:00:00Z"}]))
+
+    def test_les_entrees_SANS_marqueur_restent_lues(self):
+        """TÉMOIN inverse : 21 entrées antérieures au 28/08 n'ont pas de
+        `run_type`. Les rejeter effacerait tout l'historique d'avant le
+        kickoff du tableau de bord."""
+        etat = self._extraire([{"timestamp": "2026-08-27T17:00:00Z",
+                                "outcome": "order_submitted"}])
+        self.assertIsNotNone(etat)
+        self.assertEqual(etat["last_run_at"], "2026-08-27T17:00:00Z")
+
     def test_une_entree_corrompue_ne_fait_pas_tomber_la_publication(self):
         """Le journal peut contenir n'importe quoi — une ligne tronquée, un
         null. La publication du tableau de bord ne doit jamais s'arrêter

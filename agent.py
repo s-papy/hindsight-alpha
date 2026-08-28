@@ -256,7 +256,15 @@ def main() -> None:
     symbols = list(dict.fromkeys(
         s.strip().upper() for s in args.symbols.split(",") if s.strip()))
 
-    record: dict = {"dry_run": args.dry_run, "symbols": symbols, "outcome": "unknown"}
+    # `run_type` AJOUTE le 28/08/2026 au soir, une fois le premier passage
+    # live termine (et le suivant seulement lundi : la fenetre etait sure).
+    # monitor_exits.py marquait ses entrees depuis toujours ; l agent, non.
+    # Le tableau de bord devait donc l identifier par la NEGATIVE -- « tout
+    # ce qui n est pas exit_monitor » -- ce qui aurait pris pour un passage
+    # d agent le premier futur type inconnu, et fait paraitre vivant un
+    # agent mort. On nomme ce qu on ecrit.
+    record: dict = {"run_type": "agent", "dry_run": args.dry_run,
+                    "symbols": symbols, "outcome": "unknown"}
     try:
         _run(args, symbols, record)
     except SystemExit as sortie:
