@@ -61,6 +61,86 @@ python3 garde_fou.py
 code=$?
 
 if [ "$code" -eq 0 ]; then
+    # ── LA SUITE DE TESTS, quand du CODE est indexé ───────────────────────
+    #
+    # AJOUTÉ le 28/08/2026 au soir, après avoir committé QUATRE FOIS dans la
+    # journée sur une suite rouge sans m'en apercevoir. Ce hook ne lançait
+    # que garde_fou.py : rien n'empêchait mécaniquement un commit sur du
+    # code cassé. Une règle qu'on se rappelle ne vaut rien face à une règle
+    # que l'outil applique.
+    #
+    # SEULEMENT si un .py est indexé. Mesuré : les commits automatiques du
+    # tableau de bord ne touchent QUE docs/data.json, toutes les 30 minutes
+    # -- ils ne paieront jamais ce coût.
+    #
+    # COÛT MESURÉ : 70 s avec la sentinelle anti-récursion, 139 s sans. On
+    # pose la sentinelle : à 139 s je contournerais le hook, et un garde
+    # qu'on contourne ne garde rien. Le prix assumé est que le test
+    # anti-récursion se saute ici ; il tourne entier en CI.
+    #
+    # CE QUE CE HOOK PROUVE, ET CE QU'IL NE PROUVE PAS : il lance la suite
+    # sur l'ARBRE DE TRAVAIL, pas sur le contenu indexé. Avec des
+    # modifications non indexées, un commit partiel peut donc être cassé
+    # alors que l'arbre est vert. Limite réelle, énoncée plutôt que masquée
+    # -- ce hook attrape « j'ai oublié de lancer les tests », pas « j'ai
+    # indexé un sous-ensemble incohérent ».
+    CODE_INDEXE=$(git diff --cached --name-only --diff-filter=ACM | grep '\.py$' || true)
+    if [ -n "$HINDSIGHT_SKIP_TESTS" ]; then
+        [ -z "$CODE_INDEXE" ] || echo "[pre-commit] HINDSIGHT_SKIP_TESTS posé — la suite n'a PAS tourné."
+        exit 0
+    fi
+    if [ -z "$CODE_INDEXE" ]; then
+        exit 0
+    fi
+
+    echo "[pre-commit] du code Python est indexé — lancement de la suite (~70 s)..."
+    # Borne de temps, même raison que dans le hook du catalogue : sans elle,
+    # une suite qui s'emballe gèle `git commit` sans autre issue qu'un
+    # Ctrl-C. `timeout` n'existe pas de base sur macOS, d'où cette
+    # surveillance à la main.
+    DELAI="${HINDSIGHT_TESTS_TIMEOUT:-300}"
+    _sortie=$(mktemp -t hindsight-tests 2>/dev/null) || _sortie=""
+    if [ -z "$_sortie" ]; then
+        _gd=$(git rev-parse --git-dir 2>/dev/null)
+        if [ -n "$_gd" ] && : >"$_gd/tests-pre-commit.log" 2>/dev/null; then
+            _sortie="$_gd/tests-pre-commit.log"
+        else
+            _sortie=/dev/null
+            echo "[pre-commit] aucun fichier temporaire accessible — en cas d'échec le détail ne pourra pas être montré." >&2
+        fi
+    fi
+    HINDSIGHT_SOUS_EXECUTION=1 python3 -m unittest discover -p "test_*.py" >"$_sortie" 2>&1 &
+    _pid=$!
+    _attendu=0
+    while kill -0 "$_pid" 2>/dev/null && [ "$_attendu" -lt "$DELAI" ]; do
+        sleep 1
+        _attendu=$((_attendu + 1))
+    done
+    if kill -0 "$_pid" 2>/dev/null; then
+        pkill -P "$_pid" 2>/dev/null
+        kill -KILL "$_pid" 2>/dev/null
+        wait "$_pid" 2>/dev/null
+        echo ""
+        echo "COMMIT REFUSÉ : la suite a dépassé ${DELAI}s et a été interrompue."
+        echo "Ce n'est pas un test rouge, c'est une vérification qui n'a pas eu lieu."
+        echo "Pour lever la borne : HINDSIGHT_TESTS_TIMEOUT=900 git commit ..."
+        [ "$_sortie" = /dev/null ] || rm -f "$_sortie"
+        exit 1
+    fi
+    wait "$_pid"
+    _rc=$?
+    if [ "$_rc" -ne 0 ]; then
+        echo ""
+        echo "COMMIT REFUSÉ : la suite de tests est ROUGE (code $_rc)."
+        [ "$_sortie" = /dev/null ] || tail -25 "$_sortie" | sed 's/^/    /'
+        echo ""
+        echo "Pour committer quand même en connaissance de cause :"
+        echo "  HINDSIGHT_SKIP_TESTS=1 git commit ...   (ou git commit --no-verify)"
+        [ "$_sortie" = /dev/null ] || rm -f "$_sortie"
+        exit 1
+    fi
+    echo "[pre-commit] suite verte."
+    [ "$_sortie" = /dev/null ] || rm -f "$_sortie"
     exit 0
 fi
 

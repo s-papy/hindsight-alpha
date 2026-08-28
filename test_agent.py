@@ -830,6 +830,98 @@ class TestCroisementDeLUnivers(unittest.TestCase):
 
 
 @unittest.skipUnless(GIT, "git absent")
+class TestLeHookRefuseUnCodeNonTESTE(unittest.TestCase):
+    """Rien n'empêchait mécaniquement de committer sur une suite rouge.
+
+    Le hook de pre-commit ne lançait que garde_fou.py. J'ai committé QUATRE
+    FOIS le 28/08/2026 sur une suite rouge sans m'en apercevoir — la
+    dernière en ajoutant un contrôle censé empêcher exactement ce genre de
+    dérive. Une règle qu'on se rappelle ne vaut rien face à une règle que
+    l'outil applique.
+
+    Ces tests exercent le VRAI hook dans un dépôt jetable, avec une suite
+    minuscule : c'est la vérité-terrain, pas une lecture du script.
+
+    Les deux témoins comptent autant que le cas rouge :
+      . une suite VERTE doit passer — sinon plus aucun commit n'est possible ;
+      . un commit qui ne touche PAS de .py ne doit rien lancer — le tableau
+        de bord commite tout seul toutes les 30 minutes et ne touche que
+        docs/data.json ; lui faire payer 70 s serait absurde.
+    """
+
+    RACINE = Path(__file__).resolve().parent
+    SUITE_VERTE = ("import unittest\n"
+                   "class T(unittest.TestCase):\n"
+                   "    def test_ok(self): pass\n")
+    SUITE_ROUGE = ("import unittest\n"
+                   "class T(unittest.TestCase):\n"
+                   "    def test_casse(self): self.assertEqual(1, 2)\n")
+
+    def _depot(self):
+        d = Path(tempfile.mkdtemp(prefix="hindsight-hook-tests-"))
+        shutil.copytree(self.RACINE / "githooks", d / "githooks")
+        (d / "githooks" / "pre-commit").chmod(0o755)
+        # garde_fou factice qui approuve : ce qu'on teste ici est la SUITE,
+        # pas le garde-fou, et le vrai exigerait tout le dossier.
+        (d / "garde_fou.py").write_text("import sys\nsys.exit(0)\n",
+                                        encoding="utf-8")
+        (d / "docs").mkdir()
+        (d / "docs" / "data.json").write_text("{}", encoding="utf-8")
+        for a in (["init", "-q", "."], ["config", "user.email", "t@t"],
+                  ["config", "user.name", "t"],
+                  ["config", "core.hooksPath", "githooks"]):
+            subprocess.run([GIT, *a], cwd=str(d), check=True,
+                           capture_output=True, timeout=30)
+        return d
+
+    def _commiter(self, d, message):
+        subprocess.run([GIT, "add", "-A"], cwd=str(d), check=True,
+                       capture_output=True, timeout=30)
+        r = subprocess.run([GIT, "commit", "-m", message], cwd=str(d),
+                           capture_output=True, text=True, timeout=300)
+        return r.returncode, r.stdout + r.stderr
+
+    def test_du_code_avec_une_suite_ROUGE_est_refuse(self):
+        d = self._depot()
+        try:
+            (d / "test_x.py").write_text(self.SUITE_VERTE, encoding="utf-8")
+            self.assertEqual(self._commiter(d, "base")[0], 0, "le commit de base a échoué")
+            (d / "test_y.py").write_text(self.SUITE_ROUGE, encoding="utf-8")
+            code, sortie = self._commiter(d, "code casse")
+            self.assertNotEqual(code, 0,
+                                "un commit sur une suite ROUGE est passé :\n%s" % sortie)
+            self.assertIn("ROUGE", sortie)
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
+    def test_du_code_avec_une_suite_VERTE_passe(self):
+        """TÉMOIN : sans lui, un hook qui refuserait TOUT passerait le test
+        ci-dessus, et plus aucun commit ne serait possible."""
+        d = self._depot()
+        try:
+            (d / "test_x.py").write_text(self.SUITE_VERTE, encoding="utf-8")
+            code, sortie = self._commiter(d, "code vert")
+            self.assertEqual(code, 0, "un commit parfaitement vert est refusé :\n%s" % sortie)
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
+    def test_un_commit_SANS_python_ne_lance_pas_la_suite(self):
+        """TÉMOIN : le tableau de bord commite tout seul toutes les 30 min et
+        ne touche que docs/data.json. Lui faire payer la suite serait absurde
+        — et me pousserait à désarmer le hook."""
+        d = self._depot()
+        try:
+            (d / "test_x.py").write_text(self.SUITE_VERTE, encoding="utf-8")
+            self._commiter(d, "base")
+            (d / "docs" / "data.json").write_text('{"x": 1}', encoding="utf-8")
+            code, sortie = self._commiter(d, "snapshot")
+            self.assertEqual(code, 0)
+            self.assertNotIn("lancement de la suite", sortie,
+                             "la suite tourne pour un commit sans code Python")
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
+
 class TestHooksBranches(unittest.TestCase):
     """CLAUDE.md décrit une protection en TROIS couches et dit d'activer la
     première « une fois par clone » : git config core.hooksPath githooks.
