@@ -282,6 +282,70 @@ class TestBanniereDeSante(BaseRendu):
                          "la bannière accuse le moniteur alors que c'est la "
                          "page qui est vieille")
 
+    def test_une_publication_manquee_n_accuse_pas_le_moniteur(self):
+        """La page transporte un horodatage plus vieux qu'elle-même.
+
+        Le moniteur tourne toutes les 15 min ; la publication seulement à
+        :00, :05 et :30. L'horodatage porté par la page est donc, par
+        construction, plus ancien qu'elle — jusqu'à 15 min de plus.
+
+        Il existait donc une fenêtre où la page avait moins de 45 min (donc
+        n'était pas « périmée ») mais où l'horodatage qu'elle portait en
+        avait plus : la cascade tombait alors dans la branche qui accuse le
+        MONITEUR.
+
+        Mesuré sous node, horloge figée en plein marché, AVANT correction :
+
+            page 35 min, moniteur 50 min
+            -> « Exit monitor: last check 50 minutes ago — later than the
+               usual 15-minute cadence »
+
+        alors que le moniteur allait parfaitement bien : c'est la
+        publication qui avait manqué. Un message ne doit pas nommer une
+        cause qu'il n'a pas mesurée.
+        """
+        r = self.executer(self.PRE + """
+            // page ecrite il y a 35 min, portant un moniteur de 50 min :
+            // sain A LA PUBLICATION (15 min d'ecart), en retard AUJOURD'HUI.
+            renderMonitorHealth([], {last_run_at: ilYA(50/60), outcome:"checked"},
+                                ilYA(35/60));
+            _resultats.classe = lire().className;
+            _resultats.texte  = lire().textContent;
+        """)
+        self.assertEqual(r["classe"], "health-yellow")
+        self.assertIn("snapshot", r["texte"],
+                      "la bannière n'annonce pas que c'est la PAGE qui est "
+                      "vieille : %s" % r["texte"])
+        self.assertNotIn("15-minute cadence", r["texte"],
+                         "la bannière accuse le moniteur d'un retard de "
+                         "cadence alors qu'il était à l'heure quand la page "
+                         "a été écrite : %s" % r["texte"])
+
+    def test_un_moniteur_REELLEMENT_en_retard_est_toujours_accuse(self):
+        """TÉMOIN, et c'est lui qui compte.
+
+        Sans lui, une bannière qui dirait « snapshot » dans TOUS les cas
+        passerait le test ci-dessus — et un moniteur réellement mort ne
+        serait plus jamais signalé. Ici le décalage était DÉJÀ au-delà du
+        seuil au moment de la publication : la page est fraîche, le
+        moniteur est en panne, et c'est bien lui qu'il faut nommer."""
+        r = self.executer(self.PRE + """
+            renderMonitorHealth([], {last_run_at: ilYA(65/60), outcome:"checked"},
+                                ilYA(5/60));
+            _resultats.classe = lire().className;
+            _resultats.texte  = lire().textContent;
+        """)
+        # PAS d'assertion sur la COULEUR : cette branche-ci passe par
+        # isUsMarketHoursNow(), donc elle est jaune pendant le marché et verte
+        # en dehors. Ma première version exigeait health-yellow — elle serait
+        # passée ce soir et aurait échoué demain matin. Un test qui dépend de
+        # l'heure ment un jour sur deux. On assert donc ce qui est vrai à
+        # toute heure, et qui suffit à attraper la dérive redoutée.
+        self.assertIn("Exit monitor", r["texte"])
+        self.assertNotIn("snapshot", r["texte"],
+                         "un moniteur réellement en panne est excusé comme "
+                         "un simple retard de publication : %s" % r["texte"])
+
     def test_un_dry_run_n_a_jamais_droit_au_vert(self):
         """Un dry-run ne ferme AUCUNE position — c'est sa définition. Il
         produit pourtant un horodatage frais et `outcome: "checked"`, donc il

@@ -574,9 +574,30 @@ function renderMonitorHealth(decisions, monitorStatus, generatedAt) {
       cls = 'health-yellow';
       text = `🟡 Exit monitor: the last run reported success, but its timestamp is unreadable `
            + `— there is no way to tell whether that check was minutes or days ago.`;
-    } else if (pagePerimee && moniteurSainALaPublication) {
+    } else if (moniteurSainALaPublication
+               && (pagePerimee || (ageMin !== null && ageMin > STALE_MINUTES))) {
       // La page est vieille, le moniteur allait bien quand elle a ete ecrite.
       // Accuser le moniteur ici serait faux.
+      //
+      // ELARGI le 28/08/2026. La condition exigeait `pagePerimee`, c'est-a-dire
+      // une PAGE de plus de 45 min. Or l'horodatage que la page transporte est
+      // par construction plus vieux qu'elle : le moniteur tourne toutes les
+      // 15 min, la publication seulement a :00, :05 et :30. Il existe donc une
+      // fenetre ou la page a moins de 45 min mais l'horodatage qu'elle porte en
+      // a plus -- et la cascade tombait alors dans la branche suivante, qui
+      // accuse le MONITEUR.
+      //
+      // Mesure sur ce fichier meme, sous node, horloge figee en plein marche :
+      //   page 35 min, moniteur 50 min
+      //   -> « Exit monitor: last check 50 minutes ago — later than the usual
+      //      15-minute cadence » ALORS QUE le moniteur allait bien.
+      // La publication avait manque ; c'est elle qu'il fallait nommer.
+      //
+      // Un message ne doit pas nommer une cause qu'il n'a pas mesuree : on
+      // sait que le moniteur etait a l'heure a la publication, donc le retard
+      // vient de la page. Le cas d'un moniteur REELLEMENT en panne passe
+      // toujours dans la branche suivante, puisque le decalage etait alors
+      // deja au-dela du seuil A LA PUBLICATION (verifie).
       cls = 'health-yellow';
       text = `🟡 This page is a snapshot from ${fmtAge(pageAgeMs)} — it is not live. `
            + `The exit monitor was running normally when it was written `
