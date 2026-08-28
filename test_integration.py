@@ -4012,5 +4012,79 @@ class TestAucunChampMortDansLesDonneesPubliees(unittest.TestCase):
         self.assertEqual(publie["symbol"], "SPY")
 
 
+class TestHookPreCommitNeSeTaitPas(unittest.TestCase):
+    """Le hook est la PREMIÈRE couche d'application. Mesuré de bout en bout,
+    dans une copie du dépôt avec les hooks actifs :
+
+        dépôt sain             -> commit passe              (juste)
+        garde_fou 🔴           -> commit REFUSÉ             (juste)
+        garde_fou.py supprimé  -> commit PASSE, hook MUET   (faux)
+
+    Et la sortie de ce dernier cas disait, mot pour mot : « 1 file changed,
+    2629 deletions(-), delete mode garde_fou.py ». Le commit qui SUPPRIME le
+    garde-fou était exactement celui que son propre hook laissait passer sans
+    un mot.
+
+    Le hook est exécuté ici, pas relu : chercher des mots dans un script est
+    précisément le genre de contrôle que ce projet a déjà vu rester vert
+    pendant que le comportement disparaissait."""
+
+    HOOK = Path(__file__).parent / "githooks" / "pre-commit"
+
+    def _lancer(self, contenu_garde_fou):
+        """Exécute le hook dans un dépôt git jetable. `contenu_garde_fou` à
+        None = fichier absent."""
+        dossier = tempfile.mkdtemp(prefix="hindsight-hook-")
+        try:
+            subprocess.run(["git", "init", "-q"], cwd=dossier, check=True)
+            if contenu_garde_fou is not None:
+                Path(dossier, "garde_fou.py").write_text(contenu_garde_fou,
+                                                         encoding="utf-8")
+            r = subprocess.run(["sh", str(self.HOOK)], cwd=dossier,
+                               capture_output=True, text=True, timeout=60)
+            return r.returncode, r.stdout + r.stderr
+        finally:
+            shutil.rmtree(dossier, ignore_errors=True)
+
+    def test_un_verdict_vert_laisse_passer_en_silence(self):
+        """TÉMOIN : sans lui, refuser ou crier toujours passerait le reste."""
+        code, sortie = self._lancer("raise SystemExit(0)\n")
+        self.assertEqual(code, 0)
+        self.assertNotIn("REFUSÉ", sortie)
+
+    def test_un_verdict_rouge_refuse_le_commit(self):
+        code, sortie = self._lancer("raise SystemExit(1)\n")
+        self.assertEqual(code, 1)
+        self.assertIn("verdict", sortie)
+
+    def test_garde_fou_absent_laisse_passer_mais_LE_DIT(self):
+        """Le cœur du correctif. On ne bloque pas — 27 des 162 commits de ce
+        dépôt sont antérieurs à garde_fou.py, et la CI attrape déjà le cas
+        (`python3 garde_fou.py` sans le fichier sort en code 2). Le tort du
+        hook n'était pas de laisser passer : c'était de se taire."""
+        code, sortie = self._lancer(None)
+        self.assertEqual(code, 0, "bloquer casserait le travail sur "
+                                  "l'historique antérieur au garde-fou")
+        self.assertIn("ABSENT", sortie,
+                      "le hook laisse passer SANS DIRE que rien n'a été "
+                      "vérifié — le commit qui supprime le garde-fou est "
+                      "précisément celui qu'il ne mentionne pas")
+        self.assertIn("RIEN", sortie)
+
+    def test_un_plantage_n_est_pas_annonce_comme_un_verdict(self):
+        """Le message annonçait « verdict 🔴 ci-dessus » pour TOUT code non
+        nul — y compris 127 (python3 introuvable) et 2 (script planté), où
+        aucun verdict n'a été rendu. Envoyer chercher un verdict qui n'existe
+        pas fait perdre le vrai diagnostic : c'est la même faute que celle que
+        garde_fou dénonce ailleurs, confondre « je refuse » et « je n'ai pas
+        pu mesurer »."""
+        code, sortie = self._lancer("raise SystemExit(2)\n")
+        self.assertEqual(code, 1, "un garde-fou qui plante doit tout de même "
+                                  "refuser — côté sûr")
+        self.assertIn("PAS PU", sortie)
+        self.assertNotIn("verdict 🔴 ci-dessus", sortie,
+                         "un plantage est annoncé comme un verdict rouge")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

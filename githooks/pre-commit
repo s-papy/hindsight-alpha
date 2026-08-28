@@ -28,19 +28,57 @@
 # brut du sous-processus). Constaté sur le premier témoin lancé.
 cd "$(git rev-parse --show-toplevel)" || exit 1
 
+# CORRIGÉ le 28/08/2026 : ce bloc sortait 0 EN SILENCE quand garde_fou.py
+# était absent. Mesuré de bout en bout, dans une copie du dépôt avec les
+# hooks actifs :
+#
+#   dépôt sain                     -> commit passe                  (juste)
+#   garde_fou 🔴                   -> commit REFUSÉ                 (juste)
+#   garde_fou.py supprimé          -> commit PASSE, hook MUET       (faux)
+#
+# Et la sortie de ce dernier cas disait, mot pour mot :
+# « 1 file changed, 2629 deletions(-), delete mode garde_fou.py ».
+# Le commit qui SUPPRIME le garde-fou était exactement celui que son propre
+# hook laissait passer sans un mot.
+#
+# Pourquoi on ne BLOQUE pas ici, et c'est mesuré : 27 des 162 commits de ce
+# dépôt sont antérieurs à garde_fou.py. Bloquer casserait tout travail sur
+# cette partie de l'historique, pour un cas que la couche suivante attrape
+# déjà -- vérifié : `python3 garde_fou.py` sans le fichier sort en code 2,
+# donc la CI échoue au push. Le tort du hook n'était pas de laisser passer,
+# c'était de ne rien dire.
 if [ ! -f garde_fou.py ]; then
+    echo ""
+    echo "⚠️  garde_fou.py est ABSENT — ce commit n'a été vérifié par RIEN."
+    echo "    Le hook laisse passer (27 commits de ce dépôt lui sont antérieurs),"
+    echo "    mais la CI échouera au push. Si tu ne l'as pas supprimé exprès,"
+    echo "    arrête-toi ici : git checkout HEAD -- garde_fou.py"
+    echo ""
     exit 0
 fi
 
 python3 garde_fou.py
 code=$?
 
-if [ "$code" -ne 0 ]; then
-    echo ""
-    echo "COMMIT REFUSÉ par garde_fou.py (verdict 🔴 ci-dessus)."
-    echo "Corrige le dossier, jamais garde_fou.py, pour faire taire ça."
-    echo "Pour committer quand même en connaissance de cause : git commit --no-verify"
-    exit 1
+if [ "$code" -eq 0 ]; then
+    exit 0
 fi
 
-exit 0
+# Distinguer « garde_fou a REFUSÉ » de « garde_fou n'a PAS PU tourner » --
+# ajouté le 28/08 en relisant ce message. Il annonçait « verdict 🔴 ci-dessus »
+# pour TOUT code non nul, y compris ceux où aucun verdict n'a été rendu :
+# 127 (python3 introuvable), 2 (le script a planté avant de conclure). Envoyer
+# quelqu'un chercher un verdict qui n'existe pas, c'est lui faire perdre le
+# vrai diagnostic -- et c'est la même faute que celle que garde_fou.py
+# dénonce ailleurs : confondre « je refuse » et « je n'ai pas pu mesurer ».
+echo ""
+if [ "$code" -eq 1 ]; then
+    echo "COMMIT REFUSÉ par garde_fou.py (verdict 🔴 ci-dessus)."
+    echo "Corrige le dossier, jamais garde_fou.py, pour faire taire ça."
+else
+    echo "COMMIT REFUSÉ : garde_fou.py n'a PAS PU rendre de verdict (code $code)."
+    echo "Ce n'est pas un dossier refusé, c'est une vérification qui n'a pas eu lieu."
+    echo "Codes usuels : 127 = python3 introuvable, 2 = le script a planté."
+fi
+echo "Pour committer quand même en connaissance de cause : git commit --no-verify"
+exit 1
