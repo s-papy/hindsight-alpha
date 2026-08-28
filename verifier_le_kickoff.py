@@ -131,8 +131,34 @@ def tag_signe() -> bool:
     apres = _git("rev-list", "--count", "%s..HEAD" % dernier) or "?"
 
     if not valide:
-        _dire(JAUNE, "tag signe",
-              "%s existe mais sa signature n'a pas ete verifiee ici" % dernier)
+        # DISTINGUER LES DEUX CAUSES, ajoute le 28/08/2026 apres avoir
+        # reproduit le piege : `git tag -s` rend le code de sortie 0 et cree
+        # un tag SANS SIGNATURE quand la phrase secrete de la cle n'a pas pu
+        # etre saisie. Mesure sur cette machine :
+        #
+        #   git tag -s essai2-claude -m "essai"   -> code 0
+        #   git cat-file tag essai2-claude        -> aucun bloc SSH SIGNATURE
+        #
+        # Un tel tag se pousse sans broncher et ne prouve RIEN. Un
+        # enchainement `git tag -s ... && git push ...` le publierait en
+        # silence, puisque le && ne voit qu'un succes.
+        #
+        # « pas verifiee ici » couvrait les deux cas et laissait croire au
+        # moins grave. Un fichier de signataires incomplet se repare en une
+        # ligne ; un tag non signe doit etre refait.
+        objet = subprocess.run(["git", "cat-file", "tag", dernier], cwd=RACINE,
+                               capture_output=True, text=True, timeout=20)
+        non_signe = ("SSH SIGNATURE" not in objet.stdout
+                     and "PGP SIGNATURE" not in objet.stdout)
+        if non_signe:
+            _dire(ROUGE, "tag signe",
+                  "%s N'EST PAS SIGNE — l'objet ne contient aucune signature. "
+                  "Il ne prouve rien : refais-le en saisissant la phrase "
+                  "secrete de la cle." % dernier)
+        else:
+            _dire(JAUNE, "tag signe",
+                  "%s porte bien une signature, mais elle ne se verifie pas "
+                  "ici (fichier des signataires autorises ?)" % dernier)
         return False
     if apres != "0":
         _dire(JAUNE, "tag signe",

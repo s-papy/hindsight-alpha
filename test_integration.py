@@ -5000,6 +5000,92 @@ class TestLaVerificationDeKickoff(unittest.TestCase):
                          "il doit toujours sortir en 0 : il informe, il ne "
                          "bloque pas")
 
+    def _depot_jetable(self, dossier, contenu_du_tag):
+        """Un vrai depot git, un vrai objet tag, ecrit octet par octet.
+
+        On n'appelle JAMAIS `git tag -s` ici : la cle de signature est
+        protegee par une phrase secrete, et `ssh-keygen` ouvre /dev/tty pour
+        la demander meme quand la sortie est redirigee. Mesure du
+        28/08/2026 : la commande a bloque DIX MINUTES dans un shell non
+        interactif avant d'etre tuee. Un test ne doit jamais pouvoir faire
+        ca."""
+        import subprocess
+        def g(*a, **kw):
+            return subprocess.run(["git", "-C", dossier, *a],
+                                  capture_output=True, text=True, timeout=60, **kw)
+        g("init", "-q", ".")
+        g("config", "user.email", "t@t")
+        g("config", "user.name", "t")
+        g("config", "tag.gpgsign", "false")
+        Path(dossier, "f.txt").write_text("x", encoding="utf-8")
+        g("add", "-A")
+        g("commit", "-qm", "base")
+        commit = g("rev-parse", "HEAD").stdout.strip()
+        objet = contenu_du_tag % {"commit": commit}
+        h = subprocess.run(["git", "-C", dossier, "hash-object", "-t", "tag",
+                            "-w", "--stdin"], input=objet, capture_output=True,
+                           text=True, timeout=60).stdout.strip()
+        g("update-ref", "refs/tags/essai", h)
+        return dossier
+
+    def _verdict_du_tag(self, contenu):
+        import importlib.util, tempfile, io, contextlib
+        spec = importlib.util.spec_from_file_location(
+            "kickoff_sous_test", str(self.SCRIPT))
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        with tempfile.TemporaryDirectory() as d:
+            mod.RACINE = Path(self._depot_jetable(d, contenu))
+            tampon = io.StringIO()
+            with contextlib.redirect_stdout(tampon):
+                mod.tag_signe()
+            return tampon.getvalue()
+
+    NON_SIGNE = ("object %(commit)s\ntype commit\ntag essai\n"
+                 "tagger T <t@t> 1787937582 +0200\n\nsans signature\n")
+    SIGNE_MAIS_FAUX = (
+        "object %(commit)s\ntype commit\ntag essai\n"
+        "tagger T <t@t> 1787937582 +0200\n\nsignature illisible\n"
+        "-----BEGIN SSH SIGNATURE-----\nZmF1eA==\n-----END SSH SIGNATURE-----\n")
+
+    def test_un_tag_SANS_signature_est_nomme_comme_tel(self):
+        """`git tag -s` rend le code 0 et cree un tag NON SIGNE quand la
+        phrase secrete de la cle n'a pas pu etre saisie.
+
+        Reproduit le 28/08/2026 sur cette machine :
+
+            git tag -s essai2-claude -m "essai"  -> code de sortie 0
+            git cat-file tag essai2-claude       -> aucun bloc SSH SIGNATURE
+
+        Un tel tag se pousse sans broncher et ne prouve RIEN ; un
+        enchainement `git tag -s ... && git push ...` le publierait en
+        silence, puisque le && ne voit qu'un succes. Le message disait
+        « sa signature n'a pas ete verifiee ICI », ce qui se lit « je n'ai
+        pas pu verifier » -- la cause la moins grave des deux."""
+        sortie = self._verdict_du_tag(self.NON_SIGNE)
+        self.assertIn("N'EST PAS SIGNE", sortie,
+                      "un tag depourvu de signature n'est pas nomme comme "
+                      "tel : %s" % sortie.strip())
+        self.assertIn("\U0001f534", sortie,
+                      "un tag qui ne prouve rien doit etre ROUGE, pas jaune : "
+                      "%s" % sortie.strip())
+
+    def test_un_tag_SIGNE_mais_invalide_n_est_PAS_dit_non_signe(self):
+        """TEMOIN, et c'est lui qui compte : sans lui, un message qui
+        crierait « N'EST PAS SIGNE » a chaque echec de verification
+        passerait le test ci-dessus.
+
+        Les deux causes ne se reparent pas pareil. Un fichier de signataires
+        autorises incomplet -- le cas reel de ce depot, ou allowed_signers ne
+        connait qu'UNE adresse -- se corrige en une ligne. Un tag non signe
+        doit etre refait."""
+        sortie = self._verdict_du_tag(self.SIGNE_MAIS_FAUX)
+        self.assertNotIn("N'EST PAS SIGNE", sortie,
+                         "un tag qui PORTE une signature est declare non "
+                         "signe : la reparation annoncee est la mauvaise. %s"
+                         % sortie.strip())
+        self.assertIn("signature", sortie.lower())
+
     def test_il_nomme_les_cinq_points_a_verifier(self):
         import subprocess
         sortie = subprocess.run([sys.executable, str(self.SCRIPT)],
