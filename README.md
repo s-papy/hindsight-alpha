@@ -303,6 +303,8 @@ paper order, reading real bars — needs that network access.
 
 ## Setup (run once, in a terminal)
 
+**Python 3.9 or newer.** That is the version the agent actually runs on (3.9.6 on the operator's machine), and CI verifies BOTH ends — 3.9 and the latest 3.x — so this line is checked, not promised. Before 28/08 the repo declared no minimum anywhere and CI tested only the newest, which meant "works on 3.9" rested entirely on one machine nobody else can see.
+
 ```bash
 # 1. Install the Alpaca CLI (not a pip package)
 brew install alpacahq/tap/cli          # macOS/Linux

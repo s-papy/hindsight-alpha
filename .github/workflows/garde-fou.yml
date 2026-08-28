@@ -48,6 +48,23 @@ on:
 jobs:
   verifier:
     runs-on: ubuntu-latest
+    strategy:
+      # AJOUTÉ le 28/08/2026. La CI ne testait que `3.x`, c'est-à-dire la
+      # version la PLUS RÉCENTE. Or la machine qui fait tourner l'agent est en
+      # Python 3.9.6 (mesuré). Résultat : « ça marche en 3.9 » n'était vérifié
+      # que par la machine de l'opérateur, et « ça marche sur la dernière »
+      # que par la CI — aucune des deux ne vérifiait l'autre, et un juge qui
+      # clone utilise la sienne, qui peut être ni l'une ni l'autre.
+      #
+      # Le dossier ne déclarait AUCUNE version minimale : ni le README, ni
+      # requirements.txt, ni ce fichier. Tester les deux bornes transforme une
+      # hypothèse en affirmation vérifiable, ce qui est tout le propos ici.
+      #
+      # `fail-fast: false` pour voir les DEUX résultats : si seule 3.9 casse,
+      # l'information utile est précisément laquelle.
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.x"]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -62,7 +79,7 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.x"
+          python-version: ${{ matrix.python-version }}
 
       # Les tests d'abord : ils couvrent la chaine de sortie et le
       # disjoncteur, c'est-a-dire les seuls mecanismes qui protegent une

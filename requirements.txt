@@ -1,3 +1,12 @@
+# Python 3.9 minimum -- la version de la machine qui fait tourner l'agent
+# (3.9.6, mesuree). Ajoute le 28/08/2026 : le dossier ne declarait AUCUNE
+# version minimale, ni ici, ni dans le README, ni dans la CI -- qui ne
+# testait que « 3.x », la plus recente. La CI teste desormais les DEUX
+# bornes, donc cette ligne est verifiee et non promise.
+#
+# La syntaxe passe aussi en 3.8 (verifie par ast.parse feature_version),
+# mais rien ne l'exerce a l'execution : on n'annonce que ce qui tourne.
+
 python-dotenv>=1.0.0
 
 # The Alpaca CLI itself is NOT a pip package -- install it separately:
