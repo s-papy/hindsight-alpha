@@ -3031,6 +3031,68 @@ class TestBasculeDeCompte(BaseExit):
                          "une sortie comptée sur l'ancien compte pourrait faire "
                          "prendre une vraie perte du nouveau pour un doublon")
 
+    def test_une_equite_ILLISIBLE_ne_devient_pas_une_ligne_de_base(self):
+        """Le verrou hebdomadaire pouvait être désactivé DÉFINITIVEMENT.
+
+        Reproduit de bout en bout le 28/08/2026, premier soir de la semaine
+        live :
+
+          1. bascule de compte + équité illisible — `_record_exit_outcome`
+             passe `equity or 0.0`, donc 0.0 -> starting_equity = 0.0 ;
+          2. un passage NORMAL ensuite, équité parfaitement lisible à
+             101 000 $, ne le répare PAS : la re-calibration ne se déclenche
+             que si le compte change ou si le champ MANQUE, or 0.0 est
+             présent ;
+          3. `drawdown = (starting - equity) / starting if starting else 0`
+             rend alors 0 % même à 50 000 $ d'équité — le verrou de perte
+             hebdomadaire ne se déclenche PLUS JAMAIS.
+
+        `check_gates()` refuse déjà une équité <= 0 ou non finie et n'appelle
+        donc jamais cette fonction avec un chiffre douteux. Le chemin des
+        SORTIES, lui, ne validait rien — et c'est celui qui s'exécute toutes
+        les 15 minutes.
+        """
+        for mauvaise in (0.0, -1.0, float("nan"), float("inf"), None, "abc", True):
+            with self.subTest(equite=mauvaise):
+                etat = risk_gates._record_starting_equity(
+                    mauvaise, self._etat_sale(), self.NOUVEAU)
+                self.assertNotIn(
+                    "starting_equity", etat,
+                    "%r a été enregistré comme ligne de base : un drawdown "
+                    "calculé contre elle sera faux, et contre zéro il vaudra "
+                    "toujours 0 %%, ce qui désactive le verrou pour de bon"
+                    % (mauvaise,))
+                self.assertEqual(etat["account_id"], self.NOUVEAU,
+                                 "la bascule elle-même doit avoir lieu : "
+                                 "seule la ligne de base est refusée")
+                self.assertFalse(etat["locked"])
+
+    def test_le_champ_ABSENT_se_repare_au_passage_suivant(self):
+        """TÉMOIN. Refuser d'écrire ne sert à rien si personne ne répare.
+
+        C'est la règle qui existait déjà qu'on laisse jouer : « starting_equity
+        manquant » déclenche une re-calibration au prochain passage — avec,
+        cette fois, une équité vérifiée par check_gates."""
+        etat = risk_gates._record_starting_equity(0.0, self._etat_sale(), self.NOUVEAU)
+        self.assertNotIn("starting_equity", etat)
+        repare = risk_gates._record_starting_equity(101000.0, etat, self.NOUVEAU)
+        self.assertEqual(repare["starting_equity"], 101000.0,
+                         "le champ absent n'a pas été reposé : la ligne de "
+                         "base ne reviendrait jamais")
+        drawdown = (repare["starting_equity"] - 50000.0) / repare["starting_equity"]
+        self.assertGreaterEqual(
+            drawdown, risk_gates.WEEKLY_LOSS_LOCK_PCT,
+            "le verrou hebdomadaire ne se déclenche toujours pas après "
+            "réparation")
+
+    def test_une_equite_VALIDE_est_toujours_enregistree(self):
+        """TÉMOIN, et c'est lui qui compte le plus : sans lui, une fonction
+        qui refuserait TOUTE ligne de base passerait le premier test — et
+        aucun verrou ne pourrait plus jamais se poser."""
+        etat = risk_gates._record_starting_equity(
+            120000.0, self._etat_sale(), self.NOUVEAU)
+        self.assertEqual(etat["starting_equity"], 120000.0)
+
     def test_l_etat_apres_bascule_de_compte_est_epingle(self):
         """LE GARDE MÉCANIQUE. Deux champs ont déjà été oubliés dans la liste
         de remise à zéro, à deux dates différentes, chacun ajouté après coup.

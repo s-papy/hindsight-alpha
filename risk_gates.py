@@ -455,7 +455,47 @@ def _record_starting_equity(equity: float, state: dict, account_id: Optional[str
                 f"already-counted-exits memory."
             )
         state["account_id"] = account_id
-        state["starting_equity"] = equity
+        # NE JAMAIS ENREGISTRER UNE LIGNE DE BASE QU'ON NE PEUT PAS CROIRE.
+        # Ajoute le 28/08/2026, premier soir de la semaine live, apres
+        # reproduction complete :
+        #
+        #   1. bascule de compte + equite illisible -> _record_exit_outcome
+        #      passe `equity or 0.0`, donc 0.0 -> starting_equity = 0.0
+        #   2. un passage NORMAL ensuite, equite parfaitement lisible a
+        #      101 000 $, ne le repare PAS : la re-calibration ne se declenche
+        #      que si le compte change ou si le champ MANQUE, or 0.0 est present
+        #   3. `drawdown_pct = (starting - equity) / starting if starting else 0`
+        #      rend alors 0 % meme a 50 000 $ d'equite -> le verrou de perte
+        #      hebdomadaire ne se declenche PLUS JAMAIS
+        #
+        # Un filet de securite desactive en silence, definitivement, et dont le
+        # declencheur est exactement la bascule de compte prevue ce soir.
+        #
+        # check_gates() refuse deja une equite <= 0 ou non finie (ligne ~1424)
+        # et n'appelle donc jamais cette fonction avec un chiffre douteux. Le
+        # chemin des SORTIES, lui, ne validait rien.
+        #
+        # En laissant le champ ABSENT plutot qu'a zero, on rend la main a la
+        # regle qui existe deja : « starting_equity manquant » declenche une
+        # re-calibration au prochain passage de check_gates, avec une equite
+        # cette fois verifiee. On ne change AUCUN seuil ; on refuse seulement
+        # d'ecrire une mesure qu'on n'a pas.
+        equite_sure = (isinstance(equity, (int, float))
+                       and not isinstance(equity, bool)
+                       and math.isfinite(equity) and equity > 0)
+        if equite_sure:
+            state["starting_equity"] = equity
+        else:
+            state.pop("starting_equity", None)
+            print(
+                "  WARNING: refusing to record %r as the starting equity for "
+                "account %r -- it is not a usable figure. No baseline is "
+                "written, so the next run that reads a clean equity will set "
+                "one. Recording zero here would leave the weekly loss lock "
+                "permanently disabled, since a drawdown against a zero "
+                "baseline always computes as 0%%." % (equity, account_id),
+                flush=True,
+            )
         state["locked"] = False
         state["lock_reason"] = None
         state["traded_today"] = {"date": _today(), "symbols": []}
