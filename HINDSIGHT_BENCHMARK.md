@@ -91,6 +91,23 @@ Le README affirme, sous le titre *« Honest fact worth surfacing »*, que `momen
 
 **« Momentum est plus propre sur le test de fuite » est donc un tirage à pile ou face présenté comme un constat.** Le fait mérite d'être publié ; la comparaison ne mérite pas qu'on agisse dessus. Lire un signal dans un écart qui tient dans le bruit est exactement l'erreur que ce projet existe pour attraper — et il l'avait commise dans son propre README. C'est corrigé là-bas, avec ces chiffres.
 
+## Ce que couterait un seuil non nul
+
+Le jeu D montre qu'avec le seuil livré (**0.0**) rien ne protège contre une sélection sans edge. Le dire sans chiffrer l'alternative laisserait la décision en l'air.
+
+| seuil | jeu D — certifie du BRUIT | jeu A — refuse un VRAI edge |
+|---|---|---|
+| 0.00 ← livré | 52.0 % | 30.2 % |
+| 0.10 | 49.4 % | 30.2 % |
+| 0.20 | 43.3 % | 30.2 % |
+| 0.30 | 34.6 % | 30.2 % |
+| 0.40 | 24.1 % | 30.4 % |
+| 0.60 | 8.2 % | 33.3 % |
+
+**Jusqu'à 0.30 le coût ne bouge pas** — 30.2 % dans les deux cas — pendant que le bruit certifié tombe de 52.0 % à 34.6 %. Ce n'est pas un arbitrage à cet endroit : c'est un gain sans contrepartie mesurable. L'arbitrage commence vers 0.60, où 8 % de bruit se paient 3.1 points de vrais edges refusés.
+
+*Mesuré sur le modèle synthétique de ce banc (σ=0.30, ρ=0.70), pas sur la vraie distribution des Sharpe. Et changer ce seuil invaliderait les backtests publiés, qui emploient 0.0 : c'est une décision de méthode, pas un réglage.*
+
 ## Ce que ce banc ne démontre pas
 
 - La vérité-terrain est construite **au niveau des scores**, pas des prix. C'est le contrat réel de `check_selection_leakage`, et c'est le seul moyen de contrôler exactement la taille d'effet — mais cela ne démontre pas que le pipeline de prix produit ces situations-là.

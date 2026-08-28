@@ -190,6 +190,39 @@ def jeu_c() -> List[Tuple[float, Counter]]:
     return sortie
 
 
+def balayage_du_seuil():
+    """Que couterait un seuil de Sharpe NON NUL ?
+
+    AJOUTE le 28/08/2026, quelques heures avant le gel des parametres. Le jeu
+    D montre qu avec le seuil livre (0.0) rien ne protege contre une selection
+    sans edge. Dire cela sans chiffrer l alternative laisse la decision en
+    l air : on mesure donc les DEUX colonnes.
+
+      . jeu D — part de selections SANS AUCUN EDGE certifiees `agrees`.
+        C est ce qu on veut voir baisser.
+      . jeu A — part de VRAIS edges refuses. C est ce que ca coute, et il ne
+        faut pas le laisser exploser.
+
+    Le resultat est inhabituel et vaut d etre dit : jusqu a 0.30 le cout ne
+    bouge PAS (29.8 % dans les deux cas), pendant que le bruit certifie tombe
+    de 52.7 % a 35.6 %. Ce n est pas un arbitrage a cet endroit, c est un gain
+    sans contrepartie mesurable. L arbitrage commence vers 0.60.
+    """
+    edge = {10: 0.35, 20: 0.45, 30: 0.85, 60: 0.40, 90: 0.30}
+    nul = {c: 0.0 for c in CANDIDATS}
+    global SEUIL
+    ancien, sortie = SEUIL, []
+    try:
+        for seuil in (0.0, 0.10, 0.20, 0.30, 0.40, 0.60):
+            SEUIL = seuil
+            d = _campagne("D", nul, {}, GRAINE + 3)
+            a = _campagne("A", edge, {}, GRAINE + 1)
+            sortie.append((seuil, _pct(d, "agrees"), 100.0 - _pct(a, "agrees")))
+    finally:
+        SEUIL = ancien
+    return sortie
+
+
 def jeu_a_balaye() -> List[Tuple[float, Counter]]:
     """A balaye -- le taux de fausse alerte en fonction de l'ECART entre le
     meilleur candidat et son suivant.
@@ -301,6 +334,7 @@ def construire_rapport() -> str:
     d = jeu_d()
     ab = jeu_a_balaye()
     cmp4 = comparaison_a_quatre_symboles()
+    seuils = balayage_du_seuil()
     d2 = jeu_d_sans_seuil()
 
     faux_positifs = 100.0 - _pct(a, "agrees")
@@ -468,6 +502,31 @@ def construire_rapport() -> str:
              "exactement l'erreur que ce projet existe pour attraper — et il "
              "l'avait commise dans son propre README. C'est corrigé là-bas, "
              "avec ces chiffres.")
+    L.append("")
+    L.append("## Ce que couterait un seuil non nul")
+    L.append("")
+    L.append("Le jeu D montre qu'avec le seuil livré (**0.0**) rien ne protège "
+             "contre une sélection sans edge. Le dire sans chiffrer "
+             "l'alternative laisserait la décision en l'air.")
+    L.append("")
+    L.append("| seuil | jeu D — certifie du BRUIT | jeu A — refuse un VRAI edge |")
+    L.append("|---|---|---|")
+    for seuil, bruit, cout in seuils:
+        marque = " ← livré" if seuil == 0.0 else ""
+        L.append("| %.2f%s | %.1f %% | %.1f %% |" % (seuil, marque, bruit, cout))
+    L.append("")
+    L.append("**Jusqu'à 0.30 le coût ne bouge pas** — %.1f %% dans les deux "
+             "cas — pendant que le bruit certifié tombe de %.1f %% à %.1f %%. "
+             "Ce n'est pas un arbitrage à cet endroit : c'est un gain sans "
+             "contrepartie mesurable. L'arbitrage commence vers 0.60, où 8 %% "
+             "de bruit se paient %.1f points de vrais edges refusés."
+             % (seuils[0][2], seuils[0][1], seuils[3][1],
+                seuils[5][2] - seuils[0][2]))
+    L.append("")
+    L.append("*Mesuré sur le modèle synthétique de ce banc (σ=%.2f, ρ=%.2f), "
+             "pas sur la vraie distribution des Sharpe. Et changer ce seuil "
+             "invaliderait les backtests publiés, qui emploient 0.0 : c'est "
+             "une décision de méthode, pas un réglage.*" % (SIGMA, RHO))
     L.append("")
     L.append("## Ce que ce banc ne démontre pas")
     L.append("")
