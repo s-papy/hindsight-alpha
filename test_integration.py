@@ -4596,5 +4596,68 @@ class TestLeDocumentDeReglesNeMentPas(unittest.TestCase):
                          % ", ".join(perimables))
 
 
+class TestLaPublicationRefuseLeMauvaisCompte(unittest.TestCase):
+    """Le troisième acteur du garde de compte, et celui qu'un JUGE regarde.
+
+    `check_gates` refuse une entrée sur un compte non déclaré, `manage_exits`
+    refuse une clôture. `publish_dashboard`, lui, publiait — `account_number`,
+    les positions et l'équité — sur une page publique, toutes les 30 minutes,
+    sans personne devant.
+
+    Sur un mauvais compte il republiait donc en silence les données d'un
+    AUTRE compte, écrasant la preuve du hackathon. Un juge comparant le numéro
+    déclaré dans la soumission à celui affiché verrait un désaccord sans
+    explication, sur la seule chose que ce projet lui demande de croire.
+
+    On lève plutôt que de publier : la page porte déjà une bannière qui
+    vieillit (« snapshot from X ago »). Une page périmée est honnête ; une
+    page qui affirme le mauvais compte ne l'est pas."""
+
+    def _publier(self, numero_reel, attendu):
+        from unittest import mock
+        import publish_dashboard
+        with mock.patch.object(publish_dashboard.config, "require_credentials"), \
+             mock.patch.object(publish_dashboard.config, "ACCOUNT_ID", attendu), \
+             mock.patch.object(publish_dashboard.alpaca_cli, "get_account",
+                               return_value={"account_number": numero_reel,
+                                             "status": "ACTIVE"}), \
+             mock.patch.object(publish_dashboard.alpaca_cli, "list_positions",
+                               return_value=[]), \
+             mock.patch.object(publish_dashboard.decision_log, "read_log",
+                               return_value=[]):
+            return publish_dashboard.build_snapshot()
+
+    def test_un_autre_compte_n_est_pas_publie(self):
+        with self.assertRaises(RuntimeError) as ctx:
+            self._publier("PAAUTRE", "PAFAUXCOMPTE")
+        message = str(ctx.exception)
+        self.assertIn("refusing to publish", message)
+        self.assertIn("PAAUTRE", message)
+        self.assertIn("PAFAUXCOMPTE", message)
+
+    def test_un_numero_illisible_n_est_pas_publie_non_plus(self):
+        """Ne pas pouvoir prouver quel compte on décrit n'est pas « c'est le
+        bon » — même règle que sur les deux autres chemins."""
+        for absent in (None, "", "   "):
+            with self.subTest(valeur=absent):
+                with self.assertRaises(RuntimeError) as ctx:
+                    self._publier(absent, "PAFAUXCOMPTE")
+                self.assertIn("cannot prove", str(ctx.exception))
+
+    def test_le_bon_compte_est_publie_normalement(self):
+        """TÉMOIN : sans lui, refuser toute publication passerait les deux
+        tests ci-dessus et figerait la page pour toute la semaine."""
+        instantane = self._publier("PAFAUXCOMPTE", "PAFAUXCOMPTE")
+        self.assertEqual(instantane["account"]["account_number"],
+                         "PAFAUXCOMPTE")
+
+    def test_sans_compte_declare_la_publication_a_lieu(self):
+        """SECOND TÉMOIN : rien à comparer ne doit pas figer la page — même
+        choix que sur les entrées et les sorties."""
+        instantane = self._publier("PAQUELCONQUE", None)
+        self.assertEqual(instantane["account"]["account_number"],
+                         "PAQUELCONQUE")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

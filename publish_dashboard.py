@@ -108,6 +108,42 @@ def _position_publiable(position: dict) -> dict:
 def build_snapshot() -> dict:
     config.require_credentials()
     account = alpaca_cli.get_account()
+
+    # AJOUTE le 28/08/2026, en completant le garde de compte pose le meme
+    # matin dans check_gates (entrees) puis manage_exits (sorties). Ce
+    # fichier-ci est le troisieme acteur, et c'est celui qu'un JUGE regarde :
+    # il publie `account_number`, les positions et l'equite sur une page
+    # publique, toutes les 30 minutes, sans personne devant.
+    #
+    # Sur un mauvais compte, il republiait donc en silence le numero, les
+    # positions et l'equite d'un AUTRE compte -- ecrasant la preuve du
+    # hackathon. Un juge qui compare le numero declare dans la soumission a
+    # celui affiche sur la page verrait un desaccord sans explication, sur la
+    # seule chose que ce projet lui demande de croire.
+    #
+    # On LEVE plutot que de publier. La page porte deja une banniere qui
+    # vieillit et qui dit « snapshot from X ago » : une page perimee est
+    # honnete, une page qui affirme le mauvais compte ne l'est pas. Sous
+    # launchd, l'echec part dans le log declare par le plist.
+    attendu = getattr(config, "ACCOUNT_ID", None)
+    if attendu:
+        reel = str(account.get("account_number") or "").strip()
+        if not reel:
+            raise RuntimeError(
+                "refusing to publish: the account response carried no "
+                "account_number, so this snapshot cannot prove which account "
+                "it describes (declared: %r)." % (attendu,))
+        if reel != str(attendu).strip():
+            raise RuntimeError(
+                "refusing to publish: this run is on account %r but the "
+                "configuration declares %r. Publishing would overwrite the "
+                "public dashboard with another account's positions and "
+                "equity." % (reel, str(attendu).strip()))
+    else:
+        print("  WARNING: no ALPACA_ACCOUNT_ID declared -- this snapshot is "
+              "published without any check that it describes the intended "
+              "account.", flush=True)
+
     positions = alpaca_cli.list_positions()
     recent = decision_log.read_log(limit=30)
     monitor_status = _read_monitor_status()
