@@ -197,6 +197,32 @@
     border: 1px solid var(--border);
     color: var(--muted);
   }
+  /* COMMENT LIRE CETTE PAGE. Ajoute le 28/08/2026 au soir : la page passait
+     des bandeaux aux chiffres du compte, sans jamais dire ce que « hindsight
+     guard » veut dire. Un juge qui n'a pas lu le README voyait des nombres
+     sans mecanisme. Trois etapes, une ligne chacune. */
+  .lecture {
+    max-width: 960px;
+    margin: 0 auto 20px;
+    padding: 14px 18px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: rgba(139,146,165,0.06);
+    font-size: 13px;
+    line-height: 1.55;
+  }
+  .lecture h2 {
+    margin: 0 0 8px;
+    font-size: 12px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .lecture ol { margin: 0; padding-left: 20px; }
+  .lecture li { margin: 3px 0; }
+  .lecture .cle { color: var(--text); font-weight: 600; }
+  .lecture .note { margin: 9px 0 0; color: var(--muted); }
+
   .leak-stat {
     display: none;
     max-width: 960px;
@@ -225,6 +251,19 @@
     Paper trading only — zero real funds at risk.
   </p>
 </header>
+
+<section class="lecture">
+  <h2>How to read this page</h2>
+  <ol>
+    <li>For each symbol, the agent scores 5 volatility windows <span class="cle">twice</span> — once on the full price history, once on only what was knowable <em>yesterday</em>.</li>
+    <li>If the two winners <span class="cle">disagree</span>, the choice depended on data the agent could not have had, so it <span class="cle">refuses that symbol</span>. Look for 🛡️ in the verdicts below — XLK earns it on every run.</li>
+    <li>Only symbols that pass reach the risk gates, and only then can an order be placed.</li>
+  </ol>
+  <p class="note">Every run is here, refusals included — this is the log, not a highlight reel.
+  The result worth judging is the refusal, not the P&amp;L: five sessions and a handful of trades
+  cannot separate a strategy from a coin flip, and <a href="https://github.com/s-papy/hindsight-alpha/blob/main/LIVE_WEEK.md" target="_blank" rel="noopener">LIVE_WEEK.md</a>
+  said so before the results were known.</p>
+</section>
 
 <div id="leak-stat" class="leak-stat"></div>
 <div id="error-banner"></div>

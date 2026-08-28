@@ -23,6 +23,22 @@ says so itself when it goes stale.
 | **Risk** | paper trading only, enforced in code; per-trade, total-exposure, sector, drawdown and consecutive-loss caps |
 | **Proof it runs** | real paper order filled and closed; 500+ offline regression tests; CI green on every push |
 
+### The mechanism, in one picture
+
+```mermaid
+flowchart LR
+    B["Daily bars<br/>(657 real ones)"] --> F["Score 5 volatility windows<br/><b>on the FULL history</b>"]
+    B --> I["Score the same 5<br/><b>on what was knowable YESTERDAY</b>"]
+    F --> C{"Same winner<br/>both times?"}
+    I --> C
+    C -- "no — the choice depended<br/>on data it could not have had" --> R["<b>REFUSE this symbol</b><br/>XLK, on every run"]
+    C -- yes --> G["Risk gates<br/>size, sector, drawdown, losing streak"]
+    G --> T["Paper order<br/>SPY, GLD, XLV"]
+```
+
+Every box runs **before every decision**, not once at design time. The refusal
+on the left is the result worth judging — not the P&L on the right.
+
 ### TL;DR
 
 For each symbol, the agent sweeps 5 volatility-window candidates and scores
@@ -51,6 +67,7 @@ Paper trading only. Zero real funds at risk.
 | [Files](#files) | what each module is for |
 | [Hosted dashboard](#hosted-dashboard) | how the public page is built without exposing a key |
 | [Status](#status) | what is proven, what is running, what is left |
+| [LIVE_WEEK.md](LIVE_WEEK.md) | **what will be reported on 04/09 — decided before the results were known** |
 
 ## Backtest, at a glance
 
