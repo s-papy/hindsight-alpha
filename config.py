@@ -53,6 +53,23 @@ def _signaler_precedence(chemin) -> list:
     try:
         from dotenv import dotenv_values
     except ImportError:
+        # LE DERNIER REPLI MUET DE CE DEPOT, corrige le 28/08/2026 au soir --
+        # trouve en balayant TOUS les `except ImportError` apres l'echec de CI,
+        # plutot qu'en s'arretant au cas qui avait echoue.
+        #
+        # `[]` veut dire « aucune divergence ». La verite est « je n'ai pas pu
+        # regarder ». C'est exactement ce qui a rendu l'echec de CI illisible :
+        # le test affirmait « la divergence n'est pas signalee » alors que rien
+        # ne pouvait la signaler.
+        #
+        # Le chemin NORMAL ne passe jamais ici : quand dotenv manque, l'import
+        # de `load_dotenv` echoue d'abord et l'avertissement du bas de ce
+        # fichier s'affiche. Cette branche ne sert qu'a un appelant direct --
+        # un test, un script tiers -- et elle ne doit pas lui mentir non plus.
+        print("WARNING: python-dotenv is not installed, so the precedence "
+              "between the environment and the config file was NOT checked. "
+              "This is not 'no conflict found'.",
+              file=sys.stderr, flush=True)
         return []
     try:
         du_fichier = dotenv_values(chemin)

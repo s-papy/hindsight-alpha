@@ -2544,6 +2544,38 @@ class TestPrecedenceDesIdentifiants(unittest.TestCase):
         self.assertIn("unset", texte,
                       "l'avertissement ne dit pas quoi faire")
 
+    def test_sans_dotenv_le_controle_DIT_qu_il_n_a_pas_regarde(self):
+        """`[]` veut dire « aucune divergence ». Sans dotenv, la vérité est
+        « je n'ai pas pu regarder ».
+
+        C'est exactement ce qui a rendu l'échec de CI illisible pendant
+        quatre exécutions : le test affirmait « la divergence n'est pas
+        signalée » alors que rien ne pouvait la signaler. Trouvé en balayant
+        TOUS les `except ImportError` du dépôt après cet échec, plutôt qu'en
+        s'arrêtant au cas qui avait échoué — c'était le dernier repli muet."""
+        from unittest import mock
+        flux = io.StringIO()
+        with mock.patch.dict(sys.modules, {"dotenv": None}):
+            with contextlib.redirect_stderr(flux):
+                rendu = config._signaler_precedence("/chemin/inexistant")
+        self.assertEqual(rendu, [])
+        self.assertIn(
+            "NOT checked", flux.getvalue(),
+            "sans dotenv, le contrôle rend une liste vide SANS dire qu'il n'a "
+            "rien pu vérifier : c'est « aucun conflit » qui se lit, et c'est "
+            "faux")
+
+    def test_avec_dotenv_aucun_avertissement_de_ce_genre(self):
+        """TÉMOIN. Sans lui, un avertissement affiché à CHAQUE appel
+        satisferait le test ci-dessus — et le vrai message de divergence
+        serait noyé dans un bruit permanent."""
+        if not _DOTENV_PRESENT:
+            self.skipTest("python-dotenv absent : ce témoin n'a rien à vérifier")
+        div, texte = self._appeler("ALPACA_API_KEY=X\n", {})
+        self.assertNotIn("NOT checked", texte,
+                         "le contrôle se plaint de ne pas avoir regardé alors "
+                         "qu'il vient de le faire")
+
     def test_l_avertissement_ne_divulgue_JAMAIS_les_valeurs(self):
         """L'assertion la plus importante des quatre. Un avertissement qui
         imprime ce qu'il protège serait pire que son absence — et il partirait
