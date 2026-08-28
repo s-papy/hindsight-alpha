@@ -4877,5 +4877,94 @@ class TestUnRefusDePublierNeGelePasLHistorique(unittest.TestCase):
         self.assertEqual(poussees, [])
 
 
+class TestLesJobsTombentDansLaFenetreDeVeille(unittest.TestCase):
+    """`controle_reveil_programme` vérifiait que le Mac se RÉVEILLE avant la
+    séance, et citait même la fenêtre de veille (« 15:20 à 22:05 »). Personne
+    n'avait vérifié que les jobs tombent DEDANS.
+
+    Deux mesures, deux défauts réels :
+
+      · la dernière publication du jour était à 22:05:00 et le verrou
+        `caffeinate -t 24300` expirait à 22:05:00 — le verrou se relâchait à
+        la seconde où la dernière preuve de la séance devait s'écrire ;
+      · le moniteur de sorties commençait à 15:00, avant le réveil `pmset`
+        de 15:15, et refaisait un tick à 15:15 pile. Deux ticks avant
+        l'ouverture du marché (15:30), donc sans effet utile — mais capables
+        d'échouer réseau et de peindre la bannière en rouge. C'est
+        exactement la panne DarkWake déjà vécue (11 échecs consécutifs)."""
+
+    RACINE = Path(__file__).parent / "launchagents"
+
+    def _plists(self):
+        import plistlib
+        for chemin in sorted(self.RACINE.glob("*.plist")):
+            with open(chemin, "rb") as fh:
+                yield chemin.name, plistlib.load(fh)
+
+    def _fenetre(self):
+        for nom, p in self._plists():
+            args = p.get("ProgramArguments", [])
+            if "caffeinate" not in " ".join(args):
+                continue
+            duree = next(int(args[i + 1]) for i, a in enumerate(args) if a == "-t")
+            iv = p["StartCalendarInterval"]
+            if isinstance(iv, dict):
+                iv = [iv]
+            debut = min(e.get("Hour", 0) * 60 + e.get("Minute", 0) for e in iv)
+            return debut, debut + duree // 60
+        self.fail("aucun agent de veille trouvé")
+
+    def test_chaque_job_est_strictement_dans_la_fenetre(self):
+        debut, fin = self._fenetre()
+        for nom, p in self._plists():
+            if "caffeinate" in " ".join(p.get("ProgramArguments", [])):
+                continue
+            iv = p.get("StartCalendarInterval", [])
+            if isinstance(iv, dict):
+                iv = [iv]
+            if not iv:
+                continue
+            minutes = [e.get("Hour", 0) * 60 + e.get("Minute", 0) for e in iv]
+            with self.subTest(job=nom):
+                self.assertGreaterEqual(
+                    min(minutes), debut,
+                    "%s démarre avant que la machine soit tenue éveillée" % nom)
+                self.assertLess(
+                    max(minutes), fin,
+                    "%s a un tick au bord exact ou hors de la fenêtre : le "
+                    "verrou de veille peut se relâcher à l'instant où il "
+                    "doit s'exécuter" % nom)
+
+    def test_la_fenetre_couvre_bien_la_seance(self):
+        """TÉMOIN : sans lui, réduire la fenêtre à une minute rendrait le test
+        ci-dessus trivialement vrai en vidant tous les jobs."""
+        debut, fin = self._fenetre()
+        self.assertLessEqual(debut, 15 * 60 + 30, "la veille commence après "
+                                                  "l'ouverture du marché")
+        self.assertGreaterEqual(fin, 22 * 60, "la veille s'arrête avant la "
+                                              "clôture du marché")
+
+    def test_le_moniteur_couvre_toute_la_seance(self):
+        """SECOND TÉMOIN, et il est nécessaire : retirer des ticks pour faire
+        passer le premier test ne doit pas laisser de trou pendant la séance.
+        Ici on vérifie qu'aucun intervalle ne dépasse 15 minutes entre
+        l'ouverture et la clôture."""
+        import plistlib
+        with open(self.RACINE / "com.hindsightalpha.monitor-exits.plist",
+                  "rb") as fh:
+            iv = plistlib.load(fh)["StartCalendarInterval"]
+        minutes = sorted({e.get("Hour", 0) * 60 + e.get("Minute", 0)
+                          for e in iv})
+        seance = [m for m in minutes if 15 * 60 + 30 <= m <= 22 * 60]
+        self.assertTrue(seance, "aucun tick pendant la séance")
+        self.assertEqual(seance[0], 15 * 60 + 30,
+                         "le premier tick n'est pas à l'ouverture du marché")
+        trous = [(a, b) for a, b in zip(seance, seance[1:]) if b - a > 15]
+        self.assertEqual(trous, [],
+                         "trou(s) de plus de 15 min pendant la séance : %s"
+                         % ["%02d:%02d->%02d:%02d" % (a//60, a%60, b//60, b%60)
+                            for a, b in trous])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -2391,6 +2391,85 @@ def _ecrire_gel(chemin: str, valeurs: dict) -> None:
         fh.write("\n")
 
 
+def controle_jobs_dans_la_fenetre_de_veille() -> None:
+    """Chaque job programme tombe-t-il DANS la fenetre ou le Mac reste eveille ?
+
+    AJOUTE le 28/08/2026. `controle_reveil_programme` verifie que la machine
+    se REVEILLE avant la seance, et il cite meme la fenetre de veille --
+    « 15:20 a 22:05 ». Mais personne n'avait verifie que les jobs tombent
+    dedans.
+
+    Mesure : la derniere publication du jour etait programmee a 22:05:00, et
+    le verrou `caffeinate -t 24300` expirait a 22:05:00. Le verrou de veille
+    se relachait a la SECONDE ou la derniere preuve de la seance devait
+    s'ecrire.
+
+    Le systeme ne s'endort pas instantanement -- le compteur d'inactivite
+    repart ensuite -- donc ce job passait PROBABLEMENT. Se reposer sur ce
+    probablement est exactement ce que ce depot traque partout ailleurs.
+
+    La fenetre a ete portee a 25200 s (22:20). Ce controle empeche qu'un job
+    ajoute plus tard retombe dehors sans que personne ne s'en apercoive : le
+    calcul est refait a partir des plists eux-memes, jamais d'un chiffre
+    recopie ici.
+
+    ALERTE et non blocage : c'est une question de planification locale, pas un
+    defaut du dossier livre.
+    """
+    import plistlib
+    dossier = os.path.join(RACINE, "launchagents")
+    if not os.path.isdir(dossier):
+        return
+    fenetre, jobs = None, []
+    for nom in sorted(os.listdir(dossier)):
+        if not nom.endswith(".plist"):
+            continue
+        try:
+            with open(os.path.join(dossier, nom), "rb") as fh:
+                p = plistlib.load(fh)
+        except Exception as e:
+            alerte(nom, "illisible (%s) — la couverture de veille n'a PAS pu "
+                        "etre verifiee" % type(e).__name__)
+            continue
+        args = p.get("ProgramArguments", [])
+        intervalles = p.get("StartCalendarInterval", [])
+        if isinstance(intervalles, dict):
+            intervalles = [intervalles]
+        minutes = sorted((d.get("Hour", 0) * 60 + d.get("Minute", 0))
+                         for d in intervalles)
+        if not minutes:
+            continue
+        if "caffeinate" in " ".join(args):
+            duree = None
+            for i, a in enumerate(args):
+                if a == "-t" and i + 1 < len(args):
+                    try:
+                        duree = int(args[i + 1])
+                    except ValueError:
+                        duree = None
+            if duree is None:
+                alerte(nom, "caffeinate sans duree `-t` lisible — impossible de "
+                            "savoir jusqu'a quand la machine reste eveillee")
+                return
+            fenetre = (minutes[0], minutes[0] + duree // 60)
+        else:
+            jobs.append((nom, minutes[0], minutes[-1]))
+
+    if fenetre is None:
+        return  # pas d'agent de veille : rien a comparer
+
+    debut, fin = fenetre
+    for nom, premier, dernier in jobs:
+        if premier < debut or dernier >= fin:
+            alerte(nom,
+                   "job programme de %02d:%02d a %02d:%02d, hors de la fenetre "
+                   "de veille %02d:%02d-%02d:%02d (ou a son bord exact). Le "
+                   "verrou de veille peut se relacher au moment meme ou ce job "
+                   "doit s'executer."
+                   % (premier // 60, premier % 60, dernier // 60, dernier % 60,
+                      debut // 60, debut % 60, fin // 60, fin % 60))
+
+
 def controle_garde_de_compte_actif() -> None:
     """Les trois gardes de compte protegent-ils vraiment cette machine ?
 
@@ -2606,6 +2685,7 @@ def main() -> int:
         controle_plists_sont_du_xml_valide,
         controle_gel_des_parametres_au_kickoff,
         controle_garde_de_compte_actif,
+        controle_jobs_dans_la_fenetre_de_veille,
         controle_journal,
         controle_env_hackathon_scelle,
         controle_garde_live_trading,

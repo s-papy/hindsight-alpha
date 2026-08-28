@@ -44,12 +44,19 @@
 <plist version="1.0"><dict>
     <key>Label</key><string>com.hindsightalpha.market-hours-awake</string>
 
-    <key>ProgramArguments</key>
+    <!-- Duree portee de 24300 s a 25200 s le 28/08/2026. A 24300 la fenetre
+     se fermait a 22:05:00, l'instant EXACT ou le dernier instantane du
+     jour est programme. Le verrou de veille expirait donc a la seconde
+     ou la derniere preuve de la seance devait s'ecrire. Le systeme ne
+     s'endort pas instantanement, donc le job passait probablement ; se
+     reposer sur ce probablement est precisement ce que ce depot traque
+     ailleurs. 25200 s ferme a 22:20 et laisse 15 minutes de marge. -->
+<key>ProgramArguments</key>
     <array>
         <string>/usr/bin/caffeinate</string>
         <string>-dimu</string>
         <string>-t</string>
-        <string>24300</string>
+        <string>25200</string>
     </array>
 
     <key>StartCalendarInterval</key>
