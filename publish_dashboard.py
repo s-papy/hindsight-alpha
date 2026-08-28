@@ -125,21 +125,12 @@ def build_snapshot() -> dict:
     # vieillit et qui dit « snapshot from X ago » : une page perimee est
     # honnete, une page qui affirme le mauvais compte ne l'est pas. Sous
     # launchd, l'echec part dans le log declare par le plist.
-    attendu = getattr(config, "ACCOUNT_ID", None)
-    if attendu:
-        reel = str(account.get("account_number") or "").strip()
-        if not reel:
-            raise RuntimeError(
-                "refusing to publish: the account response carried no "
-                "account_number, so this snapshot cannot prove which account "
-                "it describes (declared: %r)." % (attendu,))
-        if reel != str(attendu).strip():
-            raise RuntimeError(
-                "refusing to publish: this run is on account %r but the "
-                "configuration declares %r. Publishing would overwrite the "
-                "public dashboard with another account's positions and "
-                "equity." % (reel, str(attendu).strip()))
-    else:
+    refus = config.raison_de_refus_du_compte(account)
+    if refus:
+        raise RuntimeError(
+            "refusing to publish: %s. Publishing would overwrite the public "
+            "dashboard with another account's positions and equity." % refus)
+    if not config.compte_est_declare():
         print("  WARNING: no ALPACA_ACCOUNT_ID declared -- this snapshot is "
               "published without any check that it describes the intended "
               "account.", flush=True)

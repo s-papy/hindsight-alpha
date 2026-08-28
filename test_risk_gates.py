@@ -3265,7 +3265,10 @@ class TestMauvaisCompteRefuseLEntree(unittest.TestCase):
             with self.subTest(valeur=absent):
                 d = self._decider(absent, "PAFAUXCOMPTE")
                 self.assertFalse(d.allowed)
-                self.assertIn("unverified", d.reason)
+                # « cannot prove » depuis l'extraction de la regle dans
+                # config.raison_de_refus_du_compte() : les trois chemins
+                # emploient desormais LA MEME phrase, ce qui est le but.
+                self.assertIn("cannot prove", d.reason)
 
     def test_le_bon_compte_passe_ce_garde(self):
         """TÉMOIN, et il est essentiel : sans lui, refuser TOUT passerait les
@@ -3362,6 +3365,27 @@ class TestMauvaisCompteRefuseLaCloture(unittest.TestCase):
                             for a in actions),
                         "le refus ne dit pas qu'il n'a PAS PU vérifier : %r"
                         % [a.error for a in actions])
+
+    def test_un_numero_present_mais_VIDE_ne_ferme_rien(self):
+        """Lacune trouvée par mutation après l'extraction de la règle
+        partagée : muter « tolère un numéro illisible » faisait tomber les
+        tests des entrées et de la publication, mais PAS ceux des sorties.
+
+        La raison : le seul cas « illisible » testé ici était un
+        `get_account()` qui LÈVE. Un numéro présent mais vide — un champ
+        blanc dans une réponse par ailleurs valide — n'était couvert nulle
+        part sur ce chemin."""
+        for vide in (None, "", "   "):
+            with self.subTest(valeur=vide):
+                actions, fermetures = self._sortir(vide, "PAFAUXCOMPTE")
+                self.assertEqual(fermetures, [],
+                                 "clôture effectuée avec un numéro de compte "
+                                 "vide (%r)" % (vide,))
+                self.assertTrue(any("cannot prove" in (a.error or "")
+                                    for a in actions),
+                                "le refus ne dit pas qu'il ne peut pas "
+                                "prouver le compte : %r"
+                                % [a.error for a in actions])
 
     def test_sur_le_BON_compte_la_cloture_a_bien_lieu(self):
         """TÉMOIN, et c'est le plus important de tous : sans lui, refuser

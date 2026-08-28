@@ -130,6 +130,61 @@ def require_credentials() -> None:
         )
 
 
+def raison_de_refus_du_compte(account: dict) -> "str | None":
+    """La regle de verification du compte, ecrite UNE fois.
+
+    Rend None si l'on peut agir (compte conforme, ou aucun compte declare),
+    sinon la raison du refus -- a prefixer par l'appelant selon ce qu'il
+    refuse d'ailleurs (« no new entry », « refused to close », « refusing to
+    publish »).
+
+    EXTRAITE le 28/08/2026, le jour meme ou elle a ete ecrite TROIS fois :
+    dans check_gates (entrees), manage_exits (sorties) et build_snapshot
+    (publication). Le depot enseigne pourtant, noir sur blanc et deux fois
+    ailleurs, qu'« une regle ecrite deux fois n'est vraie qu'a un seul
+    endroit ». Je l'ai cite en ecrivant la premiere, puis je l'ai enfreint
+    dans l'heure.
+
+    Et elles avaient DEJA diverge, avant meme d'etre relues -- trois
+    normalisations differentes du numero lu :
+
+        check_gates        str(reel).strip() if reel is not None else ""
+        manage_exits       str(... or "").strip()
+        build_snapshot     str(... or "").strip()
+
+    La premiere rendrait "0" la ou les deux autres rendent "" : sans
+    consequence sur un vrai numero Alpaca, mais c'est exactement ainsi que
+    deux copies commencent a repondre differemment.
+
+    TROIS etats, jamais deux -- c'est le coeur de la regle :
+      . declare et DIFFERENT  -> refus ;
+      . declare et ILLISIBLE  -> refus aussi : ne pas pouvoir prouver sur
+        quel compte on est n'est pas « c'est le bon » ;
+      . rien de declare       -> None. Rien a comparer n'est pas une faute,
+        sinon un dossier sans ALPACA_ACCOUNT_ID serait paralyse. L'appelant
+        avertit.
+    """
+    attendu = ACCOUNT_ID
+    if not attendu:
+        return None
+    brut = account.get("account_number")
+    reel = "" if brut is None else str(brut).strip()
+    if not reel:
+        return ("the account response carried no account_number, so this run "
+                "cannot prove which account it is on (declared: %r)"
+                % (str(attendu).strip(),))
+    if reel != str(attendu).strip():
+        return ("this run is on account %r but the configuration declares %r"
+                % (reel, str(attendu).strip()))
+    return None
+
+
+def compte_est_declare() -> bool:
+    """Y a-t-il un compte attendu ? Sert aux appelants a decider s'ils
+    avertissent (rien a comparer) ou se taisent."""
+    return bool(ACCOUNT_ID)
+
+
 def cli_env() -> dict:
     """Environment dict for subprocess calls to the `alpaca` CLI: inherits the
     current process environment but forces ALPACA_LIVE_TRADE unset, regardless

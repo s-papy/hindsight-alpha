@@ -1177,27 +1177,23 @@ def manage_exits(dry_run: bool = False) -> List[ExitAction]:
                     # le docstring de monitor_exits.py revendique est donc
                     # intacte -- verifie : ce bloc est sous
                     # `if would_close_profit or would_close_loss`.
-                    attendu = getattr(config, "ACCOUNT_ID", None)
-                    if attendu:
-                        try:
-                            reel = str(alpaca_cli.get_account().get(
-                                "account_number") or "").strip()
-                        except Exception as e:
-                            actions.append(ExitAction(
-                                symbol, ExitKind.ERROR,
-                                error="refused to close: could not verify which "
-                                      "account this run is on (%s: %s)"
-                                      % (type(e).__name__, e)))
-                            continue
-                        if reel != str(attendu).strip():
-                            actions.append(ExitAction(
-                                symbol, ExitKind.ERROR,
-                                error="refused to close: this run is on account "
-                                      "%r but the configuration declares %r. "
-                                      "Closing here would place an unintended "
-                                      "order on another account."
-                                      % (reel, str(attendu).strip())))
-                            continue
+                    try:
+                        refus = config.raison_de_refus_du_compte(
+                            alpaca_cli.get_account())
+                    except Exception as e:
+                        actions.append(ExitAction(
+                            symbol, ExitKind.ERROR,
+                            error="refused to close: could not verify which "
+                                  "account this run is on (%s: %s)"
+                                  % (type(e).__name__, e)))
+                        continue
+                    if refus:
+                        actions.append(ExitAction(
+                            symbol, ExitKind.ERROR,
+                            error="refused to close: %s. Closing here would "
+                                  "place an unintended order on another "
+                                  "account." % refus))
+                        continue
                     alpaca_cli.close_position(symbol)
                     # _record_exit_outcome() is bookkeeping AFTER the close
                     # already succeeded -- wrapped in its own inner
@@ -1380,31 +1376,14 @@ def check_gates(
     #     laisse passer, sinon un dossier sans ACCOUNT_ID ne traderait plus
     #     du tout -- le meme choix que le controle d'identifiants du
     #     garde-fou fait dans le meme cas.
-    attendu = getattr(config, "ACCOUNT_ID", None)
-    reel = account.get("account_number")
-    # `.strip()` AVANT le test de presence : une chaine d'espaces est vraie en
-    # Python, donc `not reel` la laissait passer jusqu'a la comparaison, ou
-    # elle etait diagnostiquee « WRONG ACCOUNT » au lieu de « identite
-    # illisible ». Le refus etait deja juste ; c'est la RAISON qui mentait --
-    # la meme faute que celle corrigee ce matin dans le hook pre-commit.
-    reel = str(reel).strip() if reel is not None else ""
-    if attendu:
-        if not reel:
-            return RiskDecision(
-                False,
-                "the account response carried no account_number, so this run "
-                "cannot prove it is on the declared account (%r). Refusing to "
-                "open new risk on an account whose identity is unverified."
-                % (attendu,))
-        if reel != str(attendu).strip():
-            return RiskDecision(
-                False,
-                "WRONG ACCOUNT: this run is on %r but the configuration "
-                "declares %r. No new entry. Check which credentials are "
-                "loaded before trading -- the hackathon account must not "
-                "carry trades meant for another one, and vice versa."
-                % (reel, str(attendu).strip()))
-    else:
+    refus = config.raison_de_refus_du_compte(account)
+    if refus:
+        return RiskDecision(
+            False,
+            "WRONG ACCOUNT: %s. No new entry. Check which credentials are "
+            "loaded before trading -- the hackathon account must not carry "
+            "trades meant for another one, and vice versa." % refus)
+    if not config.compte_est_declare():
         print("  WARNING: no ALPACA_ACCOUNT_ID declared, so this run cannot "
               "check which account it is trading on. Nothing verifies that "
               "the credentials loaded are the intended ones.", flush=True)
