@@ -125,7 +125,7 @@ def tag_signe() -> bool:
         return False
     dernier = tags[0]
     sortie = subprocess.run(["git", "tag", "-v", dernier], cwd=RACINE,
-                            capture_output=True, text=True)
+                            capture_output=True, text=True, timeout=30)
     texte = sortie.stdout + sortie.stderr
     valide = "Good" in texte and "signature" in texte
     apres = _git("rev-list", "--count", "%s..HEAD" % dernier) or "?"
@@ -144,8 +144,12 @@ def tag_signe() -> bool:
 
 
 def garde_fou() -> bool:
+    # Borne de temps OBLIGATOIRE : un test de ce depot refuse tout
+    # sous-processus non borne, et il a attrape ces trois appels-ci a la
+    # premiere execution de la suite. garde_fou tourne en 0.63 s (mesure),
+    # donc 60 s est large sans jamais figer la verification.
     r = subprocess.run([sys.executable, str(RACINE / "garde_fou.py")],
-                       cwd=RACINE, capture_output=True, text=True)
+                       cwd=RACINE, capture_output=True, text=True, timeout=60)
     if r.returncode != 0:
         _dire(ROUGE, "garde-fou", "verdict BLOQUANT — lance-le pour le detail")
         return False
@@ -157,8 +161,10 @@ def garde_fou() -> bool:
 
 def compte_reel() -> bool:
     """Delegue entierement a test_connection.py, qui possede cette regle."""
+    # Celui-ci sort sur le RESEAU : sans borne, une API muette figerait la
+    # verification pour toujours -- exactement ce que ce garde interdit.
     r = subprocess.run([sys.executable, str(RACINE / "test_connection.py")],
-                       cwd=RACINE, capture_output=True, text=True)
+                       cwd=RACINE, capture_output=True, text=True, timeout=120)
     sortie = r.stdout + r.stderr
     if "MAUVAIS COMPTE" in sortie:
         _dire(ROUGE, "compte Alpaca", "MAUVAIS COMPTE — ne lance pas agent.py")
