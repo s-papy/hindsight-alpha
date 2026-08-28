@@ -3205,7 +3205,15 @@ class TestCoherenceDesTables(unittest.TestCase):
         self.assertNotIn(a, set(risk_gates.SECTOR_MAP.values()))
 
 
-class TestMauvaisCompteRefuseLEntree(unittest.TestCase):
+class TestMauvaisCompteRefuseLEntree(BaseExit):
+    # HERITE DE BaseExit depuis le 28/08, meme correctif que sa jumelle
+    # ci-dessous. check_gates() lit et ecrit l etat via
+    # _record_starting_equity : cette classe ecrivait donc dans le VRAI
+    # state.json.
+    #
+    # Trouvee en bissectant les 39 classes du fichier une par une, apres qu un
+    # premier echantillon de quatre eut manque celle-ci. Un echantillon n est
+    # pas une mesure.
     """`config.ACCOUNT_ID` existe et `test_connection.py` le compare bien au
     compte réel, avec un verdict « MAUVAIS COMPTE » qui sort en erreur. Mais
     c'est un script LANCÉ À LA MAIN : ni `agent.py` ni `monitor_exits.py` ne
@@ -3291,7 +3299,21 @@ class TestMauvaisCompteRefuseLEntree(unittest.TestCase):
         self.assertNotIn("WRONG ACCOUNT", d.reason or "")
 
 
-class TestMauvaisCompteRefuseLaCloture(unittest.TestCase):
+class TestMauvaisCompteRefuseLaCloture(BaseExit):
+    # HERITE DE BaseExit depuis le 28/08, et c est un correctif, pas un detail
+    # de style. Cette classe etait un `unittest.TestCase` NU : son temoin
+    # « sur le BON compte la cloture a bien lieu » fermait donc pour de vrai,
+    # `_record_exit_outcome` s executait, et il ecrivait dans le VRAI
+    # state.json -- l etat de risque que l agent lit en production.
+    #
+    # Mesure : suite lancee avec state.json supprime, il etait RECREE avec
+    # account_id='u', starting_equity=100000.0 et consecutive_losses=2. Or
+    # MAX_CONSECUTIVE_LOSSES vaut 3 : le disjoncteur etait a deux tiers du
+    # declenchement, a cause de tests, la veille de la semaine live.
+    #
+    # La protection existait -- BaseExit redirige STATE_FILE vers un dossier
+    # temporaire, et le docstring de ce fichier l annonce des la ligne 22.
+    # Je l ai contournee en ecrivant une classe nue.
     """L'autre moitié du garde de compte. `check_gates` refuse une ENTRÉE sur
     un compte non déclaré ; les SORTIES n'avaient pas d'équivalent.
 

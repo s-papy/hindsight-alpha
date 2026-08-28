@@ -5033,5 +5033,57 @@ class TestLaVerificationDeKickoff(unittest.TestCase):
                       "copie locale")
 
 
+class TestAucunTestNeTouchePasLEtatDeProduction(unittest.TestCase):
+    """`state.json` porte l'état de risque RÉEL : équité de départ, verrou
+    hebdomadaire, compteur de pertes consécutives. L'agent le lit en
+    production.
+
+    Mesuré le 28/08 : la suite complète, lancée avec `state.json` supprimé, le
+    RECRÉAIT avec `account_id='u'`, `starting_equity=100000.0` et
+    `consecutive_losses=2`. Or `MAX_CONSECUTIVE_LOSSES` vaut 3 — le
+    disjoncteur était à deux tiers du déclenchement, à cause de tests, la
+    veille de la semaine live.
+
+    La protection existait (`BaseExit` redirige `STATE_FILE` vers un dossier
+    temporaire, et le docstring de test_risk_gates.py l'annonce dès sa ligne
+    22) ; une classe écrite nue l'avait contournée. Ce test rend le
+    contournement impossible à refaire en silence."""
+
+    # SENTINELLE, ajoutee dans la minute qui a suivi l ecriture de ce test :
+    # il lancait `unittest discover` depuis l INTERIEUR de la suite decouverte,
+    # donc la suite lancait la suite lancait la suite. Le premier essai a
+    # tourne 10 minutes avant d etre tue.
+    #
+    # Un test qui verifie une propriete de LA SUITE doit se retirer de la
+    # sous-execution qu il declenche, sinon il ne mesure que sa propre
+    # recursion.
+    MARQUEUR = "HINDSIGHT_SOUS_EXECUTION"
+
+    def test_la_suite_ne_recree_pas_state_json(self):
+        if os.environ.get(self.MARQUEUR):
+            self.skipTest("sous-execution : on ne se relance pas soi-meme")
+        import subprocess
+        racine = Path(__file__).parent
+        etat = racine / "state.json"
+        sauvegarde = etat.read_bytes() if etat.exists() else None
+        try:
+            if etat.exists():
+                etat.unlink()
+            env = dict(os.environ, **{self.MARQUEUR: "1"})
+            subprocess.run([sys.executable, "-m", "unittest", "discover",
+                            "-p", "test_*.py"], cwd=racine, env=env,
+                           capture_output=True, text=True, timeout=600)
+            recree = etat.exists()
+            contenu = etat.read_text(encoding="utf-8")[:200] if recree else ""
+        finally:
+            if etat.exists():
+                etat.unlink()
+            if sauvegarde is not None:
+                etat.write_bytes(sauvegarde)
+        self.assertFalse(recree,
+                         "la suite de tests écrit dans l'état de risque de "
+                         "production : %s" % contenu)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
