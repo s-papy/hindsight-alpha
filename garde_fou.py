@@ -2391,6 +2391,52 @@ def _ecrire_gel(chemin: str, valeurs: dict) -> None:
         fh.write("\n")
 
 
+def controle_garde_de_compte_actif() -> None:
+    """Les trois gardes de compte protegent-ils vraiment cette machine ?
+
+    AJOUTE le 28/08/2026, apres avoir pose ces gardes le matin meme dans
+    check_gates (entrees), manage_exits (sorties) et build_snapshot
+    (publication). Tous les trois s'appuient sur `config.ACCOUNT_ID`, et tous
+    les trois se DEGRADENT en simple avertissement quand il est absent -- a
+    dessein : sans compte declare il n'y a rien a comparer, et refuser
+    paralyserait un dossier qui n'en declare pas.
+
+    Mais cet avertissement part sur la sortie standard, c'est-a-dire, sous
+    launchd, dans un fichier de log que personne ne regarde. Une protection
+    inerte qui ne le dit qu'a un log est une protection dont on croit
+    disposer.
+
+    Le controle ne se declenche QUE si des identifiants sont charges : c'est
+    ce qui distingue « la machine qui trade » d'un clone ou de la CI, ou
+    l'absence de ACCOUNT_ID est normale et ou alerter serait du bruit. Meme
+    discrimination que le controle d'identifiants, et pour la meme raison.
+
+    `test_connection.py` couvre deja le cas a la main (verdict
+    « NON VERIFIE »), mais c'est un script qu'il faut penser a lancer -- le
+    trou exact que ce garde-fou existe pour combler ailleurs.
+    """
+    try:
+        import config
+    except Exception as e:
+        alerte("config.py", "illisible (%s) — impossible de verifier si le "
+                            "garde de compte est actif" % type(e).__name__)
+        return
+
+    identifiants_charges = bool(getattr(config, "API_KEY", None)
+                                and getattr(config, "SECRET_KEY", None))
+    if not identifiants_charges:
+        return  # clone ou CI : rien a dire, c'est l'etat normal
+
+    if not getattr(config, "ACCOUNT_ID", None):
+        alerte("ALPACA_ACCOUNT_ID",
+               "ABSENT alors que des identifiants SONT charges : les trois "
+               "gardes de compte (entrees, sorties, publication) se degradent "
+               "en simple avertissement et ne protegent RIEN sur cette "
+               "machine. Rien n'empeche alors de trader, de cloturer ou de "
+               "publier sur un compte qui n'est pas celui prevu. "
+               "Declare-le dans le fichier de configuration (voir le modele).")
+
+
 def controle_gel_des_parametres_au_kickoff() -> None:
     """Les parametres de decision ont-ils bouge depuis le kickoff ?
 
@@ -2559,6 +2605,7 @@ def main() -> int:
         controle_entrees_attendues_presentes,
         controle_plists_sont_du_xml_valide,
         controle_gel_des_parametres_au_kickoff,
+        controle_garde_de_compte_actif,
         controle_journal,
         controle_env_hackathon_scelle,
         controle_garde_live_trading,

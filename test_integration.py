@@ -4659,5 +4659,57 @@ class TestLaPublicationRefuseLeMauvaisCompte(unittest.TestCase):
                          "PAQUELCONQUE")
 
 
+class TestLeGardeDeCompteEstSignaleQuandIlEstInerte(unittest.TestCase):
+    """Les trois gardes de compte posés le 28/08 — entrées, sorties,
+    publication — s'appuient tous sur `config.ACCOUNT_ID`, et tous les trois
+    se dégradent en simple avertissement quand il est absent. À dessein :
+    sans compte déclaré il n'y a rien à comparer, et refuser paralyserait un
+    dossier qui n'en déclare pas.
+
+    Mais cet avertissement part sur la sortie standard, c'est-à-dire, sous
+    launchd, dans un fichier de log que personne ne regarde. Une protection
+    inerte qui ne le dit qu'à un log est une protection dont on CROIT
+    disposer — et c'est le cas mesuré sur la machine de l'agent au moment
+    d'écrire ce test."""
+
+    def setUp(self):
+        import garde_fou
+        self.g = garde_fou
+        del garde_fou.blocages[:], garde_fou.alertes[:]
+
+    def tearDown(self):
+        del self.g.blocages[:], self.g.alertes[:]
+
+    def _lancer(self, cle, secret, compte):
+        from unittest import mock
+        import config
+        with mock.patch.object(config, "API_KEY", cle), \
+             mock.patch.object(config, "SECRET_KEY", secret), \
+             mock.patch.object(config, "ACCOUNT_ID", compte):
+            self.g.controle_garde_de_compte_actif()
+        return [f for f, _ in self.g.alertes]
+
+    def test_identifiants_charges_mais_aucun_compte_declare_alerte(self):
+        alertes = self._lancer("cle", "secret", None)
+        self.assertIn("ALPACA_ACCOUNT_ID", alertes,
+                      "les trois gardes sont inertes et rien ne le dit")
+        message = dict(self.g.alertes)["ALPACA_ACCOUNT_ID"]
+        self.assertIn("ne protegent RIEN", message,
+                      "l'alerte ne dit pas que la protection est inerte")
+
+    def test_un_compte_declare_ne_declenche_rien(self):
+        """TÉMOIN : sans lui, alerter toujours passerait le test ci-dessus et
+        noierait le seul jaune qui compte."""
+        self.assertEqual(self._lancer("cle", "secret", "PAFAUXCOMPTE"), [])
+
+    def test_sans_identifiants_le_controle_se_tait(self):
+        """SECOND TÉMOIN, et il est nécessaire : en CI et dans tout clone,
+        l'absence de compte déclaré est l'état NORMAL. Alerter là serait du
+        bruit permanent sur le dépôt public — vérifié, 0 alerte."""
+        for cle, secret in ((None, None), ("cle", None), (None, "secret")):
+            with self.subTest(cle=bool(cle), secret=bool(secret)):
+                self.assertEqual(self._lancer(cle, secret, None), [])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
