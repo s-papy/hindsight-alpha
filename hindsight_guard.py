@@ -102,8 +102,32 @@ class LeakageReport:
         #
         # Sans egalite, la regle se reduit exactement a l'ancienne egalite de
         # gagnants : ce n'est pas un durcissement du cas courant.
+        # UN SEUL CANDIDAT NE PEUT PAS ETRE EN DESACCORD AVEC LUI-MEME.
+        # AJOUTE le 28/08/2026 au soir, trouve en sondant cette fonction sur
+        # ses cas limites. Mesure AVANT correctif :
+        #
+        #     check_selection_leakage([10], lambda c, w: 1.0)
+        #     -> agrees=True, « OK: full-window winner (10) matches the
+        #        in-sample winner and clears the threshold »
+        #
+        # Le gagnant est le meme PAR CONSTRUCTION : il n'y avait rien a
+        # comparer. Le message se lit pourtant comme une verification reussie.
+        # C'est le meme defaut que `unscorable` corrige a cote -- « je n'ai pas
+        # pu detecter de desaccord » presente comme « il n'y a pas de
+        # desaccord » -- et il touche ici la piece centrale du depot.
+        #
+        # AUCUN EFFET SUR CE DEPOT, verifie avant d'ecrire : les TROIS
+        # appelants passent cinq candidats (CANDIDATE_HV_WINDOWS,
+        # CANDIDATE_LOOKBACKS, CANDIDATS du benchmark), tous figes au kickoff.
+        # Aucun chiffre publie ne bouge, aucun comportement de trading non
+        # plus. Ce correctif rend la bibliotheque honnete pour l'usage general
+        # qu'elle documente -- « score_fn decide ce que ces deux mots
+        # signifient » -- ou un appelant peut tres bien n'avoir qu'un candidat.
+        self.comparable = len(self.candidates) >= 2
+
         self.agrees = (
-            not self.unscorable
+            self.comparable
+            and not self.unscorable
             and bool(self.full_winners)
             and all(g in self.in_sample_winners for g in self.full_winners)
             and self.in_sample_clears_bar
@@ -132,7 +156,7 @@ class LeakageReport:
         meme regle finissent toujours par diverger -- ici en trois heures."""
         if self.agrees:
             return "agrees"
-        if self.unscorable:
+        if not getattr(self, "comparable", True) or self.unscorable:
             return "CANNOT CONCLUDE"
         if not self.in_sample_clears_bar and not self._plein_franchit_le_seuil():
             return "NO EDGE"
@@ -144,6 +168,15 @@ class LeakageReport:
             lines.append(
                 f"OK: full-window winner ({self.full_winner!r}) matches the in-sample "
                 f"winner and clears the threshold ({self.threshold})."
+            )
+        elif not getattr(self, "comparable", True):
+            lines.append(
+                "CANNOT CONCLUDE: only one candidate was given, and a single "
+                "candidate cannot disagree with itself."
+            )
+            lines.append(
+                "  -> the two winners match by construction, not by evidence. "
+                "Nothing was compared, so nothing is certified leak-free."
             )
         elif self.unscorable:
             lines.append(

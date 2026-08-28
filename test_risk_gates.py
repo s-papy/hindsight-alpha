@@ -486,6 +486,43 @@ class TestHindsightGuard(unittest.TestCase):
             list(full), lambda c, w: (full if w == "full" else in_sample)[c],
             threshold=seuil)
 
+    def test_UN_SEUL_candidat_ne_certifie_RIEN(self):
+        """Un candidat ne peut pas être en désaccord avec lui-même.
+
+        Trouvé le 28/08/2026 en sondant cette fonction sur ses cas limites.
+        Mesure AVANT correctif :
+
+            check_selection_leakage([10], lambda c, w: 1.0)
+            -> agrees=True, « OK: full-window winner (10) matches the
+               in-sample winner and clears the threshold »
+
+        Le gagnant est le même PAR CONSTRUCTION : rien n'a été comparé. Le
+        message se lisait pourtant comme une vérification réussie — et cette
+        fonction est la pièce centrale du dossier, celle dont le README dit
+        que son résultat « est celui qui mérite d'être jugé ».
+
+        Même défaut que `unscorable` corrige à côté : « je n'ai pas pu
+        détecter de désaccord » présenté comme « il n'y a pas de désaccord ».
+        """
+        r = self._verdict({"A": 1.0}, {"A": 1.0})
+        self.assertFalse(r.agrees,
+                         "un seul candidat suffit à obtenir un certificat "
+                         "« sans fuite » : %s" % r.summary())
+        self.assertEqual(r.verdict_label(), "CANNOT CONCLUDE")
+        self.assertIn("cannot disagree with itself", r.summary())
+
+    def test_DEUX_candidats_en_accord_certifient_TOUJOURS(self):
+        """TÉMOIN, et c'est lui qui compte : sans lui, une fonction qui ne
+        certifierait plus JAMAIS rien passerait le test ci-dessus — et le
+        mécanisme entier deviendrait muet, ce qui est pire que trop bavard.
+
+        Les trois appelants de ce dépôt passent CINQ candidats ; ce test
+        garantit que le correctif ne les touche pas."""
+        r = self._verdict({"A": 2.0, "B": 1.0}, {"A": 2.0, "B": 1.0})
+        self.assertTrue(r.agrees,
+                        "une sélection parfaitement cohérente n'est plus "
+                        "certifiée : %s" % r.summary())
+
     def test_un_score_non_fini_empeche_de_conclure_quelle_que_soit_sa_position(self):
         """Le cœur du défaut : le verdict ne doit pas dépendre de l'ordre."""
         nan = float("nan")
