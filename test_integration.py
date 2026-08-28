@@ -3001,30 +3001,38 @@ class TestEntreesAttendues(unittest.TestCase):
                                  "l'alerter serait du bruit permanent" % nom)
 
     def test_une_entree_manquante_est_annoncee_avec_sa_consequence(self):
-        """Signaler ne suffit pas : l'alerte doit dire ce qui cesse d'être
-        vérifié. « fichier absent » n'aide personne à décider si c'est grave."""
+        """Signaler ne suffit pas : le message doit dire ce qui cesse d'être
+        vérifié. « fichier absent » n'aide personne à décider si c'est grave.
+
+        MIS À JOUR le 28/08/2026 : ce test lisait `alertes`, parce que le
+        contrôle alertait en jaune. Il BLOQUE désormais — mesuré, supprimer
+        BACKTEST_RESULTS.md laissait la CI verte et le hook pre-commit
+        passant, pendant que le message annonçait « AUCUN chiffre des
+        livrables n'est plus recoupé ». Le test suit ce changement de
+        sévérité ; ce qu'il vérifie — que le message nomme la conséquence —
+        est inchangé."""
         import garde_fou
-        garde_fou.alertes.clear()
+        garde_fou.blocages.clear()
         vraie = garde_fou.RACINE
         try:
             vide = tempfile.mkdtemp(prefix="hindsight-vide-")
             garde_fou.RACINE = vide
             garde_fou.controle_entrees_attendues_presentes()
-            self.assertEqual(len(garde_fou.alertes),
+            self.assertEqual(len(garde_fou.blocages),
                              len(garde_fou.ENTREES_ATTENDUES),
                              "toutes les entrées manquent, toutes doivent être "
                              "nommées")
-            dits = dict(garde_fou.alertes)
+            dits = dict(garde_fou.blocages)
             self.assertIn("submission/Hindsight_Alpha_Writeup.docx", dits)
             message = dits["submission/Hindsight_Alpha_Writeup.docx"]
             self.assertIn("ABSENT", message)
             self.assertIn("chiffres", message,
-                          "l'alerte ne dit pas ce qui cesse d'être vérifié : %s"
+                          "le blocage ne dit pas ce qui cesse d'être vérifié : %s"
                           % message)
         finally:
             shutil.rmtree(vide, ignore_errors=True)
             garde_fou.RACINE = vraie
-            garde_fou.alertes.clear()
+            garde_fou.blocages.clear()
 
     def test_un_depot_intact_ne_declenche_rien(self):
         """Pendant obligatoire, et le plus important des quatre : ce contrôle
@@ -3623,6 +3631,78 @@ class TestRangEtVolatiliteFaceALIncertitude(unittest.TestCase):
         le test ci-dessus — et le module ne s'importerait plus du tout."""
         self.assertTrue(all(w >= 2 for w in vol_strategy.CANDIDATE_HV_WINDOWS),
                         vol_strategy.CANDIDATE_HV_WINDOWS)
+
+
+class TestUneEntreeAbsenteBloque(unittest.TestCase):
+    """Le manifeste `ENTREES_ATTENDUES` existe parce que l'absence de ces
+    fichiers REND MUETS d'autres contrôles. Il alertait pourtant en jaune.
+
+    Mesuré : supprimer `BACKTEST_RESULTS.md` — la source de vérité de TOUS les
+    chiffres publiés — donnait « 🟡 rien de bloquant » et un code de sortie 0.
+    La CI restait donc VERTE et le hook pre-commit laissait passer, pendant
+    que le message du contrôle annonçait « AUCUN chiffre des livrables n'est
+    plus recoupé ». Le message décrivait une panne bloquante, le verdict
+    disait l'inverse ; les deux ne pouvaient pas avoir raison.
+
+    C'est la version « verdict » du 0.0 qui veut dire « je n'ai pas pu
+    mesurer » : un contrôle devenu muet annoncé comme rien de bloquant."""
+
+    def setUp(self):
+        import garde_fou
+        self.g = garde_fou
+        self.dossier = tempfile.mkdtemp(prefix="hindsight-entrees-")
+        self._racine = garde_fou.RACINE
+        garde_fou.RACINE = self.dossier
+        for nom in garde_fou.ENTREES_ATTENDUES:
+            cible = Path(self.dossier) / nom
+            cible.parent.mkdir(parents=True, exist_ok=True)
+            if "." in cible.name:
+                cible.write_text("x", encoding="utf-8")
+            else:
+                cible.mkdir(exist_ok=True)
+        del garde_fou.blocages[:], garde_fou.alertes[:]
+
+    def tearDown(self):
+        self.g.RACINE = self._racine
+        del self.g.blocages[:], self.g.alertes[:]
+        shutil.rmtree(self.dossier, ignore_errors=True)
+
+    def test_toutes_presentes_ne_bloque_pas(self):
+        """TÉMOIN, et il compte : sans lui, bloquer TOUJOURS passerait le test
+        ci-dessous et rendrait la CI rouge en permanence."""
+        self.g.controle_entrees_attendues_presentes()
+        self.assertEqual(self.g.blocages, [])
+
+    def test_chaque_entree_absente_bloque(self):
+        """Chacune, pas seulement la première : une boucle qui s'arrêterait au
+        premier manquant laisserait les neuf autres sans protection."""
+        for nom in self.g.ENTREES_ATTENDUES:
+            with self.subTest(entree=nom):
+                cible = Path(self.dossier) / nom
+                sauvegarde = cible.is_dir()
+                if sauvegarde:
+                    shutil.rmtree(cible)
+                else:
+                    cible.unlink()
+                del self.g.blocages[:], self.g.alertes[:]
+                self.g.controle_entrees_attendues_presentes()
+                noms_bloques = [f for f, _ in self.g.blocages]
+                self.assertIn(nom, noms_bloques,
+                              "%s absent ne bloque pas — un contrôle devenu "
+                              "muet serait annoncé « rien de bloquant »" % nom)
+                if sauvegarde:
+                    cible.mkdir(parents=True, exist_ok=True)
+                else:
+                    cible.parent.mkdir(parents=True, exist_ok=True)
+                    cible.write_text("x", encoding="utf-8")
+
+    def test_le_message_dit_ce_qui_n_est_plus_verifie(self):
+        """Un blocage qui ne dit pas CE QU'ON PERD force à relire le script
+        pour le comprendre — exactement ce que ce projet reproche ailleurs."""
+        (Path(self.dossier) / "BACKTEST_RESULTS.md").unlink()
+        self.g.controle_entrees_attendues_presentes()
+        message = dict(self.g.blocages)["BACKTEST_RESULTS.md"]
+        self.assertIn("plus rien ne verifie", message)
 
 
 class TestGelDesParametresAuKickoff(unittest.TestCase):

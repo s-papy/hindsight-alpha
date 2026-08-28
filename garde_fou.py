@@ -2307,7 +2307,25 @@ def controle_entrees_attendues_presentes() -> None:
     manquants = [(nom, quoi) for nom, quoi in sorted(ENTREES_ATTENDUES.items())
                  if not os.path.exists(os.path.join(RACINE, nom))]
     for nom, quoi in manquants:
-        alerte(nom, "ABSENT — ce que plus rien ne verifie : %s Renomme, deplace "
+        # BLOQUANT depuis le 28/08/2026 -- c'etait `alerte`, donc jaune.
+        # Mesure : supprimer BACKTEST_RESULTS.md, la source de verite de TOUS
+        # les chiffres publies, donnait « 🟡 rien de bloquant » et un code de
+        # sortie 0. La CI restait donc VERTE, et le hook pre-commit laissait
+        # passer -- pendant que ce meme message annoncait « AUCUN chiffre des
+        # livrables n'est plus recoupe ».
+        #
+        # Le message decrivait une panne bloquante ; le verdict disait le
+        # contraire. Les deux ne pouvaient pas avoir raison.
+        #
+        # C'est la raison d'etre de ce manifeste : ces dix entrees ne sont pas
+        # « souhaitables », leur absence REND MUETS d'autres controles. Un
+        # controle devenu muet ne doit jamais etre annonce comme « rien de
+        # bloquant » -- c'est la version « verdict » du 0.0 qui veut dire
+        # « je n'ai pas pu mesurer ».
+        #
+        # Aucun faux positif possible : les dix sont suivies par git (verifie),
+        # donc presentes dans tout clone et dans la CI.
+        bloque(nom, "ABSENT — ce que plus rien ne verifie : %s Renomme, deplace "
                     "ou supprime ? Tant qu'il manque, les controles qui le "
                     "lisent ne disent RIEN, ni oui ni non." % quoi)
 
