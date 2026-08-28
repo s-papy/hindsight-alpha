@@ -4966,5 +4966,72 @@ class TestLesJobsTombentDansLaFenetreDeVeille(unittest.TestCase):
                             for a, b in trous])
 
 
+class TestLaVerificationDeKickoff(unittest.TestCase):
+    """`verifier_le_kickoff.py` : une seule commande qui dit ce qui reste à
+    faire. Il ne REFAIT rien — il délègue à `garde_fou.py` et
+    `test_connection.py`, qui possèdent déjà ces règles, et n'ajoute que ce
+    que personne ne vérifiait : les plists chargés contre ceux du dépôt, les
+    commits poussés, le tag signé.
+
+    Sa première exécution l'a corrigé lui-même : il prenait `tags[-1]`,
+    c'est-à-dire le dernier par ordre ALPHABÉTIQUE, et annonçait « vérifié »
+    en vert pour un tag posé la veille avec 33 commits après lui — une
+    signature valide sur un état périmé, exactement la fausse assurance qu'il
+    existe pour éviter."""
+
+    SCRIPT = Path(__file__).parent / "verifier_le_kickoff.py"
+
+    def test_le_script_tourne_sans_rien_modifier(self):
+        """Il lit, il compare, il dit. Un outil de diagnostic qui modifie
+        l'état est un outil auquel on ne peut plus faire confiance."""
+        import subprocess
+        avant = subprocess.run(["git", "status", "--porcelain"],
+                               cwd=self.SCRIPT.parent, capture_output=True,
+                               text=True).stdout
+        r = subprocess.run([sys.executable, str(self.SCRIPT)],
+                           cwd=self.SCRIPT.parent, capture_output=True,
+                           text=True, timeout=120)
+        apres = subprocess.run(["git", "status", "--porcelain"],
+                               cwd=self.SCRIPT.parent, capture_output=True,
+                               text=True).stdout
+        self.assertEqual(avant, apres,
+                         "le script de vérification a modifié le dépôt")
+        self.assertEqual(r.returncode, 0,
+                         "il doit toujours sortir en 0 : il informe, il ne "
+                         "bloque pas")
+
+    def test_il_nomme_les_cinq_points_a_verifier(self):
+        import subprocess
+        sortie = subprocess.run([sys.executable, str(self.SCRIPT)],
+                                cwd=self.SCRIPT.parent, capture_output=True,
+                                text=True, timeout=120).stdout
+        for attendu in ("compte declare", "LaunchAgents", "travail pousse",
+                        "tag signe", "garde-fou", "compte Alpaca"):
+            with self.subTest(point=attendu):
+                self.assertIn(attendu, sortie)
+
+    def test_un_tag_perime_n_est_pas_annonce_en_vert(self):
+        """LE défaut que sa première exécution a révélé. Un tag valide qui ne
+        couvre pas l'état actuel doit être dit tel quel."""
+        source = self.SCRIPT.read_text(encoding="utf-8")
+        self.assertIn("--sort=-creatordate", source,
+                      "les tags sont triés alphabétiquement : le « dernier » "
+                      "peut être le plus ancien")
+        self.assertIn("APRES lui", source,
+                      "le script ne dit pas si des commits suivent le tag")
+
+    def test_il_ne_reecrit_aucune_regle_qui_vit_ailleurs(self):
+        """TÉMOIN de sa raison d'être : il doit APPELER garde_fou.py et
+        test_connection.py, pas recopier leurs contrôles. Une règle écrite
+        deux fois n'est vraie qu'à un seul endroit — leçon déjà payée trois
+        fois dans ce dépôt."""
+        source = self.SCRIPT.read_text(encoding="utf-8")
+        self.assertIn("garde_fou.py", source)
+        self.assertIn("test_connection.py", source)
+        self.assertIn("compte_est_declare", source,
+                      "la règle du compte doit venir de config, pas d'une "
+                      "copie locale")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
