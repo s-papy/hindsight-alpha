@@ -1491,6 +1491,10 @@ class TestAucunIdentifiantPublie(unittest.TestCase):
             "ALPACA_API_KEY=%s\nALPACA_SECRET_KEY=%s\nALPACA_ACCOUNT_ID=%s\n"
             % (self.CLE, self.SECRET, self.COMPTE), encoding="utf-8")
         for nom, contenu in fichiers.items():
+            # `parents=True` : sans lui, un chemin imbriqué comme
+            # « docs/data.json » lève FileNotFoundError. Le helper ne savait
+            # écrire qu'à plat.
+            (d / nom).parent.mkdir(parents=True, exist_ok=True)
             (d / nom).write_text(contenu, encoding="utf-8")
         for args in (["init", "-q", "."], ["add", "-A"]):
             subprocess.run([GIT] + args, cwd=str(d), capture_output=True,
@@ -1512,6 +1516,58 @@ class TestAucunIdentifiantPublie(unittest.TestCase):
         self.assertIn("agent.py", sortie)
 
     @unittest.skipUnless(shutil.which("git"), "git absent")
+    def _data_json(self, **extra):
+        """Le fichier publié, avec le compte à sa place légitime."""
+        import json as _json
+        base = {"team": "Hindsight Alpha",
+                "account": {"account_number": self.COMPTE, "status": "ACTIVE"},
+                "positions": [], "recent_decisions": []}
+        base.update(extra)
+        return _json.dumps(base, indent=2)
+
+    def test_le_compte_a_SA_PLACE_dans_data_json_ne_declenche_rien(self):
+        """L'alerte ne pouvait JAMAIS être résolue, et c'est le défaut.
+
+        Elle disait « c'est peut-être un choix assumé — signalé pour que ce
+        soit un choix, pas un oubli », sans offrir aucun moyen de trancher.
+        Elle restait donc jaune à chaque passage, indéfiniment, alors que la
+        réponse est écrite dans publish_dashboard.py : `account_number` est
+        publié EXPRÈS, pour qu'un juge puisse recouper le tableau de bord
+        avec le compte soumis.
+
+        Une alerte qu'on ne peut jamais résoudre entraîne à ignorer les
+        alertes — la faute que la bannière du moniteur avait failli commettre
+        en criant chaque soir. Le contrôle LIT désormais la réponse au lieu
+        de reposer la question."""
+        sortie = self._depot_git({"docs/data.json": self._data_json()})
+        # On assert sur la LIGNE de data.json, pas sur toute la sortie : la
+        # fixture suit délibérément son propre fichier d'identifiants, qui
+        # porte lui aussi le numéro et doit continuer d'alerter. Ma première
+        # version confondait les deux — la même imprécision que le test du
+        # matin qui visait la ligne d'un stub.
+        self.assertEqual(
+            [l for l in sortie.splitlines()
+             if "data.json" in l and "ALPACA_ACCOUNT_ID" in l], [],
+            "le contrôle redemande une question dont la réponse est écrite "
+            "dans le dépôt :\n%s" % sortie[-700:])
+
+    def test_le_meme_compte_AILLEURS_dans_data_json_alerte_toujours(self):
+        """LE test qui compte : la tolérance porte sur un EMPLACEMENT, pas
+        sur un fichier.
+
+        Sans lui, j'aurais simplement désarmé le contrôle sur data.json — et
+        un numéro qui fuit dans `recent_decisions`, là où personne ne l'a
+        décidé, passerait désormais inaperçu."""
+        sortie = self._depot_git({
+            "docs/data.json": self._data_json(
+                recent_decisions=[{"note": "compte %s" % self.COMPTE}])})
+        self.assertTrue(
+            [l for l in sortie.splitlines()
+             if "data.json" in l and "ALPACA_ACCOUNT_ID" in l],
+            "le numéro apparaît HORS de account.account_number et le contrôle "
+            "se tait sur data.json : la tolérance est devenue un trou\n%s"
+            % sortie[-700:])
+
     def test_un_numero_de_compte_alerte_sans_bloquer(self):
         """Deux sévérités : un numéro de compte n'autorise aucune action sans
         les clés, et le tableau de bord publie déjà celui du compte courant.

@@ -1852,6 +1852,36 @@ def controle_readme_decrit_les_agents() -> None:
             )
 
 
+def _publication_deliberee(rel: str, nom: str, valeur: str) -> bool:
+    """La valeur est-elle a l'endroit EXACT ou le depot la publie exprEs ?
+
+    Un seul cas aujourd'hui : le numero de compte, dans
+    docs/data.json -> account.account_number. publish_dashboard.py explique
+    pourquoi sur dix lignes -- « the dashboard shows the SAME identifier
+    that's declared in the submission [...] a mismatch here would make the
+    cross-check confusing instead of reassuring ».
+
+    On verifie l'EMPLACEMENT, pas seulement la presence : la meme valeur
+    dans recent_decisions, dans positions, ou dans n'importe quel autre
+    fichier, n'est pas couverte et alerte toujours.
+    """
+    if rel != os.path.join("docs", "data.json") or nom != "ALPACA_ACCOUNT_ID":
+        return False
+    try:
+        with open(os.path.join(RACINE, rel), encoding="utf-8") as fh:
+            donnees = json.load(fh)
+    except (OSError, ValueError):
+        return False
+    compte = donnees.get("account")
+    if not isinstance(compte, dict) or compte.get("account_number") != valeur:
+        return False
+    # La valeur ne doit apparaitre NULLE PART AILLEURS dans le fichier : on
+    # re-serialise sans ce champ et on re-cherche.
+    sans = json.loads(json.dumps(donnees))
+    sans["account"].pop("account_number", None)
+    return valeur not in json.dumps(sans)
+
+
 def controle_aucun_identifiant_dans_les_fichiers_publies() -> None:
     """Un identifiant est-il present dans un fichier COMMITTE ?
 
@@ -2034,13 +2064,34 @@ def controle_aucun_identifiant_dans_les_fichiers_publies() -> None:
                     "retirer la valeur, puis REVOQUER cette cle chez Alpaca -- si "
                     "elle est deja partie, elle est publique pour toujours." % nom,
                 )
+            elif _publication_deliberee(rel, nom, valeur):
+                # LA REPONSE EST DANS LE DEPOT, on la lit au lieu de la
+                # redemander. Ajoute le 28/08/2026 au soir.
+                #
+                # L'alerte precedente disait « c'est peut-etre un choix assume.
+                # Signale pour que ce soit un choix, pas un oubli » -- et elle
+                # n'offrait AUCUN moyen de trancher. Elle restait donc jaune a
+                # chaque passage, indefiniment, alors que la reponse est ecrite
+                # dans publish_dashboard.py : `account_number` est publie
+                # exprES, pour qu'un juge puisse recouper le tableau de bord
+                # avec le compte soumis.
+                #
+                # Une alerte qu'on ne peut jamais resoudre entraine a ignorer
+                # les alertes -- la meme faute que la banniere du moniteur
+                # avait failli commettre en criant chaque soir.
+                #
+                # ON NE RELACHE RIEN : la valeur n'est toleree QU'A CET ENDROIT
+                # PRECIS -- account.account_number du fichier publie. La meme
+                # valeur ailleurs dans data.json, ou dans un autre fichier,
+                # alerte toujours.
+                pass
             else:
                 alerte(
                     rel,
                     "contient la valeur de %s. Un numero de compte n'autorise "
-                    "aucune action sans les cles, et le tableau de bord publie "
-                    "deja celui du compte courant -- c'est peut-etre un choix "
-                    "assume. Signale pour que ce soit un choix, pas un oubli." % nom,
+                    "aucune action sans les cles. Ce n'est PAS l'endroit ou le "
+                    "tableau de bord le publie volontairement "
+                    "(account.account_number) : verifie pourquoi il est la." % nom,
                 )
 
     # ══ L'HISTORIQUE, pas seulement l'arbre de travail ═══════════════════════
