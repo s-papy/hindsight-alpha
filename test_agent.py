@@ -65,7 +65,13 @@ class BaseAgent(unittest.TestCase):
             "contrat": alpaca_cli.find_near_the_money_contract,
             "submit": alpaca_cli.submit_paper_option_order,
             "evaluate_symbol": agent.evaluate_symbol,
+            # Voir la note de BaseExit dans test_risk_gates.py : cette
+            # suite lisait le `.env` de la machine, et 61 tests sont
+            # devenus rouges a la seconde ou ALPACA_ACCOUNT_ID a ete
+            # declare pour de vrai, sans qu'une ligne de code ait bouge.
+            "ACCOUNT_ID": config.ACCOUNT_ID,
         }
+        config.ACCOUNT_ID = None
         risk_gates.STATE_FILE = self.tmp / "state.json"
         decision_log.LOG_FILE = self.tmp / "decision_log.jsonl"
 
@@ -96,6 +102,7 @@ class BaseAgent(unittest.TestCase):
         decision_log.LOG_FILE = self._sauve["LOG_FILE"]
         alpaca_cli.run = self._sauve["run"]
         config.require_credentials = self._sauve["require_credentials"]
+        config.ACCOUNT_ID = self._sauve["ACCOUNT_ID"]
         alpaca_cli.get_clock = self._sauve["get_clock"]
         risk_gates.manage_exits = self._sauve["manage_exits"]
         risk_gates.is_halted = self._sauve["is_halted"]

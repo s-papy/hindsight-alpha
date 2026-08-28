@@ -93,6 +93,28 @@ class BaseExit(unittest.TestCase):
         self._vrai_state = risk_gates.STATE_FILE
         risk_gates.STATE_FILE = self.tmp / "state.json"
 
+        # NEUTRALISER LA CONFIGURATION DE L'OPERATEUR. Ajoute le 28/08/2026
+        # a 20h35, quelques minutes apres que Spap a declare ALPACA_ACCOUNT_ID
+        # dans sa configuration reelle : SOIXANTE ET UN tests sont devenus
+        # rouges d'un coup, sans qu'une seule ligne de code ait change.
+        #
+        # Cause : cette suite lisait le `.env` de la machine. Les comptes
+        # factices des fixtures ne portent pas le numero declare, donc le
+        # garde de compte refusait chaque entree -- « risk_gate_blocked » au
+        # lieu de « order_submitted ».
+        #
+        # La suite etait donc verte toute la journee UNIQUEMENT parce que la
+        # variable etait absente. Un test qui depend de la configuration de
+        # l'operateur ment le jour ou celle-ci change, et il aurait menti
+        # toute la semaine live -- en masquant les vraies regressions sous
+        # soixante et un faux echecs.
+        #
+        # Les tests DEDIES au garde de compte posent leur propre valeur par
+        # mock.patch.object ; ils ne sont pas concernes par cette remise a
+        # zero.
+        self._vrai_account_id = risk_gates.config.ACCOUNT_ID
+        risk_gates.config.ACCOUNT_ID = None
+
         # `run()` est le SEUL point par lequel ce module atteint le CLI, donc
         # le reseau. On le remplace par une explosion : tout chemin qu'on aurait
         # oublie de boucher echoue bruyamment ICI, au lieu de partir sur le vrai
@@ -137,6 +159,7 @@ class BaseExit(unittest.TestCase):
             if valeur is not None:
                 setattr(alpaca_cli, nom, valeur)
         risk_gates.STATE_FILE = self._vrai_state
+        risk_gates.config.ACCOUNT_ID = self._vrai_account_id
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     def etat(self) -> dict:

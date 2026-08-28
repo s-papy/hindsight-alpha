@@ -105,6 +105,13 @@ class BaseIntegration(unittest.TestCase):
         self._state, self._log, self._halt = (
             risk_gates.STATE_FILE, decision_log.LOG_FILE, risk_gates.HALT_FILE)
         self._req = config.require_credentials
+        # Voir la note de BaseExit dans test_risk_gates.py : cette suite
+        # lisait le `.env` de la machine, et 61 tests sont devenus rouges
+        # a la seconde ou ALPACA_ACCOUNT_ID a ete declare pour de vrai,
+        # sans qu'une ligne de code ait bouge. Les comptes factices ne
+        # portent pas ce numero, donc le garde de compte refusait tout.
+        self._compte_declare = config.ACCOUNT_ID
+        config.ACCOUNT_ID = None
 
         risk_gates.STATE_FILE = self.tmp / "state.json"
         decision_log.LOG_FILE = self.tmp / "decision_log.jsonl"
@@ -154,6 +161,7 @@ class BaseIntegration(unittest.TestCase):
         risk_gates.STATE_FILE, decision_log.LOG_FILE, risk_gates.HALT_FILE = (
             self._state, self._log, self._halt)
         config.require_credentials = self._req
+        config.ACCOUNT_ID = self._compte_declare
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     def lancer(self, symboles=("SPY",), dry_run=False):
@@ -4009,6 +4017,7 @@ class TestAucunChampMortDansLesDonneesPubliees(unittest.TestCase):
                  "exchange": "OPRA", "qty_available": "1", "usd": {}}
 
         with mock.patch.object(publish_dashboard.config, "require_credentials"), \
+             mock.patch.object(publish_dashboard.config, "ACCOUNT_ID", None), \
              mock.patch.object(publish_dashboard.alpaca_cli, "get_account",
                                return_value={"account_number": "PA0",
                                              "status": "ACTIVE"}), \
@@ -4966,6 +4975,60 @@ class TestLesJobsTombentDansLaFenetreDeVeille(unittest.TestCase):
                             for a, b in trous])
 
 
+class TestLaSuiteNeDependPasDeLaConfigurationDeLOperateur(unittest.TestCase):
+    """Une suite qui lit le `.env` de la machine ment le jour où il change.
+
+    Arrivé EN VRAI le 28/08/2026 à 20h32, une heure avant le premier passage
+    de l'agent : Spap déclare `ALPACA_ACCOUNT_ID` dans sa configuration —
+    exactement ce que je lui avais demandé de faire — et SOIXANTE ET UN
+    tests deviennent rouges d'un coup, sans qu'une seule ligne de code ait
+    bougé.
+
+    Cause : les comptes factices des fixtures ne portent pas ce numéro, donc
+    le garde de compte refusait chaque entrée (« risk_gate_blocked » au lieu
+    de « order_submitted »). La suite était donc verte toute la journée
+    UNIQUEMENT parce que la variable était absente.
+
+    Le danger n'est pas le rouge, c'est ce qu'il cache : soixante et un faux
+    échecs pendant la semaine live auraient noyé la première vraie
+    régression.
+
+    Ce test relance un module entier dans un sous-processus AVEC la variable
+    posée dans l'environnement. C'est la vérité-terrain, pas une inspection
+    des fixtures : si la neutralisation disparaît d'une classe de base, il
+    tombe.
+    """
+
+    RACINE = Path(__file__).parent
+
+    def _relance(self, module):
+        import subprocess
+        env = dict(os.environ)
+        env["ALPACA_ACCOUNT_ID"] = "PACOMPTEDECLARE"
+        # Sentinelle de récursion : le test qui vérifie qu'aucun test ne
+        # touche l'état de production lance lui-même `unittest discover`.
+        # Sans elle, ce module se relancerait sans fin — c'est arrivé, dix
+        # minutes avant que je l'arrête.
+        env["HINDSIGHT_SOUS_EXECUTION"] = "1"
+        # Borne OBLIGATOIRE : un test de ce dépôt refuse tout sous-processus
+        # non borné.
+        return subprocess.run(
+            [sys.executable, "-m", "unittest", module],
+            cwd=str(self.RACINE), env=env, capture_output=True,
+            text=True, timeout=600)
+
+    def test_un_compte_declare_dans_l_environnement_ne_rougit_pas_la_suite(self):
+        for module in ("test_agent", "test_risk_gates"):
+            with self.subTest(module=module):
+                r = self._relance(module)
+                self.assertEqual(
+                    r.returncode, 0,
+                    "%s devient rouge quand ALPACA_ACCOUNT_ID est déclaré : "
+                    "la suite dépend de la configuration de l'opérateur, et "
+                    "elle mentira toute la semaine live.\n%s"
+                    % (module, r.stderr[-1200:]))
+
+
 class TestLaVerificationDeKickoff(unittest.TestCase):
     """`verifier_le_kickoff.py` : une seule commande qui dit ce qui reste à
     faire. Il ne REFAIT rien — il délègue à `garde_fou.py` et
@@ -5023,7 +5086,9 @@ class TestLaVerificationDeKickoff(unittest.TestCase):
 
         Constaté EN VRAI le 28/08/2026, une heure avant le premier passage
         de l'agent, sur des clés qui ouvraient PA3I2OIKF5F4 alors que
-        PA3K8MP3MF0U était déclaré.
+        un AUTRE numéro était déclaré. (Le numéro réel n'est pas écrit ici :
+        le garde-fou signale tout fichier qui porte la valeur de
+        ALPACA_ACCOUNT_ID, et un test n'a aucun besoin de la vraie.)
 
         Ce contrôle cherchait la chaîne « MAUVAIS COMPTE » dans la sortie de
         test_connection.py. Or ce script ne l'imprimait PAS : elle vivait
@@ -5056,7 +5121,7 @@ class TestLaVerificationDeKickoff(unittest.TestCase):
         passage satisferait le test ci-dessus — et un compte parfaitement
         correct serait signalé comme une anomalie toute la semaine."""
         sortie = self._verdict_du_compte(
-            'print("All good - account PA3K8MP3MF0U confirmed.")')
+            'print("All good - account PACOMPTEDECLARE confirmed.")')
         self.assertIn("\U0001f7e2", sortie,
                       "un compte confirmé n'est pas annoncé en vert : %s"
                       % sortie.strip())
