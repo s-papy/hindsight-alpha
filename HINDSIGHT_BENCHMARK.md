@@ -106,6 +106,16 @@ Le jeu D montre qu'avec le seuil livré (**0.0**) rien ne protège contre une s�
 
 **Jusqu'à 0.30 le coût ne bouge pas** — 30.2 % dans les deux cas — pendant que le bruit certifié tombe de 52.0 % à 34.6 %. Ce n'est pas un arbitrage à cet endroit : c'est un gain sans contrepartie mesurable. L'arbitrage commence vers 0.60, où 8 % de bruit se paient 3.1 points de vrais edges refusés.
 
+### Décision prise le 28/08/2026 : **le seuil reste à 0.0**
+
+Décision de Spap, prise le jour du kickoff après avoir vu ces chiffres, et à revoir **après le 04/09**. Les raisons, dans l'ordre où elles pèsent :
+
+1. **Les backtests publiés emploient 0.0.** Changer le seuil sans régénérer `BACKTEST_RESULTS.md` et `STRATEGY_COMPARISON.md` laisserait les livrables décrire une règle que l'agent n'applique plus — précisément le défaut que ce projet existe pour attraper.
+2. **La semaine live est le seul résultat hors échantillon du dossier.** Ajuster un paramètre la veille, c'est en faire un énième backtest ajusté.
+3. Le gain est mesuré sur un **modèle synthétique**, pas sur la vraie distribution des Sharpe.
+
+La mesure reste publiée telle quelle. *« Voici notre seuil, voici ce qu'il nous coûte, voici pourquoi nous ne l'avons pas touché avant la semaine live »* est un meilleur argument que l'optimisation silencieuse — et c'est la thèse de ce projet appliquée à lui-même.
+
 *Mesuré sur le modèle synthétique de ce banc (σ=0.30, ρ=0.70), pas sur la vraie distribution des Sharpe. Et changer ce seuil invaliderait les backtests publiés, qui emploient 0.0 : c'est une décision de méthode, pas un réglage.*
 
 ## Ce que ce banc ne démontre pas

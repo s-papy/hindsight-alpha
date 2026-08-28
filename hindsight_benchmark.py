@@ -523,6 +523,29 @@ def construire_rapport() -> str:
              % (seuils[0][2], seuils[0][1], seuils[3][1],
                 seuils[5][2] - seuils[0][2]))
     L.append("")
+    L.append("### Décision prise le 28/08/2026 : **le seuil reste à 0.0**")
+    L.append("")
+    L.append("Décision de Spap, prise le jour du kickoff après avoir vu ces "
+             "chiffres, et à revoir **après le 04/09**. Les raisons, dans "
+             "l'ordre où elles pèsent :")
+    L.append("")
+    L.append("1. **Les backtests publiés emploient 0.0.** Changer le seuil "
+             "sans régénérer `BACKTEST_RESULTS.md` et "
+             "`STRATEGY_COMPARISON.md` laisserait les livrables décrire une "
+             "règle que l'agent n'applique plus — précisément le défaut que "
+             "ce projet existe pour attraper.")
+    L.append("2. **La semaine live est le seul résultat hors échantillon du "
+             "dossier.** Ajuster un paramètre la veille, c'est en faire un "
+             "énième backtest ajusté.")
+    L.append("3. Le gain est mesuré sur un **modèle synthétique**, pas sur la "
+             "vraie distribution des Sharpe.")
+    L.append("")
+    L.append("La mesure reste publiée telle quelle. *« Voici notre seuil, "
+             "voici ce qu'il nous coûte, voici pourquoi nous ne l'avons pas "
+             "touché avant la semaine live »* est un meilleur argument que "
+             "l'optimisation silencieuse — et c'est la thèse de ce projet "
+             "appliquée à lui-même.")
+    L.append("")
     L.append("*Mesuré sur le modèle synthétique de ce banc (σ=%.2f, ρ=%.2f), "
              "pas sur la vraie distribution des Sharpe. Et changer ce seuil "
              "invaliderait les backtests publiés, qui emploient 0.0 : c'est "
