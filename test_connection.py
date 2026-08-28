@@ -79,7 +79,24 @@ def main() -> None:
         verdict, detail = "OK", ""
 
     if verdict == "MAUVAIS COMPTE":
-        print("\nSTOP: %s" % detail)
+        # Le VERDICT est imprime, pas seulement le detail. Corrige le
+        # 28/08/2026 a 20h35, une heure avant le premier passage de l'agent,
+        # sur un vrai mauvais compte.
+        #
+        # verifier_le_kickoff.py cherche la chaine « MAUVAIS COMPTE » dans la
+        # sortie de ce script. Elle n'y etait JAMAIS : elle vivait seulement
+        # dans la variable `verdict`, et ce qu'on imprimait etait
+        # « STOP: the declared identifier is ... ». Mesure : zero occurrence
+        # de « MAUVAIS COMPTE » dans un print de ce fichier.
+        #
+        # Consequence constatee en vrai : l'etat le PLUS dangereux -- les cles
+        # ouvrent un compte qui n'est pas celui declare -- s'affichait
+        # « 🟡 compte Alpaca : non verifie » au lieu de « 🔴 ne lance pas
+        # agent.py ». Le pire cas se lisait comme une simple incertitude.
+        #
+        # Meme famille que le defaut de coherence.py corrige cet apres-midi :
+        # deux fichiers couples par un TEXTE, et le texte a derive.
+        print("\nSTOP -- MAUVAIS COMPTE: %s" % detail)
         print("Do NOT run agent.py: it would trade the wrong account. If you "
               "just switched accounts, the switch did NOT take effect -- see "
               "the precedence warning config.py prints when a stale value is "

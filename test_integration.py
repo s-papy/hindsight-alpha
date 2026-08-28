@@ -5000,6 +5000,67 @@ class TestLaVerificationDeKickoff(unittest.TestCase):
                          "il doit toujours sortir en 0 : il informe, il ne "
                          "bloque pas")
 
+    def _verdict_du_compte(self, corps_du_faux_script):
+        """Remplace test_connection.py par un script jetable, dans une copie."""
+        import importlib.util, shutil, subprocess, tempfile, io, contextlib
+        with tempfile.TemporaryDirectory() as d:
+            shutil.copy(self.SCRIPT, Path(d) / self.SCRIPT.name)
+            Path(d, "test_connection.py").write_text(corps_du_faux_script,
+                                                     encoding="utf-8")
+            spec = importlib.util.spec_from_file_location(
+                "kickoff_compte", str(Path(d) / self.SCRIPT.name))
+            mod = importlib.util.module_from_spec(spec)
+            sys.modules["kickoff_compte"] = mod
+            spec.loader.exec_module(mod)
+            mod.RACINE = Path(d)
+            tampon = io.StringIO()
+            with contextlib.redirect_stdout(tampon):
+                mod.compte_reel()
+            return tampon.getvalue()
+
+    def test_un_MAUVAIS_COMPTE_est_ROUGE_meme_si_la_phrase_a_derive(self):
+        """Le pire cas se lisait comme une simple incertitude.
+
+        Constaté EN VRAI le 28/08/2026, une heure avant le premier passage
+        de l'agent, sur des clés qui ouvraient PA3I2OIKF5F4 alors que
+        PA3K8MP3MF0U était déclaré.
+
+        Ce contrôle cherchait la chaîne « MAUVAIS COMPTE » dans la sortie de
+        test_connection.py. Or ce script ne l'imprimait PAS : elle vivait
+        seulement dans une variable interne, et le texte affiché était
+        « STOP: the declared identifier is ... ». Mesure : zéro occurrence
+        dans un print. Le cas le plus dangereux tombait donc dans la branche
+        la plus douce, « 🟡 non vérifié ».
+
+        Même famille que le défaut de coherence.py corrigé le même
+        après-midi : deux fichiers couplés par un TEXTE, et le texte dérive.
+
+        Le sous-cas « ancien texte » est celui qui compte : il prouve que le
+        verdict ne dépend plus de la phrase, mais du code de sortie."""
+        cas = {
+            "texte actuel": 'print("STOP -- MAUVAIS COMPTE: X vs Y")\nimport sys;sys.exit(1)',
+            "ancien texte (dérivé)": 'print("STOP: the declared identifier is X")\nimport sys;sys.exit(1)',
+            "plantage muet": 'import sys;sys.exit(2)',
+        }
+        for nom, corps in cas.items():
+            with self.subTest(cas=nom):
+                sortie = self._verdict_du_compte(corps)
+                self.assertIn(
+                    "\U0001f534", sortie,
+                    "%s : une anomalie sur l'identité du compte est annoncée "
+                    "autrement qu'en ROUGE — c'est le cas le plus dangereux "
+                    "du script.\n    %s" % (nom, sortie.strip()))
+
+    def test_un_compte_CONFIRME_reste_VERT(self):
+        """TÉMOIN. Sans lui, un contrôle qui crierait au rouge à chaque
+        passage satisferait le test ci-dessus — et un compte parfaitement
+        correct serait signalé comme une anomalie toute la semaine."""
+        sortie = self._verdict_du_compte(
+            'print("All good - account PA3K8MP3MF0U confirmed.")')
+        self.assertIn("\U0001f7e2", sortie,
+                      "un compte confirmé n'est pas annoncé en vert : %s"
+                      % sortie.strip())
+
     def _depot_jetable(self, dossier, contenu_du_tag):
         """Un vrai depot git, un vrai objet tag, ecrit octet par octet.
 

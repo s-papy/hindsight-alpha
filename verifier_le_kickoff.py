@@ -200,7 +200,26 @@ def compte_reel() -> bool:
                       if "All good" in l or "confirmed" in l), "connexion OK")
         _dire(VERT, "compte Alpaca", ligne[:44])
         return True
-    _dire(JAUNE, "compte Alpaca", "non verifie (voir test_connection.py)")
+
+    # NE PAS DEPENDRE D'UNE PHRASE. Corrige le 28/08/2026 a 20h35, sur un vrai
+    # mauvais compte, une heure avant le premier passage de l'agent.
+    #
+    # Ce controle cherchait « MAUVAIS COMPTE » dans la sortie. Or
+    # test_connection.py n'imprimait PAS cette chaine -- elle vivait seulement
+    # dans une variable interne, et le texte affiche etait « STOP: ... ». Le
+    # cas le PLUS dangereux tombait donc dans le dernier `return False`, avec
+    # le message le plus doux du script : « non verifie ».
+    #
+    # La chaine est corrigee cote test_connection.py, mais un couplage par
+    # PHRASE derive tot ou tard -- c'est exactement ce qui vient d'arriver, et
+    # c'est le meme defaut que coherence.py corrige cet apres-midi. On ajoute
+    # donc une regle qui ne depend d'aucun texte : test_connection.py sort en
+    # ZERO quand tout va bien. Un code NON NUL est une anomalie, et une
+    # anomalie sur l'identite du compte se traite en ROUGE, pas en jaune.
+    _dire(ROUGE, "compte Alpaca",
+          "test_connection.py a rendu le code %d — anomalie non identifiee, "
+          "traitee comme bloquante. Lance-le a la main pour la raison exacte."
+          % r.returncode)
     return False
 
 
