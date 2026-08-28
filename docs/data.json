@@ -1,15 +1,15 @@
 {
-  "generated_at": "2026-08-28T18:00:05.282944+00:00",
+  "generated_at": "2026-08-28T18:30:06.003625+00:00",
   "team": "Hindsight Alpha",
   "source": "https://github.com/s-papy/hindsight-alpha",
   "author": "Spap",
   "license": "MIT",
   "account": {
-    "account_number": "PA3I2OIKF5F4",
+    "account_number": "PA3K8MP3MF0U",
     "status": "ACTIVE",
-    "equity": "98847.47",
-    "cash": "98847.47",
-    "buying_power": "395389.88"
+    "equity": "100000",
+    "cash": "100000",
+    "buying_power": "400000"
   },
   "positions": [],
   "recent_decisions": [
@@ -714,7 +714,7 @@
     }
   ],
   "monitor_status": {
-    "last_run_at": "2026-08-28T18:00:05.272540+00:00",
+    "last_run_at": "2026-08-28T18:30:05.994115+00:00",
     "outcome": "checked",
     "market_open": true,
     "dry_run": false
