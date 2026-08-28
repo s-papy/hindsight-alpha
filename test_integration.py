@@ -5059,30 +5059,46 @@ class TestAucunTestNeTouchePasLEtatDeProduction(unittest.TestCase):
     # recursion.
     MARQUEUR = "HINDSIGHT_SOUS_EXECUTION"
 
-    def test_la_suite_ne_recree_pas_state_json(self):
+    def test_la_suite_ne_touche_aucun_fichier_de_production(self):
+        """Généralisé le 28/08 : le garde ne surveillait que `state.json`,
+        parce que c'est là que le défaut a été trouvé. Mais la classe du
+        défaut n'est pas ce fichier — c'est « un test qui écrit là où la
+        production lit ».
+
+        `decision_log.jsonl` est le plus exposé des autres : il est committé
+        ET publié sur le tableau de bord public. Un enregistrement fictif
+        ajouté par un test partirait sur GitHub Pages.
+
+        Mesuré : aucun n'est touché aujourd'hui. Ce test empêche que ça
+        change en silence."""
+        import hashlib
+        import subprocess
         if os.environ.get(self.MARQUEUR):
             self.skipTest("sous-execution : on ne se relance pas soi-meme")
-        import subprocess
+
         racine = Path(__file__).parent
-        etat = racine / "state.json"
-        sauvegarde = etat.read_bytes() if etat.exists() else None
-        try:
-            if etat.exists():
-                etat.unlink()
-            env = dict(os.environ, **{self.MARQUEUR: "1"})
-            subprocess.run([sys.executable, "-m", "unittest", "discover",
-                            "-p", "test_*.py"], cwd=racine, env=env,
-                           capture_output=True, text=True, timeout=600)
-            recree = etat.exists()
-            contenu = etat.read_text(encoding="utf-8")[:200] if recree else ""
-        finally:
-            if etat.exists():
-                etat.unlink()
-            if sauvegarde is not None:
-                etat.write_bytes(sauvegarde)
-        self.assertFalse(recree,
-                         "la suite de tests écrit dans l'état de risque de "
-                         "production : %s" % contenu)
+        cibles = ["state.json", "decision_log.jsonl", "monitor_exits_dedup.json",
+                  "monitor_last_run.json", "docs/data.json",
+                  "kickoff_freeze.json", "HALT"]
+
+        def empreinte(nom):
+            f = racine / nom
+            return hashlib.md5(f.read_bytes()).hexdigest() if f.exists() else None
+
+        avant = {c: empreinte(c) for c in cibles}
+        env = dict(os.environ, **{self.MARQUEUR: "1"})
+        subprocess.run([sys.executable, "-m", "unittest", "discover",
+                        "-p", "test_*.py"], cwd=racine, env=env,
+                       capture_output=True, text=True, timeout=900)
+        apres = {c: empreinte(c) for c in cibles}
+
+        touches = ["%s (%s)" % (c, "créé" if avant[c] is None
+                                else "supprimé" if apres[c] is None
+                                else "modifié")
+                   for c in cibles if avant[c] != apres[c]]
+        self.assertEqual(touches, [],
+                         "la suite de tests écrit dans des fichiers que la "
+                         "production lit : %s" % ", ".join(touches))
 
 
 if __name__ == "__main__":
