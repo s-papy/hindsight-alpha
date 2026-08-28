@@ -31,6 +31,7 @@ import sys
 import tempfile
 import types
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 os.environ.setdefault("ALPACA_API_KEY", "cle-de-test")
@@ -228,6 +229,91 @@ class TestOrdreAuSortInconnu(BaseAgent):
         self.assertEqual(record["outcome"], "order_submitted")
         for s in ("AAA", "BBB"):
             self.assertEqual(self._trade(record, s)["outcome"], "order_submitted")
+
+
+class TestLaMargeEstECRITEDansLeJournal(BaseAgent):
+    """Mesurer sans écrire ne servirait à rien : la marge doit être
+    VÉRIFIABLE APRÈS COUP, dans l'enregistrement du passage.
+
+    L'horloge factice de BaseAgent ne porte pas de `next_close` — c'est
+    d'ailleurs ce qui a prouvé, sur les 480 tests, que l'ajout ne lève pas
+    quand le champ manque. Ici on le fournit."""
+
+    def test_la_marge_et_la_cloche_sont_enregistrees(self):
+        cloche = (datetime.now(timezone.utc) + timedelta(minutes=23)).isoformat()
+        alpaca_cli.get_clock = lambda: {"is_open": True, "next_close": cloche}
+        record = self._lance(["SPY"])
+        self.assertEqual(record.get("next_close"), cloche)
+        self.assertIsNotNone(record.get("minutes_before_close"),
+                             "la marge avant la cloche n'est pas enregistrée : "
+                             "elle ne pourra pas être vérifiée après coup")
+        self.assertEqual(record["minutes_before_close"], 22)
+
+    def test_une_cloche_ABSENTE_ne_fait_pas_tomber_le_passage(self):
+        """TÉMOIN : l'API peut ne pas renvoyer le champ. Le passage doit
+        continuer — mesurer la marge n'est pas une condition pour trader, et
+        transformer une information manquante en panne serait pire que le
+        défaut d'origine."""
+        alpaca_cli.get_clock = lambda: {"is_open": True}
+        record = self._lance(["SPY"])
+        self.assertIsNone(record.get("minutes_before_close"))
+        self.assertNotEqual(record.get("outcome"), "unknown",
+                            "le passage ne s'est pas déroulé")
+
+
+class TestLaMargeAvantLaCloche(unittest.TestCase):
+    """L'agent est planifié à 21:37 CEST — 15:37 à New York, soit VINGT-TROIS
+    minutes avant la cloche.
+
+    L'horloge du marché n'était lue qu'UNE fois, au démarrage, et
+    `next_close` — pourtant documenté dans `alpaca_cli.get_clock` — n'était
+    lu NULLE PART dans le dépôt. Un ordre parti après la cloche est le plus
+    souvent rejeté, et ce cas dégrade proprement (ECHECS_TERMINAUX). Mais un
+    ordre simplement MIS EN FILE pour la séance suivante remonterait
+    « accepted » : la position s'ouvrirait au prix d'ouverture du lendemain,
+    pas à celui que la décision a examiné, et rien ne le dirait.
+
+    Aucun refus n'a été ajouté — ce serait un garde de risque, et aucun seuil
+    de ce dépôt ne bouge sans décision humaine. On MESURE, et la marge est
+    écrite dans le journal de décision.
+    """
+
+    def test_une_marge_lisible_est_rendue_en_minutes(self):
+        futur = (datetime.now(timezone.utc) + timedelta(minutes=45)).isoformat()
+        self.assertEqual(agent._minutes_avant(futur), 44)
+
+    def test_le_suffixe_Z_est_compris(self):
+        """Alpaca écrit ses horodatages avec un Z, pas un +00:00."""
+        futur = (datetime.now(timezone.utc)
+                 + timedelta(minutes=90)).isoformat().replace("+00:00", "Z")
+        self.assertEqual(agent._minutes_avant(futur), 89)
+
+    def test_une_marge_ILLISIBLE_rend_None_et_JAMAIS_zero(self):
+        """Le point qui compte, et c'est le motif de tout ce dépôt.
+
+        Zéro se lirait « il ne reste plus une minute » — une mesure, et une
+        alarmante. None se lit « je ne sais pas », et le champ manque alors
+        dans le journal, ce qui se voit. « Je n'ai pas compris » n'est pas
+        « il n'y a rien »."""
+        for valeur in (None, "", "pas une date", 12345, [], {}):
+            with self.subTest(valeur=valeur):
+                self.assertIsNone(
+                    agent._minutes_avant(valeur),
+                    "une marge illisible (%r) est rendue comme un nombre : "
+                    "elle sera lue comme une mesure" % (valeur,))
+
+    def test_une_cloche_DEJA_passee_rend_un_negatif_pas_None(self):
+        """TÉMOIN. Sans lui, une fonction qui rendrait None à tout coup
+        passerait le test ci-dessus — et la marge ne serait jamais mesurée.
+
+        Un négatif est une information réelle : la cloche est passée. Le
+        confondre avec « illisible » effacerait précisément le cas qu'on
+        cherche à voir."""
+        passe = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
+        marge = agent._minutes_avant(passe)
+        self.assertIsNotNone(marge, "une cloche déjà passée est traitée comme "
+                                    "illisible : le cas dangereux disparaît")
+        self.assertLess(marge, 0)
 
 
 class TestRefusAuDemarrage(unittest.TestCase):

@@ -334,6 +334,25 @@ def main() -> None:
         )
 
 
+def _minutes_avant(horodatage) -> "int | None":
+    """Minutes d'ici a `horodatage` ISO-8601, ou None si illisible.
+
+    « Illisible » rend None et non zero : on ne connait pas la marge, ce
+    n'est pas qu'elle est nulle. Le champ manque alors dans le journal, ce
+    qui se voit -- au lieu d'un « 0 » qui se lirait comme une mesure.
+    """
+    if not horodatage:
+        return None
+    try:
+        from datetime import datetime, timezone
+        t = datetime.fromisoformat(str(horodatage).replace("Z", "+00:00"))
+        if t.tzinfo is None:
+            t = t.replace(tzinfo=timezone.utc)
+        return int((t - datetime.now(timezone.utc)).total_seconds() // 60)
+    except (ValueError, TypeError):
+        return None
+
+
 def _run(args, symbols, record: dict) -> None:
     config.require_credentials()
 
@@ -348,6 +367,38 @@ def _run(args, symbols, record: dict) -> None:
             )
             record["outcome"] = "market_closed"
             return
+
+        # COMBIEN DE TEMPS RESTE-T-IL ? Ajoute le 28/08/2026, premier soir de
+        # la semaine live. L'agent est planifie a 21:37 CEST, soit 15:37 a New
+        # York : VINGT-TROIS MINUTES avant la cloche. L'horloge n'etait lue
+        # qu'UNE fois, au depart, et `next_close` -- pourtant documente dans
+        # alpaca_cli.get_clock -- n'etait lu NULLE PART dans le depot.
+        #
+        # Un ordre parti apres la cloche est le plus souvent REJETE, et ce cas
+        # degrade proprement (voir ECHECS_TERMINAUX). Mais un ordre simplement
+        # MIS EN FILE pour la seance suivante remonterait « accepted » : la
+        # position s'ouvrirait au prix d'ouverture du lendemain, pas a celui
+        # que la decision a examine, et rien ne le dirait.
+        #
+        # ON NE REFUSE RIEN ICI, deliberement. Poser un delai minimum serait
+        # ajouter un garde de risque, et aucun seuil de ce depot ne bouge sans
+        # decision humaine explicite. On MESURE et on ECRIT : la marge est
+        # desormais dans le journal de decision, donc verifiable apres coup,
+        # et un passage trop tardif se voit au lieu de se deviner.
+        record["next_close"] = clock.get("next_close")
+        record["minutes_before_close"] = _minutes_avant(clock.get("next_close"))
+        if record["minutes_before_close"] is not None:
+            print("  %d minute(s) before the close." % record["minutes_before_close"])
+            if record["minutes_before_close"] < 30:
+                print(
+                    "  WARNING: this run starts less than 30 minutes before the "
+                    "close. If it is still submitting when the bell rings, an "
+                    "order can come back 'accepted' and QUEUE for the next "
+                    "session -- filling at tomorrow's open, not at the price "
+                    "this decision looked at. Nothing is blocked here; the "
+                    "margin is recorded so it can be checked afterwards.",
+                    flush=True,
+                )
     else:
         record["market_open"] = None
 
