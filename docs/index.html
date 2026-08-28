@@ -539,6 +539,25 @@ function renderMonitorHealth(decisions, monitorStatus, generatedAt) {
       text = `🟡 Exit monitor: the last run (${ageText}) did not complete a check `
            + `— it reported "${lastOutcome === null || lastOutcome === undefined ? 'no outcome' : String(lastOutcome)}", `
            + `not a finished pass. No position was verified; treat this as unknown, not healthy.`;
+    } else if (monitorStatus.dry_run) {
+      // AJOUTE le 27/08/2026. Un dry-run ne ferme AUCUNE position -- c'est sa
+      // definition. Il produit pourtant un horodatage frais et
+      // outcome === 'checked', donc il franchissait toutes les portes
+      // ci-dessous jusqu'au vert. Mesure : moniteur programme mort, banniere
+      // rouge ; un seul `monitor_exits.py --dry-run` lance a la main, et la
+      // meme banniere passait au 🟢 « healthy » sans qu'une seule position
+      // ait ete protegee.
+      //
+      // Meme faute que le Ctrl-C juste au-dessus, et corrigee des deux cotes
+      // pour la meme raison : le moniteur doit DIRE qu'il n'a rien ferme, et
+      // la page doit REFUSER d'appeler ca une bonne sante.
+      //
+      // `undefined` sur un data.json publie avant ce champ reste faux, donc
+      // le comportement des anciennes pages ne change pas.
+      cls = 'health-yellow';
+      text = `🟡 Exit monitor: the last run (${ageText}) was a DRY RUN — it reported `
+           + `what it would do and closed nothing. No position was actually protected; `
+           + `this says the script runs, not that exits are being enforced.`;
     } else if (ageMs === null) {
       // L'horodatage est illisible. La page annoncait, mot pour mot, "last
       // check unknown time ago, healthy" -- elle se contredisait dans la meme

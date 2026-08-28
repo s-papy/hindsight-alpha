@@ -282,6 +282,63 @@ class TestBanniereDeSante(BaseRendu):
                          "la bannière accuse le moniteur alors que c'est la "
                          "page qui est vieille")
 
+    def test_un_dry_run_n_a_jamais_droit_au_vert(self):
+        """Un dry-run ne ferme AUCUNE position — c'est sa définition. Il
+        produit pourtant un horodatage frais et `outcome: "checked"`, donc il
+        franchissait toutes les portes jusqu'au vert.
+
+        Mesuré : moniteur programmé mort, bannière rouge ; un seul
+        `monitor_exits.py --dry-run` lancé à la main, et la même bannière
+        passait au 🟢 « healthy » sans qu'une seule position ait été protégée.
+
+        Même faute que le Ctrl-C corrigé le même jour, mais en pire : le Ctrl-C
+        est un accident, le dry-run est ce que le README et le script vidéo
+        disent de lancer."""
+        r = self.executer(self.PRE + """
+            renderMonitorHealth([], {last_run_at: ilYA(0.1), outcome:"checked",
+                                     dry_run: true}, ilYA(0.1));
+            _resultats.classe = lire().className;
+            _resultats.texte  = lire().textContent;
+        """)
+        self.assertNotEqual(r["classe"], "health-green",
+                            "un dry-run est annoncé « healthy » alors qu'il "
+                            "n'a rien fermé : %r" % r["texte"])
+        self.assertEqual(r["classe"], "health-yellow")
+        self.assertIn("DRY RUN", r["texte"])
+
+    def test_un_run_reel_reste_vert(self):
+        """TÉMOIN. Sans lui, refuser le vert à TOUT passerait le test
+        ci-dessus — et la bannière ne dirait plus jamais que tout va bien."""
+        r = self.executer(self.PRE + """
+            renderMonitorHealth([], {last_run_at: ilYA(0.1), outcome:"checked",
+                                     dry_run: false}, ilYA(0.1));
+            _resultats.classe = lire().className;
+        """)
+        self.assertEqual(r["classe"], "health-green")
+
+    def test_une_page_publiee_avant_ce_champ_se_comporte_comme_avant(self):
+        """SECOND TÉMOIN : `dry_run` absent (data.json d'avant ce correctif)
+        vaut `undefined`, donc faux. Le comportement des anciennes pages ne
+        doit pas changer — sinon le correctif repeindrait en jaune tout
+        l'historique déjà publié."""
+        r = self.executer(self.PRE + """
+            renderMonitorHealth([], {last_run_at: ilYA(0.1), outcome:"checked"},
+                                ilYA(0.1));
+            _resultats.classe = lire().className;
+        """)
+        self.assertEqual(r["classe"], "health-green")
+
+    def test_un_dry_run_EN_ECHEC_reste_rouge(self):
+        """L'ordre des branches compte : un échec l'emporte sur le dry-run.
+        Sinon un vrai plantage serait adouci en jaune parce qu'il se trouve
+        avoir été lancé en dry-run."""
+        r = self.executer(self.PRE + """
+            renderMonitorHealth([], {last_run_at: ilYA(0.1), outcome:"error",
+                                     dry_run: true}, ilYA(0.1));
+            _resultats.classe = lire().className;
+        """)
+        self.assertEqual(r["classe"], "health-red")
+
     def test_un_moniteur_reellement_en_echec_passe_au_rouge(self):
         r = self.executer(self.PRE + """
             renderMonitorHealth([], {last_run_at: ilYA(0.1), outcome:"error"}, ilYA(0.1));

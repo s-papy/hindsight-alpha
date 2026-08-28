@@ -3775,5 +3775,57 @@ class TestProvenanceDesFichiers(unittest.TestCase):
         self.assertIn("s-papy.github.io/hindsight-alpha", page)
 
 
+class TestStatutDuMoniteurDitSIlAAgi(unittest.TestCase):
+    """L'autre moitié du correctif « un dry-run n'est pas une bonne santé ».
+
+    `dry_run` était présent dans le `record` du moniteur et abandonné à la
+    dernière marche, au moment d'écrire le fichier d'état que lit la bannière
+    publique. La page ne pouvait donc pas distinguer un passage qui protège
+    des positions d'un passage qui se contente de dire ce qu'il ferait."""
+
+    def setUp(self):
+        import monitor_exits
+        self.m = monitor_exits
+        self.dossier = tempfile.mkdtemp(prefix="hindsight-moniteur-")
+        self._chemin = monitor_exits.MONITOR_STATUS_FILE
+        monitor_exits.MONITOR_STATUS_FILE = Path(self.dossier) / "statut.json"
+
+    def tearDown(self):
+        self.m.MONITOR_STATUS_FILE = self._chemin
+        shutil.rmtree(self.dossier, ignore_errors=True)
+
+    def _ecrire(self, dry_run):
+        from datetime import datetime, timezone
+        self.m._write_last_run_status(
+            {"run_type": "exit_monitor", "dry_run": dry_run,
+             "outcome": "checked", "market_open": True},
+            datetime.now(timezone.utc))
+        with open(self.m.MONITOR_STATUS_FILE, encoding="utf-8") as fh:
+            return json.load(fh)
+
+    def test_un_dry_run_se_declare_comme_tel(self):
+        self.assertIs(self._ecrire(True).get("dry_run"), True,
+                      "le fichier d'état ne dit pas que le passage était un "
+                      "dry-run — la bannière ne peut donc pas le savoir")
+
+    def test_un_run_reel_se_declare_comme_tel(self):
+        """TÉMOIN : sans lui, écrire `true` en dur passerait le test ci-dessus
+        et rendrait la bannière jaune pour toujours."""
+        self.assertIs(self._ecrire(False).get("dry_run"), False)
+
+    def test_le_champ_est_un_booleen_pas_une_valeur_quelconque(self):
+        """La page teste `monitorStatus.dry_run` en vérité JS. Un `None`
+        recopié tel quel serait `null`, donc faux — un dry-run mal formé
+        redeviendrait vert en silence."""
+        from datetime import datetime, timezone
+        self.m._write_last_run_status(
+            {"outcome": "checked"}, datetime.now(timezone.utc))
+        with open(self.m.MONITOR_STATUS_FILE, encoding="utf-8") as fh:
+            valeur = json.load(fh).get("dry_run")
+        self.assertIsInstance(valeur, bool,
+                              "un record sans `dry_run` produit %r au lieu "
+                              "d'un booléen" % (valeur,))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

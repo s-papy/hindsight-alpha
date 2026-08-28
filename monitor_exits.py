@@ -144,6 +144,20 @@ def _write_last_run_status(record: Dict[str, object], now: datetime) -> None:
             "last_run_at": now.isoformat(),
             "outcome": record.get("outcome", "unknown"),
             "market_open": record.get("market_open"),
+            # AJOUTE le 27/08/2026. `dry_run` etait present dans `record` et
+            # abandonne ICI, a la derniere marche. Consequence mesuree :
+            #
+            #   moniteur programme mort, aucune protection reelle depuis des
+            #   heures -> banniere rouge. L'operateur lance
+            #   `monitor_exits.py --dry-run` pour regarder -> horodatage
+            #   frais, outcome "checked" -> banniere 🟢 HEALTHY.
+            #
+            # Aucune position n'a ete fermee : un dry-run ne ferme rien, par
+            # definition. Exactement la meme faute que le Ctrl-C corrige plus
+            # haut -- un run qui ne protege rien repeint l'indicateur en vert
+            # -- mais en pire : le Ctrl-C est un accident, le dry-run est ce
+            # que le README ET le script video disent de lancer.
+            "dry_run": bool(record.get("dry_run", False)),
         }), encoding="utf-8")
     except Exception as e:
         print(f"  WARNING: could not persist {MONITOR_STATUS_FILE.name} ({type(e).__name__}: {e}) -- "
