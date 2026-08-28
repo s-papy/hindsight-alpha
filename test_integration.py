@@ -4975,6 +4975,62 @@ class TestLesJobsTombentDansLaFenetreDeVeille(unittest.TestCase):
                             for a, b in trous])
 
 
+class TestLaSantePubliqueDeLAgent(unittest.TestCase):
+    """Le tableau de bord publie désormais l'état du dernier passage de
+    l'agent, pas seulement celui du moniteur de sorties.
+
+    `agent.py` n'a PAS été modifié le soir du kickoff, délibérément : il
+    tournait un quart d'heure plus tard pour son premier passage live, et
+    une erreur y aurait coûté la journée. Un `finally` garantit déjà qu'il
+    écrit une entrée dans decision_log.jsonl à CHAQUE passage — quoi qu'il
+    arrive. L'information existait, elle n'était simplement pas publiée.
+    """
+
+    def _extraire(self, entrees):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "publish_sous_test", str(Path(__file__).parent / "publish_dashboard.py"))
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules["publish_sous_test"] = mod
+        spec.loader.exec_module(mod)
+        return mod._dernier_passage_de_l_agent(entrees)
+
+    def test_le_dernier_passage_de_l_agent_est_trouve(self):
+        """read_log rend du PLUS RÉCENT au plus ancien (vérifié) : on doit
+        donc prendre la première entrée d'agent, pas la dernière."""
+        etat = self._extraire([
+            {"run_type": "exit_monitor", "timestamp": "2026-08-28T18:00:00Z"},
+            {"timestamp": "2026-08-28T17:00:00Z", "outcome": "no_trade",
+             "symbols": ["SPY", "GLD"], "trades": []},
+            {"timestamp": "2026-08-27T17:00:00Z", "outcome": "order_submitted",
+             "symbols": ["SPY"], "trades": [{"symbol": "SPY"}]},
+        ])
+        self.assertEqual(etat["last_run_at"], "2026-08-28T17:00:00Z",
+                         "ce n'est pas le passage le plus récent")
+        self.assertEqual(etat["outcome"], "no_trade")
+        self.assertEqual(etat["symbols_evaluated"], 2)
+        self.assertEqual(etat["trades"], 0)
+
+    def test_un_journal_SANS_passage_d_agent_rend_None(self):
+        """TÉMOIN. Sans lui, une fonction qui rendrait n'importe quelle
+        entrée passerait le test ci-dessus — et une entrée de moniteur
+        serait publiée comme un passage d'agent, ce qui ferait paraître
+        vivant un agent mort."""
+        self.assertIsNone(self._extraire([
+            {"run_type": "exit_monitor", "timestamp": "2026-08-28T18:00:00Z"}]))
+        self.assertIsNone(self._extraire([]))
+
+    def test_une_entree_corrompue_ne_fait_pas_tomber_la_publication(self):
+        """Le journal peut contenir n'importe quoi — une ligne tronquée, un
+        null. La publication du tableau de bord ne doit jamais s'arrêter
+        là-dessus."""
+        etat = self._extraire(["pas un dict", None,
+                               {"timestamp": "2026-08-28T17:00:00Z",
+                                "outcome": "no_trade"}])
+        self.assertEqual(etat["last_run_at"], "2026-08-28T17:00:00Z")
+        self.assertEqual(etat["symbols_evaluated"], 0)
+
+
 class TestLaSuiteNeDependPasDeLaConfigurationDeLOperateur(unittest.TestCase):
     """Une suite qui lit le `.env` de la machine ment le jour où il change.
 

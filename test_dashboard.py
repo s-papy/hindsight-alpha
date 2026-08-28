@@ -282,6 +282,70 @@ class TestBanniereDeSante(BaseRendu):
                          "la bannière accuse le moniteur alors que c'est la "
                          "page qui est vieille")
 
+    def test_un_agent_MORT_n_est_pas_confondu_avec_un_agent_SANS_EDGE(self):
+        """LA distinction qui porte ce dossier.
+
+        Le tableau de bord publiait la santé du moniteur de SORTIES et RIEN
+        sur l'agent — celui qui prend les positions. Si `agent.py` meurt un
+        lundi, le moniteur continue de tourner toutes les 15 min, sa
+        bannière reste verte, la page affiche `positions: []`, et plus rien
+        ne distingue :
+
+          « a tourné et n'a rien retenu »  — un RÉSULTAT, le garde
+                                             anti-rétrospection au travail
+          « mort depuis trois jours »      — une PANNE
+
+        Le message doit dire explicitement qu'une liste vide signifie « ne
+        tourne pas », et non « pas d'edge »."""
+        r = self.executer(self.PRE + """
+            renderAgentHealth({last_run_at: ilYA(30), outcome: "no_trade",
+                               dry_run: false, symbols_evaluated: 4, trades: 0});
+            _resultats.classe = document.getElementById('agent-health-banner').className;
+            _resultats.texte  = document.getElementById('agent-health-banner').textContent;
+        """)
+        self.assertEqual(r["classe"], "health-red")
+        self.assertIn("MISSED", r["texte"])
+        self.assertIn('NOT "found no edge"', r["texte"],
+                      "la bannière ne dit pas ce qu'une liste vide signifie "
+                      "vraiment : %s" % r["texte"])
+
+    def test_un_agent_qui_a_tourne_sans_rien_retenir_reste_VERT(self):
+        """TÉMOIN, et c'est lui qui compte le plus.
+
+        Sans lui, une bannière qui crierait au rouge dès qu'aucun ordre n'est
+        passé transformerait le RÉSULTAT central du projet — refuser de
+        trader quand le garde anti-rétrospection dit non — en panne
+        permanente. Zéro ordre est une réponse, pas une défaillance."""
+        r = self.executer(self.PRE + """
+            renderAgentHealth({last_run_at: ilYA(0.2), outcome: "no_trade",
+                               dry_run: false, symbols_evaluated: 4, trades: 0});
+            _resultats.classe = document.getElementById('agent-health-banner').className;
+            _resultats.texte  = document.getElementById('agent-health-banner').textContent;
+        """)
+        self.assertEqual(r["classe"], "health-green",
+                         "zéro ordre est traité comme une panne : %s"
+                         % r["texte"])
+        self.assertIn("0 order(s) submitted", r["texte"])
+
+    def test_un_dry_run_de_l_agent_n_a_pas_droit_au_vert(self):
+        """Même leçon que pour le moniteur : un dry-run n'ouvre AUCUNE
+        position."""
+        r = self.executer(self.PRE + """
+            renderAgentHealth({last_run_at: ilYA(0.2), outcome: "no_trade",
+                               dry_run: true, symbols_evaluated: 4, trades: 0});
+            _resultats.classe = document.getElementById('agent-health-banner').className;
+        """)
+        self.assertEqual(r["classe"], "health-yellow")
+
+    def test_un_agent_sans_passage_du_tout_le_DIT(self):
+        r = self.executer(self.PRE + """
+            renderAgentHealth(null);
+            _resultats.classe = document.getElementById('agent-health-banner').className;
+            _resultats.texte  = document.getElementById('agent-health-banner').textContent;
+        """)
+        self.assertEqual(r["classe"], "health-muted")
+        self.assertIn("no run recorded", r["texte"])
+
     def test_une_publication_manquee_n_accuse_pas_le_moniteur(self):
         """La page transporte un horodatage plus vieux qu'elle-même.
 

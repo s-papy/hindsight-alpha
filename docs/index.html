@@ -158,7 +158,8 @@
     color: var(--red);
     font-size: 13px;
   }
-  #monitor-health-banner {
+  #monitor-health-banner,
+  #agent-health-banner {
     display: none;
     max-width: 960px;
     margin: 0 auto 20px;
@@ -166,12 +167,14 @@
     border-radius: 8px;
     font-size: 13px;
   }
-  #monitor-health-banner.health-red {
+  #monitor-health-banner.health-red,
+  #agent-health-banner.health-red {
     background: rgba(248,113,113,0.1);
     border: 1px solid var(--red);
     color: var(--red);
   }
-  #monitor-health-banner.health-yellow {
+  #monitor-health-banner.health-yellow,
+  #agent-health-banner.health-yellow {
     background: rgba(251,191,36,0.1);
     border: 1px solid var(--yellow);
     color: var(--yellow);
@@ -182,12 +185,14 @@
     .kickoff-divider td { background: #f6f7f9; color: #555; font-size: 0.85em;
       font-style: italic; text-align: center; padding: 10px 12px;
       border-top: 2px solid #d7dae0; border-bottom: 2px solid #d7dae0; }
-  #monitor-health-banner.health-green {
+  #monitor-health-banner.health-green,
+  #agent-health-banner.health-green {
     background: rgba(52,211,153,0.1);
     border: 1px solid var(--green);
     color: var(--green);
   }
-  #monitor-health-banner.health-muted {
+  #monitor-health-banner.health-muted,
+  #agent-health-banner.health-muted {
     background: rgba(139,146,165,0.1);
     border: 1px solid var(--border);
     color: var(--muted);
@@ -223,6 +228,7 @@
 
 <div id="leak-stat" class="leak-stat"></div>
 <div id="error-banner"></div>
+<div id="agent-health-banner"></div>
 <div id="monitor-health-banner"></div>
 
 <main>
@@ -271,6 +277,7 @@ async function loadDashboard() {
     const sections = [
       ["account", () => renderAccount(data.account)],
       ["positions", () => renderPositions(data.positions || [])],
+      ["agent-health-banner", () => renderAgentHealth(data.agent_status || null)],
       ["monitor-health-banner", () => renderMonitorHealth(
           data.recent_decisions || [], data.monitor_status || null,
           data.generated_at || null)],
@@ -423,6 +430,83 @@ function isUsMarketHoursNow() {
   const minute = parseInt(parts.minute, 10);
   const minutesSinceMidnight = hour * 60 + minute;
   return minutesSinceMidnight >= (9 * 60 + 30) && minutesSinceMidnight < (16 * 60);
+}
+
+function dernierPassageAttenduDeLAgent() {
+  // L'agent tourne UNE fois par jour OUVRE, a 19:37 UTC (21:37 CEST) --
+  // 15:37 a New York, 23 minutes avant la cloche. Une regle d'age simple
+  // (« plus de 26 h ») crierait au loup chaque lundi matin, apres un week-end
+  // sans passage : exactement la faute que la banniere du moniteur a evitee le
+  // 25/08 en tenant compte des heures de marche. On calcule donc le dernier
+  // passage ATTENDU, et on compare a lui.
+  const maintenant = new Date();
+  const cible = new Date(maintenant);
+  cible.setUTCHours(19, 37, 0, 0);
+  if (cible > maintenant) cible.setUTCDate(cible.getUTCDate() - 1);
+  let garde = 0;
+  while ((cible.getUTCDay() === 0 || cible.getUTCDay() === 6) && garde++ < 10) {
+    cible.setUTCDate(cible.getUTCDate() - 1);
+  }
+  return cible;
+}
+
+function renderAgentHealth(agentStatus) {
+  // AJOUTE le 28/08/2026, premier soir de la semaine live. Le tableau de bord
+  // publiait la sante du moniteur de SORTIES et RIEN sur l'agent, celui qui
+  // prend les positions. Si agent.py meurt un lundi, le moniteur continue de
+  // tourner, sa banniere reste verte, la page affiche « positions: [] » -- et
+  // plus rien ne distingue :
+  //
+  //   « l'agent a tourne et n'a rien retenu »  -- un RESULTAT (le garde
+  //                                               anti-retrospection au travail)
+  //   « l'agent est mort depuis trois jours »  -- une PANNE
+  //
+  // C'est pourtant la distinction qui porte tout ce dossier.
+  const el = document.getElementById('agent-health-banner');
+  if (!el) return;
+  let cls, text;
+
+  if (!agentStatus || !agentStatus.last_run_at) {
+    cls = 'health-muted';
+    text = '\u2B1C Agent: no run recorded yet \u2014 this banner fills in after '
+         + 'the first daily run.';
+  } else {
+    const ts = new Date(agentStatus.last_run_at).getTime();
+    const age = isNaN(ts) ? null : (Date.now() - ts);
+    const ageText = age === null ? 'unknown time ago' : fmtAge(age);
+    const enRetard = !isNaN(ts) && ts < dernierPassageAttenduDeLAgent().getTime();
+    const n = agentStatus.symbols_evaluated || 0;
+    const t = agentStatus.trades || 0;
+
+    if (agentStatus.dry_run) {
+      // Meme lecon que la banniere du moniteur : un dry-run ne prend AUCUNE
+      // position. Le laisser repeindre l'indicateur en vert dirait qu'on trade
+      // alors qu'on regarde.
+      cls = 'health-yellow';
+      text = '\u{1F7E1} Agent: last run was a DRY RUN (' + ageText + ') \u2014 it '
+           + 'submitted nothing, and opened no position.';
+    } else if (isNaN(ts)) {
+      cls = 'health-yellow';
+      text = '\u{1F7E1} Agent: a run was recorded but its timestamp is unreadable '
+           + '\u2014 there is no way to tell whether it was minutes or days ago.';
+    } else if (enRetard) {
+      cls = 'health-red';
+      text = '\u{1F534} Agent: last run ' + ageText + ' \u2014 it has MISSED at '
+           + 'least one scheduled daily run (19:37 UTC, weekdays). An empty '
+           + 'positions list below means "not running", NOT "found no edge".';
+    } else if (agentStatus.outcome === 'error' || agentStatus.outcome === 'interrupted') {
+      cls = 'health-red';
+      text = '\u{1F534} Agent: last run ' + ageText + ' ended as "'
+           + agentStatus.outcome + '".';
+    } else {
+      cls = 'health-green';
+      text = '\u{1F7E2} Agent: last run ' + ageText + ', ' + n
+           + ' symbol(s) evaluated, ' + t + ' order(s) submitted \u2014 on schedule.';
+    }
+  }
+  el.className = cls;
+  el.style.display = 'block';
+  el.textContent = text;
 }
 
 function renderMonitorHealth(decisions, monitorStatus, generatedAt) {

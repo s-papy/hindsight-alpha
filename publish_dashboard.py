@@ -64,6 +64,56 @@ def _read_monitor_status() -> dict | None:
         return None
 
 
+def _dernier_passage_de_l_agent(entrees) -> "dict | None":
+    """Quand agent.py a-t-il tourne pour la derniere fois, et comment ?
+
+    AJOUTE le 28/08/2026, premier soir de la semaine live. Le tableau de
+    bord publiait `monitor_status` -- la sante du moniteur de SORTIES -- et
+    RIEN sur l'agent, celui qui prend les positions.
+
+    Consequence, si agent.py meurt lundi : le moniteur continue de tourner
+    toutes les 15 minutes et sa banniere reste verte, la page affiche
+    `positions: []`, et plus rien ne distingue
+
+        « l'agent a tourne et n'a rien trouve »   -- un RESULTAT, le garde
+                                                    anti-retrospection qui fait
+                                                    son travail
+        « l'agent est mort depuis trois jours »   -- une PANNE
+
+    C'est pourtant la distinction qui porte tout ce dossier. Le moniteur a
+    eu sa banniere le 25/08, apres onze echecs silencieux ; l'agent n'a
+    jamais eu la sienne.
+
+    ON NE TOUCHE PAS A agent.py CE SOIR, deliberement : il tourne dans un
+    quart d'heure pour son premier passage live, et une erreur ici couterait
+    la journee. Un `finally` garantit deja qu'il ecrit une entree dans
+    decision_log.jsonl A CHAQUE passage, quoi qu'il arrive -- l'information
+    existe, elle n'etait simplement pas publiee. On la lit donc la, sans
+    rien changer au chemin de trading.
+
+    LIMITE ASSUMEE, et elle est reelle : les entrees de l'agent n'ont pas de
+    `run_type`, alors que celles du moniteur en ont un. On identifie donc
+    l'agent par la NEGATIVE. C'est fragile -- un futur `run_type` inconnu
+    serait pris pour l'agent -- et c'est pourquoi un marqueur explicite
+    `run_type: "agent"` sera pose des que le passage de ce soir sera
+    termine.
+    """
+    for e in entrees:
+        if not isinstance(e, dict):
+            continue
+        if e.get("run_type") in (None, "", "agent"):
+            return {
+                "last_run_at": e.get("timestamp"),
+                "outcome": e.get("outcome", "unknown"),
+                "dry_run": bool(e.get("dry_run", False)),
+                # Combien de symboles ont ete EXAMINES : distingue « a tourne
+                # et n'a rien retenu » de « a tourne et a tout rate ».
+                "symbols_evaluated": len(e.get("symbols") or []),
+                "trades": len(e.get("trades") or []),
+            }
+    return None
+
+
 # AJOUTE le 27/08/2026. Le commentaire de `account` ci-dessous enonce le
 # principe -- « le payload d'Alpaca est recopie ici, et il grandira » -- et
 # c'est pour cela que `account` a ete reduit a six champs choisis. `positions`,
@@ -138,6 +188,7 @@ def build_snapshot() -> dict:
     positions = alpaca_cli.list_positions()
     recent = decision_log.read_log(limit=30)
     monitor_status = _read_monitor_status()
+    agent_status = _dernier_passage_de_l_agent(decision_log.read_log(limit=200))
 
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -193,6 +244,7 @@ def build_snapshot() -> dict:
         "positions": [_position_publiable(p) for p in positions],
         "recent_decisions": recent,
         "monitor_status": monitor_status,
+        "agent_status": agent_status,
     }
 
 
