@@ -713,11 +713,12 @@ class TestSeparateurDuKickoff(BaseRendu):
                               "2026-08-24T19:05:00+00:00"])  # avant
         self.assertEqual(html.count("kickoff-divider"), 1,
                          "séparateur absent ou en double")
-        avant_sep = html.split("kickoff-divider")[0]
-        # `- 1` pour la ligne d'en-tête du <thead>, que mon premier comptage
-        # oubliait : l'assertion échouait pour cette raison, pas parce que le
-        # séparateur était mal placé.
-        lignes_au_dessus = avant_sep.count("<tr>") - 1
+        # On coupe sur la balise ENTIÈRE : `split("kickoff-divider")` tranchait
+        # au milieu de `<tr class="kickoff-divider">`, donc le `<tr` du
+        # séparateur restait du côté « au-dessus » et faussait le compte de un.
+        avant_sep = html.split('<tr class="kickoff-divider"')[0]
+        # `- 1` pour la ligne d'en-tête du <thead>.
+        lignes_au_dessus = avant_sep.count("<tr") - 1
         self.assertEqual(lignes_au_dessus, 2,
                          "le séparateur n'est pas à la frontière : %d ligne(s) "
                          "au-dessus au lieu de 2" % lignes_au_dessus)
@@ -742,7 +743,13 @@ class TestSeparateurDuKickoff(BaseRendu):
         # On compte les LIGNES de données, pas les « badge » : la classe
         # `badge badge-green` contient le mot deux fois, et mon premier
         # témoin échouait pour cette raison de comptage, pas de comportement.
-        lignes = html.count("<tr>") - html.count("kickoff-divider")
+        # Lignes de DONNÉES = toutes les balises `<tr`, moins l'en-tête du
+        # <thead>, moins la ligne du séparateur. L'ancien calcul soustrayait
+        # seulement le séparateur et tombait juste par COÏNCIDENCE : à
+        # l'époque le motif `"<tr>"` n'attrapait pas le séparateur, et le
+        # `- 1` retirait en fait l'en-tête. Les deux termes sont désormais
+        # nommés séparément.
+        lignes = html.count("<tr") - 1 - html.count('class="kickoff-divider"')
         self.assertEqual(lignes, len(horodatages),
                          "des enregistrements ont disparu du tableau : %d ligne(s) "
                          "pour %d décisions" % (lignes, len(horodatages)))
@@ -836,9 +843,9 @@ class TestIsolationParEnregistrement(BaseRendu):
                                 "%s : le tableau est VIDE — un seul "
                                 "enregistrement a tout emporté" % cas)
                 self.assertGreaterEqual(
-                    html.count("<tr>"), 3,
+                    html.count("<tr"), 3,
                     "%s : les enregistrements SAINS ont disparu avec lui "
-                    "(%d lignes)" % (cas, html.count("<tr>")))
+                    "(%d lignes)" % (cas, html.count("<tr")))
 
     def test_l_enregistrement_casse_est_signale_et_non_masque(self):
         """Sauter l'enregistrement en silence serait le pendant exact du
@@ -852,7 +859,11 @@ class TestIsolationParEnregistrement(BaseRendu):
     def test_des_enregistrements_sains_restent_intacts(self):
         """Témoin : l'isolation ne doit rien changer au cas normal."""
         html = self._rendu("%s, %s" % (self.SAIN, self.SAIN))
-        self.assertEqual(html.count("<tr>"), 3, html[:200])   # 2 lignes + entête
+        # `"<tr"` et non `"<tr>"` : depuis le 28/08 les lignes anterieures
+        # au kickoff portent une classe (elles sont ATTENUEES, jamais
+        # retirees), donc le motif exact ne les comptait plus. On compte
+        # toujours les LIGNES -- l'intention n'a pas bouge, le motif si.
+        self.assertEqual(html.count("<tr"), 3, html[:200])   # 2 lignes + entête
         self.assertNotIn("could not be rendered", html.lower())
 
 

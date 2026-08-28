@@ -182,9 +182,22 @@
     /* Ligne de separation du kickoff, ajoutee le 27/08. Volontairement
        discrete : elle EXPLIQUE, elle n'accuse pas. Rien n'est masque en
        dessous, tout y est date et dans l'ordre. */
-    .kickoff-divider td { background: #f6f7f9; color: #555; font-size: 0.85em;
-      font-style: italic; text-align: center; padding: 10px 12px;
-      border-top: 2px solid #d7dae0; border-bottom: 2px solid #d7dae0; }
+    /* COULEURS DU THEME, pas des valeurs claires codees en dur. Corrige le
+       28/08/2026 au soir : cette page est SOMBRE uniquement (--bg: #0b0d12,
+       aucun prefers-color-scheme), et le separateur posait une bande blanche
+       en plein milieu du tableau. */
+    .kickoff-divider td { background: rgba(139,146,165,0.10); color: var(--muted);
+      font-size: 0.85em; font-style: italic; text-align: center;
+      padding: 10px 12px;
+      border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+
+    /* LES LIGNES D'AVANT LE KICKOFF sont ATTENUEES, jamais retirees. Au 28/08
+       la fenetre de 30 enregistrements contient 11 erreurs reseau du 25/08 --
+       43 % de bruit anterieur a l'evenement juge. Les filtrer serait la
+       curation de preuves que ce projet denonce ailleurs ; les laisser au meme
+       contraste noie la semaine live. On baisse le contraste : le texte reste
+       lisible et selectionnable, et le separateur juste au-dessus dit pourquoi. */
+    tr.avant-kickoff td { opacity: 0.62; }
   #monitor-health-banner.health-green,
   #agent-health-banner.health-green {
     background: rgba(52,211,153,0.1);
@@ -1102,7 +1115,10 @@ function renderDecisions(decisions) {
         + `hidden — every run this project ever logged is still here, in order.`
         + `</td></tr>`;
     }
-    return separateur + `<tr>
+    // `separateurPose` est vrai des la PREMIERE ligne anterieure au
+    // kickoff : celle-la et toutes les suivantes portent la classe.
+    const classeLigne = separateurPose ? ' class="avant-kickoff"' : '';
+    return separateur + `<tr${classeLigne}>
       <td>${when}</td>
       <td>${outcomeBadge(d)}</td>
       <td>${trade}</td>
