@@ -4086,5 +4086,62 @@ class TestHookPreCommitNeSeTaitPas(unittest.TestCase):
                          "un plantage est annoncé comme un verdict rouge")
 
 
+class TestLeJournalNeRendQueDesEnregistrements(unittest.TestCase):
+    """`read_log` promettait d'ignorer « une ligne qui échoue à PARSER ». Mais
+    une ligne qui parse en autre chose qu'un objet n'est pas un enregistrement
+    non plus, et elle passait. Mesuré :
+
+        journal contenant "une chaine", 42, null, [1,2]
+        read_log() -> [None, 42, 'une chaine', ...]
+
+    Ces valeurs occupent des places dans la fenêtre des 30 derniers
+    enregistrements publiée par le tableau de bord — exactement le budget que
+    `monitor_exits.py` protège ailleurs avec son HEARTBEAT_SECONDS, pour
+    empêcher du bruit d'évincer les vraies décisions de la page publique.
+
+    ATTEIGNABILITÉ FAIBLE, et dite comme telle : `log_run()` n'écrit que des
+    dictionnaires, et une écriture interrompue produit du JSON invalide, donc
+    l'autre branche. Ce test aligne le contrat sur ce que la fonction promet,
+    il ne corrige pas une panne observée."""
+
+    def setUp(self):
+        import decision_log
+        self.d = decision_log
+        self.dossier = tempfile.mkdtemp(prefix="hindsight-journal-")
+        self._chemin = decision_log.LOG_FILE
+        decision_log.LOG_FILE = Path(self.dossier) / "journal.jsonl"
+
+    def tearDown(self):
+        self.d.LOG_FILE = self._chemin
+        shutil.rmtree(self.dossier, ignore_errors=True)
+
+    def _ecrire(self, contenu):
+        self.d.LOG_FILE.write_text(contenu, encoding="utf-8")
+
+    def test_les_valeurs_json_qui_ne_sont_pas_des_objets_sont_ignorees(self):
+        self._ecrire('"une chaine"\n42\nnull\ntrue\n[1,2]\n')
+        self.assertEqual(self.d.read_log(), [],
+                         "des valeurs JSON qui ne sont pas des enregistrements "
+                         "sont rendues comme tels")
+
+    def test_les_vrais_enregistrements_survivent(self):
+        """TÉMOIN : sans lui, tout filtrer passerait le test ci-dessus et
+        viderait le tableau de bord."""
+        self._ecrire('{"run_type":"a"}\n{"run_type":"b"}\n')
+        self.assertEqual([r["run_type"] for r in self.d.read_log()], ["b", "a"])
+
+    def test_un_intrus_n_emporte_pas_ses_voisins(self):
+        """Le principe déjà appliqué à la ligne illisible : un mauvais
+        enregistrement ne doit pas coûter les bons."""
+        self._ecrire('{"run_type":"a"}\nnull\n{"run_type":"b"}\n')
+        self.assertEqual([r["run_type"] for r in self.d.read_log()], ["b", "a"])
+
+    def test_une_ligne_illisible_est_toujours_ignoree(self):
+        """SECOND TÉMOIN : la protection d'origine ne doit pas avoir été
+        perdue en ajoutant la nouvelle."""
+        self._ecrire('{"run_type":"a"}\n{tronqu\n{"run_type":"b"}\n')
+        self.assertEqual([r["run_type"] for r in self.d.read_log()], ["b", "a"])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

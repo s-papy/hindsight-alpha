@@ -178,7 +178,33 @@ def read_log(limit: int = 30) -> List[Dict[str, Any]]:
         if not line.strip():
             continue
         try:
-            records.append(json.loads(line))
+            enregistrement = json.loads(line)
         except json.JSONDecodeError as e:
             print(f"  WARNING: decision_log.jsonl line {i} is not valid JSON ({e}) -- skipping it, not aborting the whole read")
+            continue
+        # AJOUTE le 28/08/2026. La promesse ci-dessus etait « ignorer une ligne
+        # qui echoue a PARSER ». Mais une ligne qui parse en autre chose qu'un
+        # objet n'est pas un enregistrement non plus, et elle passait. Mesure
+        # sur un journal contenant `"une chaine"`, `42` et `null` :
+        #
+        #     read_log() -> [None, 42, 'une chaine', {...}]
+        #
+        # Consequence : ces trois-la occupent des places dans la fenetre des 30
+        # derniers enregistrements que publie le tableau de bord -- exactement
+        # le budget que monitor_exits.py protege ailleurs avec son
+        # HEARTBEAT_SECONDS, pour empecher du bruit d'evincer les vraies
+        # decisions de la page publique.
+        #
+        # Atteignabilite FAIBLE et dite comme telle : log_run() n'ecrit que des
+        # dictionnaires, et une ecriture interrompue produit du JSON invalide,
+        # donc la branche du dessus. Ce correctif aligne le contrat sur ce que
+        # la fonction promet -- rendre des ENREGISTREMENTS -- plutot que de
+        # corriger une panne observee.
+        if not isinstance(enregistrement, dict):
+            print(f"  WARNING: decision_log.jsonl line {i} parses as "
+                  f"{type(enregistrement).__name__}, not an object -- skipping "
+                  f"it: it would occupy a slot in the dashboard's 30-record "
+                  f"window without being a decision")
+            continue
+        records.append(enregistrement)
     return list(reversed(records))[:limit]
