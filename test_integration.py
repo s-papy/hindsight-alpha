@@ -4763,5 +4763,72 @@ class TestLeGardeDeCompteEstSignaleQuandIlEstInerte(unittest.TestCase):
                 self.assertEqual(self._lancer(cle, secret, None), [])
 
 
+class TestLaProvenanceEstVerifiable(unittest.TestCase):
+    """La signature existait depuis hier, mais RIEN dans le dépôt ne
+    permettait de la vérifier : le badge *Verified* de GitHub suppose
+    GitHub, et quelqu'un qui conteste ailleurs — ou dans deux ans — n'avait
+    aucune clé publique à laquelle confronter un tag.
+
+    La clé PUBLIQUE est donc committée. Ce n'est pas une autorité de
+    certification (un forkeur peut y mettre la sienne), mais elle apporte la
+    continuité : cette clé est dans l'historique public depuis un commit
+    daté, antérieur à tout litige."""
+
+    RACINE = Path(__file__).parent
+    CLE = RACINE / "provenance" / "hindsight-alpha-signing-key.pub"
+
+    def test_la_cle_publique_de_signature_est_committee(self):
+        self.assertTrue(self.CLE.exists(),
+                        "aucune clé publique dans le dépôt : une signature de "
+                        "tag n'est alors vérifiable que sur GitHub")
+        contenu = self.CLE.read_text(encoding="utf-8").strip()
+        self.assertTrue(contenu.startswith("ssh-"),
+                        "le fichier n'est pas une clé publique SSH")
+        self.assertNotIn("PRIVATE", contenu.upper(),
+                         "une clé PRIVÉE a été committée")
+
+    def test_l_empreinte_documentee_correspond_a_la_cle(self):
+        """Le couple document/clé peut dériver en silence — une clé
+        remplacée, une empreinte laissée telle quelle. Alors le document
+        décrirait une clé qui ne signe plus rien."""
+        import subprocess
+        empreinte = subprocess.run(
+            ["ssh-keygen", "-lf", str(self.CLE)],
+            capture_output=True, text=True).stdout.split()[1]
+        doc = (self.RACINE / "PROVENANCE.md").read_text(encoding="utf-8")
+        self.assertIn(empreinte, doc,
+                      "PROVENANCE.md documente une empreinte (%s) qui n'est "
+                      "pas celle de la clé committée" % empreinte)
+
+    def test_le_document_dit_ce_que_la_preuve_NE_prouve_PAS(self):
+        """TÉMOIN de l'honnêteté du document : une page de provenance qui ne
+        liste que ce qu'elle démontre se lit comme une revendication de
+        propriété sur l'idée — ce que MIT ne donne pas, et ce que la
+        littérature quantitative contredit."""
+        doc = (self.RACINE / "PROVENANCE.md").read_text(encoding="utf-8")
+        self.assertIn("Ne prouve pas", doc)
+        self.assertIn("MIT", doc)
+        self.assertIn("ne sont pas signés", doc,
+                      "le document tait que les premiers commits ne sont pas "
+                      "signés")
+
+    def test_la_cle_privee_n_est_nulle_part_dans_le_depot(self):
+        """SECOND TÉMOIN, et le seul qui soit vraiment dangereux : publier la
+        clé PRIVÉE annulerait toute la valeur de la signature."""
+        import subprocess
+        suivis = subprocess.run(["git", "ls-files"], cwd=self.RACINE,
+                                capture_output=True, text=True).stdout.split()
+        for nom in suivis:
+            chemin = self.RACINE / nom
+            if not chemin.is_file() or chemin.stat().st_size > 200_000:
+                continue
+            try:
+                tete = chemin.read_text(encoding="utf-8", errors="ignore")[:200]
+            except OSError:
+                continue
+            self.assertNotIn("BEGIN OPENSSH PRIVATE KEY", tete,
+                             "clé privée committée dans %s" % nom)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
