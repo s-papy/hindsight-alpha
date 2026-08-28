@@ -4546,5 +4546,55 @@ class TestLaVersionDePythonEstDeclareeEtVerifiee(unittest.TestCase):
                          "que le README l'annonce : %s" % "; ".join(echecs))
 
 
+class TestLeDocumentDeReglesNeMentPas(unittest.TestCase):
+    """`CLAUDE.md` gouverne les décisions du projet — c'est le document qu'une
+    session future lit en premier. Il portait deux affirmations périmées :
+
+      · « un 6e contrôle » : il y en a 16 au 28/08. Un compte écrit à la main
+        vieillit à chaque ajout ;
+      · « momentum passe hindsight_guard plus proprement (4/4 vs 3/4) »,
+        présenté sans réserve — alors que la différence a été mesurée
+        indistinguable du hasard (Fisher p = 1.000) ET que les deux
+        stratégies ne décident pas sur la même information.
+
+    La seconde est la plus grave : une session future en hériterait comme
+    d'un fait, et c'est précisément l'erreur que ce projet existe pour
+    attraper. La contrainte n'a pas bougé — seule sa justification est
+    corrigée."""
+
+    CLAUDE = Path(__file__).parent / "CLAUDE.md"
+
+    def test_la_comparaison_des_strategies_porte_ses_reserves(self):
+        texte = self.CLAUDE.read_text(encoding="utf-8")
+        self.assertIn("4/4", texte, "l'observation honnête a disparu au lieu "
+                                    "d'être nuancée")
+        self.assertIn("p = 1.000", texte,
+                      "le document présente « momentum est plus propre » sans "
+                      "dire que la différence n'est pas distinguable du hasard")
+        self.assertIn("même information", texte,
+                      "le document ne mentionne pas le décalage d'information "
+                      "entre les deux stratégies")
+
+    def test_la_contrainte_elle_meme_est_intacte(self):
+        """TÉMOIN : nuancer la justification ne doit pas affaiblir la règle.
+        Sans ce test, « corriger » le paragraphe pourrait supprimer la
+        contrainte qu'il porte."""
+        texte = self.CLAUDE.read_text(encoding="utf-8")
+        self.assertIn("La stratégie live reste `vol_strategy.py`", texte)
+        self.assertIn("décision humaine explicite", texte)
+
+    def test_aucun_compte_ecrit_a_la_main_ne_peut_perimer(self):
+        """Un ordinal ou un total noté dans la prose vieillit en silence. On
+        vérifie qu'il n'en reste pas."""
+        import re
+        texte = self.CLAUDE.read_text(encoding="utf-8")
+        perimables = re.findall(r"\b(?:un |le )?\d+(?:e|er)? contrôles?\b",
+                                texte, re.I)
+        self.assertEqual(perimables, [],
+                         "compte de contrôles écrit à la main dans CLAUDE.md "
+                         "(%s) : il vieillira au prochain ajout"
+                         % ", ".join(perimables))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
