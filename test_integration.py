@@ -4975,6 +4975,78 @@ class TestLesJobsTombentDansLaFenetreDeVeille(unittest.TestCase):
                             for a, b in trous])
 
 
+class TestDesDonneesDEGENEREES_ne_CERTIFIENT_JAMAIS(unittest.TestCase):
+    """LA propriété que tout ce dossier revendique, et personne ne la testait.
+
+    `vol_strategy.score_hv_window` et `hindsight_guard.check_selection_leakage`
+    étaient testés SÉPARÉMENT. Or ce qui compte est leur COMPOSITION : c'est
+    la chaîne entière qui doit refuser de certifier quand les données ne
+    permettent pas de conclure.
+
+    Mesuré le 28/08/2026 en sondant les deux bout à bout — barres normales
+    -> `agrees` ; prix tous identiques, un prix à zéro, trop peu de barres
+    -> `CANNOT CONCLUDE` à chaque fois. Rien à corriger : les correctifs du
+    matin (`_realized_vol` rendant NaN au lieu de 0.0, `_percentile_rank`
+    qui lève) tiennent de bout en bout. Ce test FIGE ce résultat.
+
+    Le témoin est indispensable : une chaîne qui ne certifierait plus JAMAIS
+    rien satisferait le premier test, et l'agent ne traderait plus jamais —
+    une panne silencieuse déguisée en prudence.
+    """
+
+    @staticmethod
+    def _verdict(barres):
+        import hindsight_guard
+        import vol_strategy
+        return hindsight_guard.check_selection_leakage(
+            vol_strategy.CANDIDATE_HV_WINDOWS,
+            lambda c, w: vol_strategy.score_hv_window(c, w, barres),
+            threshold=0.0)
+
+    @staticmethod
+    def _barres_normales(n=700):
+        """Déterministes : une graine fixe, pas de hasard non reproductible."""
+        import random
+        import vol_strategy
+        rng = random.Random(20260828)
+        return [vol_strategy.Bar(100 * (1 + 0.01 * rng.gauss(0, 1)))
+                for _ in range(n)]
+
+    def test_des_donnees_qui_ne_permettent_pas_de_conclure_ne_certifient_pas(self):
+        import vol_strategy
+        cas = {
+            "prix tous identiques": [vol_strategy.Bar(100.0)] * 700,
+            "un prix à zéro": ([vol_strategy.Bar(100.0)] * 350
+                               + [vol_strategy.Bar(0.0)]
+                               + [vol_strategy.Bar(100.0)] * 349),
+            "un prix négatif": ([vol_strategy.Bar(100.0)] * 350
+                                + [vol_strategy.Bar(-5.0)]
+                                + [vol_strategy.Bar(100.0)] * 349),
+            "trop peu de barres": self._barres_normales(30),
+            "aucune barre": [],
+        }
+        for nom, barres in cas.items():
+            with self.subTest(cas=nom):
+                r = self._verdict(barres)
+                self.assertFalse(
+                    r.agrees,
+                    "%s : la chaîne CERTIFIE une sélection sans fuite alors "
+                    "qu'elle n'a rien pu mesurer.\n    %s" % (nom, r.summary()))
+                self.assertEqual(r.verdict_label(), "CANNOT CONCLUDE",
+                                 "%s : le verdict nomme une cause qu'il n'a "
+                                 "pas mesurée (%s)" % (nom, r.verdict_label()))
+
+    def test_des_donnees_NORMALES_certifient_TOUJOURS(self):
+        """TÉMOIN. Sans lui, une chaîne qui refuserait tout passerait le test
+        ci-dessus — et l'agent ne traderait plus jamais, une panne
+        silencieuse déguisée en prudence."""
+        r = self._verdict(self._barres_normales())
+        self.assertNotEqual(
+            r.verdict_label(), "CANNOT CONCLUDE",
+            "des barres parfaitement ordinaires ne permettent plus de "
+            "conclure :\n%s" % r.summary())
+
+
 class TestLaSantePubliqueDeLAgent(unittest.TestCase):
     """Le tableau de bord publie désormais l'état du dernier passage de
     l'agent, pas seulement celui du moniteur de sorties.
