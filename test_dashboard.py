@@ -856,5 +856,56 @@ class TestEchappement(BaseRendu):
         self.assertIn("TimeoutExpired: command timed out after 30s", r["x"])
 
 
+class TestLeSensDuTradeEstLisible(BaseRendu):
+    """Trouvé en simulant de bout en bout le PREMIER ordre réel — aucun n'a
+    encore été soumis (0 dans decision_log.jsonl), donc ce rendu n'avait
+    jamais été vu avec de vraies données.
+
+    La page imprimait `direction` BRUT, à quatre endroits. Un juge aurait lu
+    « SPY 260904P00640000 **-1** · qty 6 » : un entier signé, qui ne dit rien
+    et ressemble à un bug d'affichage."""
+
+    PRE = "const T = 3600000;\n"
+
+    def _rendu(self, direction):
+        champ = ("direction:%r," % direction) if direction is not None else ""
+        r = self.executer(self.PRE + """
+            _resultats.html = renderTrade({run_type:"agent",
+              chosen_symbol:"SPY 260904P00640000", qty:6, %s
+              order_id:"ord-1"});
+        """ % champ)
+        import re
+        return re.sub(r"<[^>]+>", " ", r["html"] or "")
+
+    def test_un_put_se_lit_put(self):
+        sortie = self._rendu(-1)
+        self.assertIn("put", sortie)
+        # Assertion RESSERREE : ma premiere version cherchait « -1 » n'importe
+        # ou dans la ligne et le trouvait dans « ord-1 », l'identifiant de
+        # l'ordre. Un test trop large echoue sur ce qu'il ne visait pas -- et
+        # aurait pu, dans l'autre sens, passer pour une mauvaise raison.
+        # On vise l'EMPLACEMENT de la direction, juste apres le symbole.
+        self.assertNotIn("00640000 -1", sortie,
+                         "la valeur interne occupe encore la place du sens")
+
+    def test_un_call_se_lit_call(self):
+        self.assertIn("call", self._rendu(1))
+
+    def test_une_direction_absente_n_invente_rien(self):
+        """TÉMOIN : ne pas savoir ne doit pas produire « call » par défaut.
+        Sans lui, une conversion qui rendrait toujours « call » passerait le
+        test ci-dessus."""
+        sortie = self._rendu(None)
+        self.assertNotIn("call", sortie)
+        self.assertNotIn("put", sortie)
+        self.assertIn("ord-1", sortie, "le reste de la ligne a disparu")
+
+    def test_une_valeur_inattendue_est_montree_telle_quelle(self):
+        """SECOND TÉMOIN : une direction qu'on ne sait pas traduire doit
+        rester VISIBLE, pas disparaître. Masquer une valeur inconnue, c'est
+        la version affichage du « je ne sais pas » rendu en silence."""
+        self.assertIn("7", self._rendu(7))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -758,6 +758,24 @@ function outcomeBadge(d) {
   return `<span class="badge ${cls}">${label}</span>`;
 }
 
+// AJOUTE le 28/08/2026, en simulant de bout en bout le PREMIER ordre reel --
+// aucun n'a encore ete soumis (0 dans decision_log.jsonl). La page imprimait
+// `d.direction` BRUT, a quatre endroits : un juge aurait lu
+// « SPY 260904P00640000 -1 · qty 6 ».
+//
+// `direction` vaut +1 (call) ou -1 (put), c'est la sortie de
+// direction_tiebreak(). Un entier signe sur une page publique ne dit rien a
+// personne, et ressemble a un bug d'affichage.
+//
+// Ecrit UNE fois et appele quatre : la meme conversion recopiee quatre fois
+// finit par diverger -- lecon deja payee trois fois dans ce depot.
+function _sens(direction) {
+  if (direction === 1 || direction === '1') return 'call';
+  if (direction === -1 || direction === '-1') return 'put';
+  // Ni l'un ni l'autre : on n'invente pas. Vide, comme avant.
+  return direction ? String(direction) : '';
+}
+
 function renderTrade(d) {
   // Since 24/08 agent.py can attempt entry on several symbols in one run,
   // so a single decision record can hold multiple trades. Newer records
@@ -808,7 +826,7 @@ function renderTrade(d) {
   if (Array.isArray(d.trades) && d.trades.length) {
     for (const t of d.trades) {
       if (t.order_id) {
-        lines.push(`${esc(t.symbol)} ${esc(t.direction || '')} · qty ${esc(t.qty || '?')} · order ${esc(t.order_id)}`
+        lines.push(`${esc(t.symbol)} ${esc(_sens(t.direction))} · qty ${esc(t.qty || '?')} · order ${esc(t.order_id)}`
                    + avertirDoublon(t));
       } else {
         // order_status_unknown ajoute le 27/08 en meme temps que le badge rouge
@@ -824,16 +842,16 @@ function renderTrade(d) {
           : t.outcome === 'no_contract_found' ? 'no contract found'
           : t.outcome === 'error' ? (t.error || 'error')
           : (t.outcome || 'not submitted');
-        lines.push(`${esc(t.symbol)} ${esc(t.direction || '')} (${esc(why)})`
+        lines.push(`${esc(t.symbol)} ${esc(_sens(t.direction))} (${esc(why)})`
                    + avertirDoublon(t));
       }
     }
   } else if (Array.isArray(d.tradeable_symbols) && d.tradeable_symbols.length) {
     lines.push(`${esc(d.tradeable_symbols.join(', '))} (dry-run: would attempt entry)`);
   } else if (d.order_id) {
-    lines.push(`${esc(d.chosen_symbol || '')} ${esc(d.direction || '')} · qty ${esc(d.qty || '?')} · order ${esc(d.order_id)}`);
+    lines.push(`${esc(d.chosen_symbol || '')} ${esc(_sens(d.direction))} · qty ${esc(d.qty || '?')} · order ${esc(d.order_id)}`);
   } else if (d.chosen_symbol) {
-    lines.push(`${esc(d.chosen_symbol)} ${esc(d.direction || '')} (not submitted)`);
+    lines.push(`${esc(d.chosen_symbol)} ${esc(_sens(d.direction))} (not submitted)`);
   }
   return lines.length ? lines.join('<br>') : '—';
 }
