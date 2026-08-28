@@ -317,7 +317,14 @@ class TestBanniereDeSante(BaseRendu):
         trader quand le garde anti-rétrospection dit non — en panne
         permanente. Zéro ordre est une réponse, pas une défaillance."""
         r = self.executer(self.PRE + """
-            renderAgentHealth({last_run_at: ilYA(0.2), outcome: "no_trade",
+            // ilYA(0.01) ~ 36 s : un horodatage TOUJOURS posterieur au
+            // dernier passage attendu, a n'importe quelle heure. Ma premiere
+            // version utilisait ilYA(0.2) -- 12 minutes -- et elle est tombee
+            // DANS L'HEURE : juste apres 19:37 UTC, « il y a 12 minutes »
+            // devient « avant le passage attendu », donc en retard. Exactement
+            // la fragilite que j'avais corrigee deux heures plus tot dans le
+            // temoin du moniteur, et que j'ai reintroduite ici.
+            renderAgentHealth({last_run_at: ilYA(0.01), outcome: "no_trade",
                                dry_run: false, symbols_evaluated: 4, trades: 0});
             _resultats.classe = document.getElementById('agent-health-banner').className;
             _resultats.texte  = document.getElementById('agent-health-banner').textContent;
