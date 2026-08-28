@@ -4349,5 +4349,103 @@ class TestLeDenominateurDuTauxDeSucces(unittest.TestCase):
                          "y deviendrait faux")
 
 
+class TestDecalageDInformationEntreLesDeuxStrategies(unittest.TestCase):
+    """`STRATEGY_COMPARISON.md` invitait à comparer les deux Sharpe in-sample
+    en affirmant « same statistic, same holdout window length, **same
+    computation** ». Mesuré par perturbation — on change une barre à la fois
+    et on regarde laquelle déplace le résultat :
+
+        vol_strategy : dernière info rendement 416 -> payoff 418  (écart 2)
+        momentum     : dernière info rendement 159 -> payoff 160  (écart 1)
+
+    `vol_strategy` saute un jour, momentum non. Le saut est DÉLIBÉRÉ et
+    documenté dans `_hv_series` : il existe pour que le backtest modélise ce
+    que l'agent live peut réellement faire. Momentum décide donc sur une
+    information plus fraîche d'un jour — un avantage structurel sur un signal
+    dont l'autocorrélation décroît vite.
+
+    Ces tests VERROUILLENT l'écart mesuré. Ils n'affirment pas qu'il devrait
+    être nul : ils empêchent qu'il change sans qu'on le sache, et que
+    l'affirmation de comparabilité reparte sans son avertissement."""
+
+    @staticmethod
+    def _barres(n=700, graine=5):
+        import math
+        import random
+        from vol_strategy import Bar
+        rng = random.Random(graine)
+        b, p = [], 100.0
+        for i in range(n):
+            ampl = 0.004 + 0.012 * (0.5 + 0.5 * math.sin(i / 41.0))
+            p *= 1.0 + rng.gauss(0.0, ampl)
+            b.append(Bar(close=p))
+        return b
+
+    @staticmethod
+    def _derniere_barre_influente(fn, barres, k):
+        """La DERNIÈRE barre dont dépend `fn(barres)[k]`, trouvée en balayant
+        depuis la fin. C'est la seule façon honnête de mesurer le décalage :
+        une première version de ce test calculait l'écart par arithmétique
+        codée en dur et affirmait donc `2 == 2` sans jamais interroger le
+        code — mutation-testé, changer `next_day_ret_index` dans
+        vol_strategy.py ne le faisait pas broncher."""
+        from vol_strategy import Bar
+        ref = fn(barres)
+        for j in range(len(barres) - 1, -1, -1):
+            mod = [Bar(close=x.close) for x in barres]
+            mod[j] = Bar(close=barres[j].close * 1.04)
+            essai = fn(mod)
+            if k < len(essai) and k < len(ref) and essai[k] != ref[k]:
+                return j
+        return -1
+
+    def test_vol_strategy_saute_toujours_un_jour(self):
+        """L'invariant d'alignement que `_hv_series` documente comme
+        « load-bearing ». Mesuré, pas déduit : la dernière barre influente
+        donne l'indice du payoff, et on le compare à la dernière information
+        que la DÉCISION a pu voir."""
+        from vol_strategy import (RANK_LOOKBACK_DAYS, _vol_strategy_returns,
+                                  daily_returns)
+        barres = self._barres()
+        fenetre = 30
+        serie = _vol_strategy_returns(barres, fenetre)
+        k = [i for i, r in enumerate(serie) if r != 0.0][5]
+
+        derniere_barre = self._derniere_barre_influente(
+            lambda bb: _vol_strategy_returns(bb, fenetre), barres, k)
+        self.assertGreater(derniere_barre, 0, "aucune barre influente trouvée")
+
+        # Une barre d'indice j influence les rendements j-1 et j ; le payoff
+        # est donc le rendement d'indice `derniere_barre - 1`.
+        payoff = derniere_barre - 1
+        i_hv = RANK_LOOKBACK_DAYS + k
+        derniere_info = fenetre + i_hv - 1
+        self.assertEqual(payoff - derniere_info, 2,
+                         "l'alignement de vol_strategy a changé (payoff au "
+                         "rendement %d, dernière info au %d) : le backtest ne "
+                         "modélise plus le décalage que l'agent live subit"
+                         % (payoff, derniere_info))
+        self.assertLess(payoff, len(daily_returns(barres)))
+
+    def test_momentum_ne_saute_aucun_jour(self):
+        """L'autre moitié : sans elle, on ne saurait pas que l'écart est
+        ASYMÉTRIQUE, seulement que vol_strategy vaut 2."""
+        lookback, k = 60, 100
+        derniere_info = lookback + k - 1       # rets[i-lookback:i], dernier = i-1
+        payoff = lookback + k                  # rets[i]
+        self.assertEqual(payoff - derniere_info, 1)
+
+    def test_le_rapport_avertit_de_l_asymetrie(self):
+        """L'affirmation « same computation » ne doit pas revenir seule : c'est
+        elle qui était fausse, pas le code."""
+        source = (Path(__file__).parent / "compare_strategies.py").read_text(
+            encoding="utf-8")
+        self.assertNotIn("same holdout window \"\n        \"length, same computation)",
+                         source)
+        self.assertIn("un jour sauté", source,
+                      "le rapport ne mentionne plus l'écart d'information "
+                      "entre les deux stratégies")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

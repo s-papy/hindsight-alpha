@@ -194,7 +194,32 @@ def format_report(results: List[dict]) -> str:
         "as raw magnitudes. What IS comparable per symbol: hindsight_guard "
         "agreement (is either one's winner an actual leak), and the in-sample "
         "Sharpe of each vetted parameter (same statistic, same holdout window "
-        "length, same computation).",
+        "length, same FORMULA — but see the information-lag caveat below, "
+        "added 28/08: not the same information).",
+        "",
+        "🔴 **Les deux stratégies n'agissent pas sur une information aussi "
+        "fraîche, et cette ligne disait « same computation ».** Mesuré par "
+        "perturbation, en changeant une barre à la fois et en regardant "
+        "laquelle déplace le résultat :",
+        "",
+        "| | dernière info de décision | payoff encaissé | écart |",
+        "|---|---|---|---|",
+        "| `vol_strategy` | rendement 416 | rendement **418** | **2 — un jour sauté** |",
+        "| `momentum` | rendement 159 | rendement **160** | **1 — aucun saut** |",
+        "",
+        "Le saut de `vol_strategy` est DÉLIBÉRÉ et documenté dans "
+        "`_hv_series` : il existe pour que le backtest modélise ce que l'agent "
+        "live peut réellement faire, décalage compris. Momentum n'en a pas. "
+        "La conséquence sur cette comparaison est directe : momentum décide "
+        "sur une information plus fraîche d'un jour, ce qui l'avantage "
+        "structurellement sur un signal dont l'autocorrélation décroît vite.",
+        "",
+        "Rien n'a été modifié dans les deux stratégies pour corriger ça : "
+        "momentum n'est pas tradé en live, changer son alignement "
+        "invaliderait les backtests publiés, et le décalage de `vol_strategy` "
+        "est une prudence assumée, pas un défaut. Ce qui est corrigé, c'est "
+        "l'affirmation — cette comparaison partage une FORMULE, pas une "
+        "information.",
         "",
         "🔴 **But do not read that Sharpe column as a verdict on its own.** An earlier "
         "version of this file called it \"the fairest apples-to-apples number\"; measuring "
