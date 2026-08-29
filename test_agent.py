@@ -1802,5 +1802,98 @@ class TestUnHorodatageNaifEstSignaleParLeGardeFou(unittest.TestCase):
         self.assertNotIn(self.MOTIF_NOW, sortie, sortie[-900:])
 
 
+
+class TestLeMoteurDeRenduDuDeckDitCeQuIlNeSaitPasFaire(unittest.TestCase):
+    """`submission/rendre_le_deck.py` existe parce que cette machine n'a aucun
+    moteur de rendu — ni LibreOffice, ni pdftoppm, ni markitdown — et que la
+    mise en page du deck était donc la seule chose du dossier que personne ne
+    pouvait vérifier.
+
+    Les deux tests ci-dessous gardent les DEUX défauts que ce script a eus
+    dans sa propre première version, tous deux du genre que ce dépôt traque."""
+
+    RACINE = Path(__file__).resolve().parent
+    SCRIPT = RACINE / "submission" / "rendre_le_deck.py"
+
+    def _lancer(self):
+        d = Path(tempfile.mkdtemp(prefix="hindsight-rendu-"))
+        try:
+            r = subprocess.run(
+                [sys.executable, str(self.SCRIPT),
+                 "--sortie", str(d / "apercu.html")],
+                cwd=str(self.RACINE), capture_output=True, text=True,
+                timeout=180)
+            return r.returncode, r.stdout + r.stderr
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
+    def test_le_graphique_NON_RENDU_est_annonce(self):
+        """Le rapport « ce qui n'a pas été rendu fidèlement » annonçait ZÉRO
+        problème alors que le graphique de la slide 8 n'était pas rendu :
+        `_geometrie` ne lisait que `a:xfrm`, or un `p:graphicFrame` porte la
+        sienne sous `p:xfrm`. Elle rendait None, l'appelant faisait
+        `continue`, et le seul élément que ce script ne sait pas rendre était
+        aussi le seul qu'il oubliait de signaler.
+
+        C'est exactement le motif de ce dépôt : un événement réel qui perd sa
+        trace dans la comptabilité censée le suivre."""
+        d = Path(tempfile.mkdtemp(prefix="hindsight-rendu3-"))
+        try:
+            cible = d / "apercu.html"
+            r = subprocess.run([sys.executable, str(self.SCRIPT),
+                                "--sortie", str(cible)], cwd=str(self.RACINE),
+                               capture_output=True, text=True, timeout=180)
+            sortie = r.stdout + r.stderr
+            self.assertEqual(r.returncode, 0, sortie[-600:])
+            self.assertIn("graphique OOXML", sortie,
+                          "le script ne dit plus qu'il ne rend pas le "
+                          "graphique :\n%s" % sortie[-800:])
+            # ET il faut que sa PLACE soit visible sur le rendu, sinon le
+            # lecteur regarde une slide 8 amputee sans le voir. C'est cette
+            # moitie-la qui exige de lire `p:xfrm` : le message, lui, part
+            # desormais sans condition.
+            page = cible.read_text(encoding="utf-8")
+            self.assertIn("GRAPHIQUE NON RENDU", page,
+                          "le message annonce le graphique mais rien ne "
+                          "marque sa place sur le rendu")
+            self.assertNotIn("n'a meme pas de geometrie lisible", sortie,
+                             "la geometrie du graphique n'est plus lue")
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
+    def test_une_boite_plus_etroite_que_ses_marges_n_est_pas_un_debordement(self):
+        """Les quatre flèches décoratives de la slide 4 vivent dans des boîtes
+        de 10 pt de large alors que les marges internes par défaut d'OOXML en
+        font 14,4. La largeur disponible est donc NÉGATIVE et le texte déborde
+        par construction.
+
+        Ma première version les comptait comme « 22 pt trop large » — quatre
+        fausses alertes sur dix. Une mesure impossible n'est pas une mesure
+        ratée : elle se dit, elle ne se convertit pas en verdict. Un outil qui
+        crie sur ce qu'il n'a pas su mesurer apprend à être ignoré."""
+        _code, sortie = self._lancer()
+        self.assertIn("non mesure", sortie, sortie[-800:])
+        bloc = sortie.split("non mesure")[0]
+        self.assertNotIn("forme 8 ", bloc,
+                         "une flèche décorative est comptée comme un "
+                         "débordement :\n%s" % bloc[-800:])
+
+    def test_le_rendu_produit_bien_les_onze_diapos(self):
+        """TÉMOIN : un script qui n'écrirait rien passerait les deux tests
+        précédents."""
+        d = Path(tempfile.mkdtemp(prefix="hindsight-rendu2-"))
+        try:
+            cible = d / "apercu.html"
+            subprocess.run([sys.executable, str(self.SCRIPT),
+                            "--sortie", str(cible)], cwd=str(self.RACINE),
+                           capture_output=True, text=True, timeout=180)
+            page = cible.read_text(encoding="utf-8")
+            self.assertEqual(page.count('class="slide"'), 11, "11 diapos "
+                             "attendues, %d rendues" % page.count('class="slide"'))
+            self.assertIn("WHERE THIS SITS IN THE FIELD", page)
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

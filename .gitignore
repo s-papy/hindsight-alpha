@@ -53,3 +53,6 @@ market_hours_awake.log
 publish_dashboard.log
 agent.log
 push_pending.log
+
+# Rendu local du deck — regenerable par submission/rendre_le_deck.py
+submission/apercu_deck.html
