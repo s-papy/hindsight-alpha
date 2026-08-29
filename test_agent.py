@@ -1878,6 +1878,21 @@ class TestLeMoteurDeRenduDuDeckDitCeQuIlNeSaitPasFaire(unittest.TestCase):
                          "une flèche décorative est comptée comme un "
                          "débordement :\n%s" % bloc[-800:])
 
+    def test_une_collision_deja_presente_n_est_pas_imputee_au_debordement(self):
+        """Ma première version annonçait « le débord recouvre la forme 1 » sur
+        la slide 4. Vérifié à la main : les deux boîtes se chevauchent DÉJÀ
+        (43–77 contre 72–158) sans qu'aucun texte ne déborde. Elle nommait les
+        bonnes formes pour la mauvaise raison.
+
+        « Ce débordement casse quelque chose » est exactement le genre
+        d'affirmation qu'un lecteur croit sur parole : elle doit donc être
+        causale, pas coïncidente."""
+        _code, sortie = self._lancer()
+        for ligne in sortie.splitlines():
+            if "RECOUVRE" in ligne:
+                self.fail("une collision est imputée au débordement alors "
+                          "qu'aucune ne l'est aujourd'hui : %s" % ligne.strip())
+
     def test_le_rendu_produit_bien_les_onze_diapos(self):
         """TÉMOIN : un script qui n'écrirait rien passerait les deux tests
         précédents."""

@@ -666,7 +666,19 @@ def mesurer(chemin_deck: Path,
             for j, (bx, by, bw, bh) in boites:
                 if j == al["forme"]:
                     continue
-                if bx < x + w and bx + bw > x and by < bas and by + bh > haut:
+                if not (bx < x + w and bx + bw > x):
+                    continue
+                # Le chevauchement doit etre CAUSE par le debordement.
+                # Corrige le 29/08 apres verification a la main : la premiere
+                # version signalait « le debord recouvre la forme 1 » sur la
+                # slide 4, ou les deux boites se chevauchent DEJA (43-77 contre
+                # 72-158) sans qu'aucun texte ne deborde. Elle nommait les
+                # bonnes formes pour la mauvaise raison -- et « ce debordement
+                # casse quelque chose » est precisement ce qu'un lecteur
+                # croirait sur parole.
+                deja = by < y + h and by + bh > y
+                apres = by < bas and by + bh > haut
+                if apres and not deja:
                     touches.append(j)
             al["touche"] = touches
     return alertes, notes, non_mesurables
