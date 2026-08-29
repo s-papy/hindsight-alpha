@@ -1059,12 +1059,16 @@ class TestAucuneValeurNeDeborde(BaseRendu):
 
     Le debordement etait `visible`, donc le texte ne s'arretait pas a la
     bordure -- il continuait SOUS la carte suivante, dont le fond est opaque
-    et peint apres. Le « U » final de PA3K8MP3MF0U etait invisible, et aucune
+    et peint apres. Le dernier caractere du numero -- 12 en tout -- etait invisible, et aucune
     ellipse ne prevenait qu'il manquait quelque chose.
 
     Le champ tronque etait le seul de la page qui serve a PROUVER sur quel
     compte tourne l'agent -- celui qu'on compare a la valeur declaree. Un
-    juge lisant PA3K8MP3MF0 et cherchant PA3K8MP3MF0U conclut a un ecart.
+    juge qui lit onze caracteres et en cherche douze conclut a un ecart.
+
+    (Le numero REEL ne figure ni ici ni dans la page : le garde-fou l'a
+    signale dans les deux le 29/08, et il avait raison -- une fixture n'a
+    pas besoin d'une valeur vraie pour mesurer une largeur.)
 
     Ce que ces tests peuvent et ne peuvent pas faire : le harnais est Node
     avec un DOM simule, sans moteur de rendu. Il ne MESURE donc aucune
@@ -1075,13 +1079,13 @@ class TestAucuneValeurNeDeborde(BaseRendu):
     def test_la_carte_identifiant_porte_sa_classe(self):
         r = self.executer("""
             const a = document.getElementById('account-cards');
-            renderAccount({account_number:"PA3K8MP3MF0U", status:"ACTIVE"});
+            renderAccount({account_number:"PA0EXEMPLE00", status:"ACTIVE"});
             _resultats.compte = a.innerHTML;
         """)
         self.assertIn("identifiant", r["compte"],
                       "la carte du numero de compte ne porte plus la classe "
                       "qui l'empeche de deborder")
-        self.assertIn("PA3K8MP3MF0U", r["compte"],
+        self.assertIn("PA0EXEMPLE00", r["compte"],
                       "prerequis : le numero est bien rendu en entier")
 
     def test_les_autres_cartes_ne_la_portent_pas(self):
