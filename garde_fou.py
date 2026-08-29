@@ -2840,6 +2840,125 @@ def controle_plists_sont_du_xml_valide() -> None:
                        "logs systeme." % cle)
 
 
+def controle_pannes_traitees_symetriquement() -> None:
+    """Une meme fonction traite-t-elle ses pannes JUMELLES de la meme facon ?
+
+    AJOUTE le 29/08/2026, apres avoir trouve QUATRE FOIS DANS LA JOURNEE le
+    meme motif a la main : une regle appliquee a une branche et pas a sa
+    jumelle.
+
+        bilan_semaine     une fenetre de gel illisible arretait le script ;
+                          un JOURNAL illisible, non -- il accusait l agent
+                          d avoir manque ses passages
+        verifier_kickoff  les FICHIERS plist etaient compares ; l etat
+                          CHARGE, non -- la ligne s appelait pourtant
+                          « LaunchAgents charges »
+        verifier_kickoff  un comptage git reussi etait lu ; un ECHEC de git
+                          rendait la meme chaine vide, lue comme « zero »
+        publish_dashboard un commit refuse et un push EXPIRE etaient
+                          expliques ; un push REJETE remontait sans un mot
+
+    Une regle qu on se rappelle ne vaut rien face a une regle que l outil
+    applique -- c est ce que dit ce fichier depuis le 25/08 a propos de
+    lui-meme. Ce controle applique enfin cette phrase au motif qui a produit
+    le plus de defauts de la semaine.
+
+    CE QU IL VOIT, ET C EST UNE SEULE DES QUATRE FORMES : dans une meme
+    fonction, plusieurs `subprocess.run(..., check=True)` dont CERTAINS sont
+    enveloppes d un handler qui attrape CalledProcessError et d autres non.
+    C est exactement la quatrieme ligne du tableau ci-dessus, et c est la
+    seule des quatre qui se lise dans un arbre syntaxique.
+
+    CE QU IL NE VOIT PAS, dit ici plutot que sous-entendu : les trois autres
+    formes sont SEMANTIQUES -- un message qui nomme une cause non mesuree,
+    une valeur de repli confondue avec une mesure, un titre qui promet plus
+    que le test. Aucune ne se detecte sans heuristique, et une heuristique
+    qui se trompe sur ce fichier bloquerait des commits justes. Ce controle
+    couvre un quart du motif, et le dire fait partie du controle.
+
+    NON BLOQUANT : une asymetrie est une piste, pas une preuve. Elle peut
+    etre deliberee -- encore faut-il l avoir decidee."""
+    for rel, chemin in _fichiers_python_du_depot():
+        try:
+            with open(chemin, encoding="utf-8") as fh:
+                arbre = ast.parse(fh.read())
+        except (OSError, SyntaxError):
+            # Ni vert ni silencieux : un fichier qu on ne sait pas lire n a
+            # pas « aucune asymetrie ».
+            alerte(rel, "n'a pas pu etre analyse pour la symetrie des pannes "
+                        "— ce n'est pas « aucune asymetrie trouvee ».")
+            continue
+        for fonction in [n for n in ast.walk(arbre)
+                         if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]:
+            couverts, nus = _appels_verifies(fonction)
+            if couverts and nus:
+                alerte(
+                    rel,
+                    "dans %s(), %d appel(s) subprocess check=True sont "
+                    "proteges par un handler et %d ne le sont pas (ligne(s) "
+                    "%s) : une panne jumelle remonterait sans explication."
+                    % (fonction.name, len(couverts), len(nus),
+                       ", ".join(str(l) for l in nus)))
+
+
+def _appels_verifies(fonction: ast.AST) -> "tuple[list, list]":
+    """(lignes protegees, lignes nues) des `subprocess.run(check=True)` de
+    cette fonction. « Protege » = enveloppe d'un `try` dont un handler
+    attrape CalledProcessError, Exception, ou tout."""
+    couverts, nus = [], []
+    ATTRAPENT = {"Exception", "BaseException", "subprocess.CalledProcessError",
+                 "CalledProcessError"}
+
+    def parcourir(noeud, sous_protection):
+        for enfant in ast.iter_child_nodes(noeud):
+            if isinstance(enfant, ast.Try):
+                types = set()
+                for h in enfant.handlers:
+                    if h.type is None:
+                        types.add("Exception")
+                    elif isinstance(h.type, ast.Tuple):
+                        types |= {ast.unparse(e) for e in h.type.elts}
+                    else:
+                        types.add(ast.unparse(h.type))
+                dedans = sous_protection or bool(types & ATTRAPENT)
+                for x in enfant.body:
+                    parcourir(x, dedans)
+                    _noter(x, dedans)
+                for x in enfant.handlers + enfant.orelse + enfant.finalbody:
+                    parcourir(x, sous_protection)
+                    _noter(x, sous_protection)
+                continue
+            if isinstance(enfant, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue      # une fonction imbriquee a ses propres jumelles
+            _noter(enfant, sous_protection)
+            parcourir(enfant, sous_protection)
+
+    def _noter(noeud, protege):
+        for appel in ast.walk(noeud):
+            if not isinstance(appel, ast.Call):
+                continue
+            if not ast.unparse(appel.func).endswith("subprocess.run"):
+                continue
+            if not any(k.arg == "check"
+                       and isinstance(k.value, ast.Constant)
+                       and k.value.value is True for k in appel.keywords):
+                continue
+            (couverts if protege else nus).append(appel.lineno)
+
+    parcourir(fonction, False)
+    return sorted(set(couverts)), sorted(set(nus))
+
+
+def _fichiers_python_du_depot() -> list:
+    """Les .py suivis par git, hors tests : ce sont eux qui tournent."""
+    out = []
+    for nom in sorted(os.listdir(RACINE)):
+        if not nom.endswith(".py") or nom.startswith("test_"):
+            continue
+        out.append((nom, os.path.join(RACINE, nom)))
+    return out
+
+
 def main() -> int:
     print("=" * 74)
     print("GARDE-FOU — hindsight-alpha — %s" % datetime.now().strftime("%d/%m/%Y %H:%M"))
@@ -2871,6 +2990,7 @@ def main() -> int:
         controle_aucun_identifiant_dans_les_fichiers_publies,
         controle_reveil_programme,
         controle_renvois_resolvent,
+        controle_pannes_traitees_symetriquement,
     )
     for controle in CONTROLES:
         controle()

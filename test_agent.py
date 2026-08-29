@@ -1303,5 +1303,101 @@ class TestLExemptionDesChiffresPerimes(unittest.TestCase):
                       % sortie[-700:])
 
 
+
+class TestLeMotifDesJUMELLESEstDetecteToutSeul(unittest.TestCase):
+    """QUATRE FOIS DANS LA MEME JOURNEE, le 29/08/2026, le même motif trouvé
+    à la main : une règle appliquée à une branche et pas à sa jumelle.
+
+        bilan_semaine      gel illisible -> on s'arrête ; journal illisible
+                           -> on accusait l'agent
+        verifier_kickoff   fichiers plist comparés ; état CHARGÉ non, alors
+                           que la ligne s'appelait « LaunchAgents chargés »
+        verifier_kickoff   comptage git réussi lu ; ÉCHEC de git rendu comme
+                           la même chaîne vide, lue « zéro »
+        publish_dashboard  commit refusé et push EXPIRÉ expliqués ; push
+                           REJETÉ remontant sans un mot
+
+    « Une règle qu'on se rappelle ne vaut rien face à une règle que l'outil
+    applique » — c'est ce que garde_fou.py dit de lui-même depuis le 25/08.
+    Le contrôle ajouté ce jour-là applique enfin cette phrase au motif qui a
+    produit le plus de défauts de la semaine.
+
+    Il n'en couvre QU'UNE des quatre formes : celle qui se lit dans un arbre
+    syntaxique. Les trois autres sont sémantiques, et le dire fait partie du
+    contrôle. Ces tests vérifient la forme couverte, dans les deux sens."""
+
+    RACINE = Path(__file__).resolve().parent
+
+    def _lancer_sur(self, contenu):
+        """Écrit `contenu` comme un module du dépôt, dans une copie."""
+        d = Path(tempfile.mkdtemp(prefix="hindsight-symetrie-"))
+        try:
+            for nom in ("garde_fou.py", "config.py"):
+                shutil.copy(self.RACINE / nom, d / nom)
+            (d / "un_module.py").write_text(contenu, encoding="utf-8")
+            r = subprocess.run([sys.executable, str(d / "garde_fou.py")],
+                               cwd=str(d), capture_output=True, text=True,
+                               timeout=120)
+            return r.stdout + r.stderr
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
+    ASYMETRIQUE = (
+        "import subprocess\n"
+        "def publier():\n"
+        "    subprocess.run(['git', 'add', '.'], check=True)\n"
+        "    try:\n"
+        "        subprocess.run(['git', 'push'], check=True)\n"
+        "    except subprocess.CalledProcessError:\n"
+        "        print('explique')\n"
+        "        raise\n")
+
+    def test_une_jumelle_non_protegee_est_signalee(self):
+        sortie = self._lancer_sur(self.ASYMETRIQUE)
+        self.assertIn("une panne jumelle remonterait sans explication", sortie,
+                      "l'asymétrie n'est pas vue :\n%s" % sortie[-700:])
+        self.assertIn("publier()", sortie,
+                      "la fonction fautive n'est pas nommée :\n%s"
+                      % sortie[-700:])
+
+    def test_deux_jumelles_PROTEGEES_ne_declenchent_rien(self):
+        """TÉMOIN : un contrôle qui crierait sur tout appel `check=True`
+        passerait le test ci-dessus et rendrait le dépôt inutilisable."""
+        sortie = self._lancer_sur(
+            "import subprocess\n"
+            "def publier():\n"
+            "    try:\n"
+            "        subprocess.run(['git', 'add', '.'], check=True)\n"
+            "        subprocess.run(['git', 'push'], check=True)\n"
+            "    except subprocess.CalledProcessError:\n"
+            "        raise\n")
+        self.assertNotIn("une panne jumelle", sortie,
+                         "deux appels également protégés sont signalés :\n%s"
+                         % sortie[-700:])
+
+    def test_deux_jumelles_NUES_ne_declenchent_rien_non_plus(self):
+        """SECOND TÉMOIN, et c'est le sens du contrôle : il cherche une
+        ASYMÉTRIE, pas l'absence de handler. Deux appels traités pareil sont
+        un choix ; un traité et pas l'autre est un oubli."""
+        sortie = self._lancer_sur(
+            "import subprocess\n"
+            "def publier():\n"
+            "    subprocess.run(['git', 'add', '.'], check=True)\n"
+            "    subprocess.run(['git', 'push'], check=True)\n")
+        self.assertNotIn("une panne jumelle", sortie,
+                         "deux appels également nus sont signalés :\n%s"
+                         % sortie[-700:])
+
+    def test_le_depot_lui_meme_est_symetrique(self):
+        """Le contrôle tourne sur le vrai dépôt et doit y être vert : c'est
+        ce qui distingue une alerte qu'on peut résoudre d'une alerte qu'on
+        apprend à ignorer."""
+        r = subprocess.run([sys.executable, str(self.RACINE / "garde_fou.py")],
+                           cwd=str(self.RACINE), capture_output=True,
+                           text=True, timeout=180)
+        self.assertNotIn("une panne jumelle remonterait", r.stdout + r.stderr,
+                         "le dépôt porte une asymétrie non résolue")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

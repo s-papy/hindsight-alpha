@@ -359,8 +359,32 @@ _DELAI_RESEAU = 120
 
 def git_publish() -> None:
     paths = ["docs/data.json", "decision_log.jsonl"]
-    subprocess.run(["git", "add", *paths], check=True,
-                   timeout=_DELAI_LOCAL, env=_ENV_GIT)
+    # LA TROISIEME JUMELLE. Le commit refuse et le push rejete sont expliques
+    # plus bas ; ce `git add` ne l'etait pas, et c'est le nouveau controle de
+    # symetrie de garde_fou.py qui l'a signale -- pas une relecture.
+    #
+    # La panne realiste ici n'est pas une faute de frappe : c'est
+    # `index.lock`. Ce depot a DEUX ecrivains -- l'operateur dans un terminal
+    # et launchd toutes les 30 minutes -- et git refuse d'indexer pendant
+    # qu'une autre commande tient le verrou. Transitoire, mais sans un mot
+    # elle produisait la meme trace brute que les deux autres.
+    try:
+        subprocess.run(["git", "add", *paths], check=True,
+                       timeout=_DELAI_LOCAL, env=_ENV_GIT)
+    except subprocess.CalledProcessError as refus:
+        print("  ERROR: `git add` was refused (exit %d). Nothing was staged, "
+              "so nothing is committed and nothing is published -- the "
+              "snapshot file on disk is still up to date. The usual cause is "
+              "another git command holding .git/index.lock at this exact "
+              "moment (this repo has two writers: a terminal and launchd "
+              "every 30 minutes), which clears by itself. If it persists, "
+              "run `git status` by hand." % refus.returncode, flush=True)
+        raise
+    except subprocess.TimeoutExpired:
+        print("  ERROR: `git add` did not answer within %ds -- most likely "
+              "another git command holding .git/index.lock. Nothing was "
+              "staged; the next run republishes." % _DELAI_LOCAL, flush=True)
+        raise
     # Both calls below are scoped to `paths` on purpose -- found 24/08,
     # a review pass. `git diff --cached --quiet` with NO pathspec checks
     # the whole index, not just the two files just staged above: if anything
