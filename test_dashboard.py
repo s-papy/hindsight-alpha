@@ -57,7 +57,8 @@ def _script_de_la_page() -> str:
 PRELUDE = """
 const _elements = {};
 const document = { getElementById: (id) => (_elements[id] = _elements[id] ||
-    { id, style: {}, className: "", textContent: "", innerHTML: "" }) };
+    { id, style: {}, className: "", textContent: "", innerHTML: "",
+      dataset: {} }) };
 const _resultats = {};
 function _publier() { console.log("---JSON---" + JSON.stringify(_resultats)); }
 """
@@ -1331,6 +1332,99 @@ class TestLeSymboleOptionSeLit(BaseRendu):
         """)
         self.assertIn("—", r["pos"])
         self.assertNotIn("undefined", r["pos"])
+
+
+class TestChaqueSectionPeutDireQuElleAEchoue(unittest.TestCase):
+    """DEUX DES SIX IDENTIFIANTS ETAIENT FAUX, et la panne etait avalee.
+
+    La boucle de rendu isole chaque section : si l'une leve, son catch ecrit
+    « This section could not be rendered (…) » DANS son element. Mais deux
+    entrees nommaient « account » et « positions », alors que les elements
+    s'appellent « account-cards » et « positions-container ».
+    getElementById rendait null, le `if (cible)` etait faux, et il ne se
+    passait RIEN.
+
+    Reproduit dans un navigateur avant correction, en faisant lever les deux
+    rendus :
+
+        ACCOUNT            -> « Loading… », pour toujours
+        OPEN POSITIONS     -> VIDE, pas un mot
+        bandeau d'erreur   -> pas affiche
+
+    ...et tout le reste de la page rendu normalement, donc d'apparence saine.
+    Une liste de positions vide se lit « aucune position ouverte » : la page
+    l'affirmait sans avoir rien lu.
+
+    Ce test lit la SOURCE plutot que d'executer la boucle : le DOM simule du
+    harnais rend un objet pour n'importe quel identifiant et ne peut donc
+    jamais produire le null qui est tout le defaut. Enonce plutot que
+    masque."""
+
+    def _ids_des_sections(self):
+        page = PAGE.read_text(encoding="utf-8")
+        bloc = re.search(r"const sections = \[(.*?)\n    \];", page, re.S)
+        self.assertIsNotNone(bloc, "le tableau `sections` n'a pas ete trouve "
+                                   "dans docs/index.html ; ce test ne verifie "
+                                   "plus rien tant qu'il n'est pas reecrit")
+        ids = re.findall(r'\[\s*"([a-z0-9-]+)"\s*,', bloc.group(1))
+        # Un motif qui ne trouve plus rien doit ECHOUER, pas passer : c'est
+        # exactement ainsi qu'un controle devient decoratif.
+        self.assertGreaterEqual(len(ids), 6,
+                                "seulement %d section(s) reconnue(s) — le "
+                                "motif ne lit plus le tableau" % len(ids))
+        return ids
+
+    def test_chaque_identifiant_de_section_existe_dans_la_page(self):
+        page = PAGE.read_text(encoding="utf-8")
+        for identifiant in self._ids_des_sections():
+            self.assertIn('id="%s"' % identifiant, page,
+                          "la section %r ecrit son message d'echec dans un "
+                          "element qui n'existe pas : sa panne serait "
+                          "silencieuse" % identifiant)
+
+    def test_le_compte_et_les_positions_sont_bien_dans_la_liste(self):
+        """TEMOIN : le test ci-dessus passerait aussi si quelqu'un RETIRAIT
+        les deux sections fautives de la boucle au lieu de corriger leur
+        identifiant -- elles perdraient alors toute isolation."""
+        ids = self._ids_des_sections()
+        self.assertIn("account-cards", ids)
+        self.assertIn("positions-container", ids)
+
+
+class TestUneSectionVideDitPourquoi(BaseRendu):
+    """Rendu dans un navigateur avec un data.json absent : le bandeau rouge
+    s'affichait bien en haut, et en dessous « ACCOUNT » restait sur
+    « Loading… » -- qui ne se resoudra jamais -- pendant que « OPEN
+    POSITIONS » et « RECENT DECISIONS » etaient vides, sans un mot.
+
+    Un bandeau en haut ne suffit pas : on ne lit pas une page de haut en bas
+    en cherchant a quoi rattacher un vide."""
+
+    def test_les_sections_non_chargees_le_disent(self):
+        r = self.executer("""
+            _direQueRienN_aEteCharge();
+            _resultats.compte = document.getElementById('account-cards').innerHTML;
+            _resultats.pos = document.getElementById('positions-container').innerHTML;
+            _resultats.dec = document.getElementById('decisions-container').innerHTML;
+        """)
+        for cle in ("compte", "pos", "dec"):
+            self.assertIn("Not loaded", r[cle])
+            self.assertIn('not "nothing to report"', r[cle],
+                          "le message ne dit pas que le vide n'est pas une "
+                          "absence de resultat : %r" % r[cle])
+
+    def test_une_section_deja_rendue_n_est_pas_ecrasee(self):
+        """TEMOIN : le repli ne doit pas effacer ce qui a REUSSI avant une
+        panne plus tardive. Sans lui, un message d'indisponibilite
+        remplacerait des chiffres reels."""
+        r = self.executer("""
+            const el = document.getElementById('account-cards');
+            el.innerHTML = 'DES CHIFFRES REELS';
+            el.dataset.rendu = '1';
+            _direQueRienN_aEteCharge();
+            _resultats.compte = el.innerHTML;
+        """)
+        self.assertEqual(r["compte"], "DES CHIFFRES REELS")
 
 
 if __name__ == "__main__":

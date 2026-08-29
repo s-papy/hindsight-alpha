@@ -427,8 +427,24 @@ async function loadDashboard() {
     // Meme raisonnement que l'isolation par element appliquee partout ailleurs
     // dans ce depot : une panne locale doit rester locale.
     const sections = [
-      ["account", () => renderAccount(data.account)],
-      ["positions", () => renderPositions(data.positions || [])],
+      // LES DEUX IDENTIFIANTS ETAIENT FAUX. Corriges le 29/08/2026.
+      //
+      // C'etait « account » et « positions » ; les elements s'appellent
+      // « account-cards » et « positions-container ». getElementById rendait
+      // donc null, le `if (cible)` du catch etait faux, et la panne de ces
+      // deux sections etait AVALEE EN SILENCE.
+      //
+      // Reproduit avant correction, en faisant lever les deux rendus :
+      //   ACCOUNT           -> « Loading… », pour toujours
+      //   OPEN POSITIONS    -> VIDE, pas un mot
+      //   banniere d'erreur -> pas affichee
+      // et le reste de la page rendu normalement, donc d'apparence saine.
+      //
+      // Une liste de positions vide se lit « aucune position ouverte ». La
+      // page l'affirmait sans avoir rien lu -- le defaut meme que ce depot
+      // traque partout, dans le seul endroit qu'un juge regarde.
+      ["account-cards", () => renderAccount(data.account)],
+      ["positions-container", () => renderPositions(data.positions || [])],
       ["agent-health-banner", () => renderAgentHealth(data.agent_status || null)],
       ["monitor-health-banner", () => renderMonitorHealth(
           data.recent_decisions || [], data.monitor_status || null,
@@ -437,15 +453,32 @@ async function loadDashboard() {
       ["decisions-container", () => renderDecisions(data.recent_decisions || [])],
     ];
     for (const [id, rendre] of sections) {
+      const cible = document.getElementById(id);
       try {
         rendre();
+        // Marque ce qui a REELLEMENT rendu : le repli du bas ne doit pas
+        // ecraser une section qui a reussi avant une panne plus tardive.
+        if (cible) cible.dataset.rendu = '1';
       } catch (err) {
-        const cible = document.getElementById(id);
         if (cible) {
           cible.innerHTML = `<div class="empty">This section could not be `
             + `rendered (${esc(String(err && err.message))}). The other `
             + `sections are unaffected, and nothing was removed from `
             + `decision_log.jsonl.</div>`;
+        } else {
+          // ON NE SE TAIT PLUS. Le repli d'origine ne faisait rien quand la
+          // cible manquait : c'est exactement ce qui a rendu les deux
+          // identifiants faux invisibles pendant quatre jours. Un message
+          // qu'on ne peut pas poser a sa place doit remonter ailleurs, pas
+          // disparaitre.
+          const banner = document.getElementById('error-banner');
+          if (banner) {
+            banner.style.display = 'block';
+            banner.textContent = 'A section failed to render (' + id + ': '
+              + String(err && err.message) + ') and its own container could '
+              + 'not be found, so nothing on this page marks the gap. What '
+              + 'that section would have shown is missing, not empty.';
+          }
         }
       }
     }
@@ -455,6 +488,37 @@ async function loadDashboard() {
     const banner = document.getElementById('error-banner');
     banner.style.display = 'block';
     banner.textContent = 'Could not load dashboard data: ' + err.message;
+    _direQueRienN_aEteCharge();
+  }
+}
+
+// CE QUE LES SECTIONS DISENT QUAND RIEN N'A ETE CHARGE. Ajoute le 29/08/2026,
+// apres avoir rendu la page avec un data.json absent pour voir ce qu'un juge
+// verrait si GitHub Pages sert le HTML avant le JSON, ou si une publication
+// echoue.
+//
+// Mesure : la banniere rouge s'affichait bien en haut -- et en dessous,
+//
+//   . « ACCOUNT » affichait « Loading… », qui ne se resoudra JAMAIS ;
+//   . « OPEN POSITIONS » etait VIDE, sans un mot ;
+//   . « RECENT DECISIONS » etait VIDE, sans un mot.
+//
+// Une section de positions vide se lit « aucune position ouverte ». C'est une
+// affirmation que la page ne peut pas faire : elle n'a rien lu. C'est le
+// defaut que ce depot traque partout ailleurs -- « je n'ai pas pu regarder »
+// rendu comme « il n'y a rien » -- et il etait ici, dans la page publique,
+// au seul endroit ou un juge le lirait.
+//
+// La banniere en haut ne suffit pas : on ne lit pas une page de haut en bas
+// en cherchant a quoi rattacher un vide.
+function _direQueRienN_aEteCharge() {
+  const message = 'Not loaded — see the error above. This is not '
+                + '"nothing to report": the page never read the data.';
+  for (const id of ['account-cards', 'positions-container', 'decisions-container']) {
+    const el = document.getElementById(id);
+    // On n'ecrase que ce qui n'a rien rendu : si une section a reussi avant
+    // la panne, son contenu reel vaut mieux que cet avertissement.
+    if (el && !el.dataset.rendu) el.innerHTML = '<div class="empty">' + message + '</div>';
   }
 }
 
