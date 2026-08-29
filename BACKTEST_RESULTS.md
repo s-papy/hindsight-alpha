@@ -34,6 +34,21 @@
 
 **hindsight_guard verdict for this symbol:** agrees (no leak) — full-window winner: 20 days, in-sample winner: 20 days.
 
+*Re-measured 29/08/2026 on live bars (same feed and adjustment the agent uses),
+and the winning window has **moved**: in-sample, 90d now scores **1.748**
+against 20d's **1.720**. GLD still agrees with itself — both winners are 90d,
+so there is no leak and no refusal — but the window this symbol is vetted on is
+no longer the one recorded above, and the 20d figure quoted in the one-page
+write-up (1.96) belongs to the frozen snapshot, not to today.*
+
+*The margin that moved it is **0.028**. Together with XLK's **0.024**, that is
+two of four symbols whose verdict is settled by roughly three hundredths of a
+Sharpe unit. The mechanism is doing exactly what it claims — comparing two
+rankings and refusing when they disagree — but on this universe the rankings
+are close enough that a few sessions of new data can reorder them. Stated here
+because a reader who re-runs the sweep next week will see different windows,
+and should know that was expected rather than wonder what broke.*
+
 ## XLK (657 bars used)
 
 *Buy-and-hold over the same bars: **-5.56%**. 🔴 This is NOT comparable to the payoff column below and must never be ranked against it: buy-and-hold is a compounded price return over every day of the period, while `cum. proxy payoff` is a SUM of daily `abs(return) - cost` payoffs on the minority of days the rule was in a position at all. Different quantities, different denominators. It is printed for context on what the underlying did, not as a benchmark to beat.*
@@ -64,7 +79,9 @@ disagreement — worth stating rather than leaving to be discovered.*
 
 *One sensitivity found while reproducing, and it is not a small one: on the
 **IEX** feed instead of the consolidated **SIP** feed, the in-sample winner
-flips to 90 and XLK stops being refused. The `alpaca` CLI defaults to `sip`
+flips to 90 and XLK stops being refused. The other three symbols return the
+same winners on both feeds — the sensitivity is confined to the one verdict
+that is decided by 0.024. The `alpaca` CLI defaults to `sip`
 and this repository never overrides it, so the live behaviour is the one
 recorded above — but the feed is a choice that decides the headline verdict,
 and it is not among the constants frozen in `kickoff_freeze.json`. It is
