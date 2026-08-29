@@ -69,9 +69,27 @@ if [ "$code" -eq 0 ]; then
     # code cassé. Une règle qu'on se rappelle ne vaut rien face à une règle
     # que l'outil applique.
     #
-    # SEULEMENT si un .py est indexé. Mesuré : les commits automatiques du
-    # tableau de bord ne touchent QUE docs/data.json, toutes les 30 minutes
-    # -- ils ne paieront jamais ce coût.
+    # SEULEMENT si un .py -- OU docs/index.html -- est indexé. Mesuré : les
+    # commits automatiques du tableau de bord ne touchent QUE
+    # docs/data.json, toutes les 30 minutes ; ils ne paient jamais ce coût.
+    #
+    # docs/index.html AJOUTÉ le 29/08/2026, après quatre commits de suite qui
+    # ne touchaient que lui. Ce fichier porte ~900 lignes de JavaScript, et
+    # test_dashboard.py en extrait le <script> pour l'exécuter sous Node :
+    # 73 tests portent dessus. La règle « un .py est indexé » lisait
+    # l'EXTENSION, pas ce qui est testé.
+    #
+    # REPRODUIT dans un clone avant de corriger : on casse _sens() dans
+    # docs/index.html, on n'indexe que ce fichier, et le commit PASSE --
+    # alors que la suite est rouge de 4 tests sur ce même arbre.
+    #
+    # githooks/pre-commit AJOUTÉ dans la foulée, pour la même raison : ce
+    # fichier-ci est EXÉCUTÉ par test_integration.py (dans un dépôt jetable,
+    # pas relu à la recherche de mots-clés) et copié par test_agent.py. Le
+    # gardien était le seul fichier testé que son propre gardien ignorait.
+    #
+    # data.json reste libre, exprès : c'est lui, et lui seul, que le
+    # publicateur committe toutes les 30 minutes.
     #
     # COÛT MESURÉ : 70 s avec la sentinelle anti-récursion, 139 s sans. On
     # pose la sentinelle : à 139 s je contournerais le hook, et un garde
@@ -84,7 +102,8 @@ if [ "$code" -eq 0 ]; then
     # alors que l'arbre est vert. Limite réelle, énoncée plutôt que masquée
     # -- ce hook attrape « j'ai oublié de lancer les tests », pas « j'ai
     # indexé un sous-ensemble incohérent ».
-    CODE_INDEXE=$(git diff --cached --name-only --diff-filter=ACM | grep '\.py$' || true)
+    CODE_INDEXE=$(git diff --cached --name-only --diff-filter=ACM \
+        | grep -E '\.py$|^docs/index\.html$|^githooks/pre-commit$' || true)
     if [ -n "$HINDSIGHT_SKIP_TESTS" ]; then
         [ -z "$CODE_INDEXE" ] || echo "[pre-commit] HINDSIGHT_SKIP_TESTS posé — la suite n'a PAS tourné."
         exit 0
@@ -93,7 +112,7 @@ if [ "$code" -eq 0 ]; then
         exit 0
     fi
 
-    echo "[pre-commit] du code Python est indexé — lancement de la suite (~70 s)..."
+    echo "[pre-commit] du code testé est indexé — lancement de la suite (~70 s)..."
     # Borne de temps, même raison que dans le hook du catalogue : sans elle,
     # une suite qui s'emballe gèle `git commit` sans autre issue qu'un
     # Ctrl-C. `timeout` n'existe pas de base sur macOS, d'où cette
