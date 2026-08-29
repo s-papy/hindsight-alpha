@@ -1380,7 +1380,7 @@ class TestAucunIdentifiantPublie(unittest.TestCase):
         depot = tempfile.mkdtemp(prefix="hindsight-arme-")
         vraie_racine = garde_fou.RACINE
         try:
-            subprocess.run(["git", "init", "-q", depot], check=True)
+            subprocess.run(["git", "-c", "init.defaultBranch=main", "init", "-q", depot], check=True)
             Path(depot, "fuite.py").write_text(
                 'CLE = "%s"\n' % self.CLE, encoding="utf-8")
             subprocess.run(["git", "-C", depot, "add", "-A"], check=True)
@@ -3059,7 +3059,7 @@ class TestMotifsDIdentifiants(unittest.TestCase):
         vraie = garde_fou.RACINE
         depot = tempfile.mkdtemp(prefix="hindsight-motif-")
         try:
-            subprocess.run(["git", "init", "-q", depot], check=True)
+            subprocess.run(["git", "-c", "init.defaultBranch=main", "init", "-q", depot], check=True)
             Path(depot, nom).write_text(contenu, encoding="utf-8")
             subprocess.run(["git", "-C", depot, "add", "-A"], check=True)
             garde_fou.RACINE = depot
@@ -4456,7 +4456,7 @@ class TestLeHookNAnnoncePasUneDureeEcriteALaMain(unittest.TestCase):
 
     def _depot(self):
         d = tempfile.mkdtemp(prefix="hindsight-duree-")
-        subprocess.run(["git", "init", "-q"], cwd=d, check=True)
+        subprocess.run(["git", "-c", "init.defaultBranch=main", "init", "-q"], cwd=d, check=True)
         Path(d, "githooks").mkdir()
         shutil.copy(self.HOOK, Path(d, "githooks", "pre-commit"))
         subprocess.run(["git", "config", "core.hooksPath", "githooks"],
@@ -4558,7 +4558,7 @@ class TestHookPreCommitNeSeTaitPas(unittest.TestCase):
         None = fichier absent."""
         dossier = tempfile.mkdtemp(prefix="hindsight-hook-")
         try:
-            subprocess.run(["git", "init", "-q"], cwd=dossier, check=True)
+            subprocess.run(["git", "-c", "init.defaultBranch=main", "init", "-q"], cwd=dossier, check=True)
             if contenu_garde_fou is not None:
                 Path(dossier, "garde_fou.py").write_text(contenu_garde_fou,
                                                          encoding="utf-8")
@@ -7171,7 +7171,7 @@ class TestUneComparaisonIMPOSSIBLENEstPasUnSUCCES(unittest.TestCase):
         import importlib.util, io, contextlib, shutil, subprocess, tempfile
         d = Path(tempfile.mkdtemp(prefix="hindsight-push-"))
         try:
-            subprocess.run(["git", "init", "-q", "."], cwd=str(d), check=True)
+            subprocess.run(["git", "-c", "init.defaultBranch=main", "init", "-q", "."], cwd=str(d), check=True)
             subprocess.run(["git", "-c", "user.email=a@b", "-c", "user.name=a",
                             "commit", "-q", "--allow-empty", "-m", "un"],
                            cwd=str(d), check=True)

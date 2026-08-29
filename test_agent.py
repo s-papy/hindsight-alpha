@@ -1624,7 +1624,7 @@ class TestUneANCREMorteEstSignalee(unittest.TestCase):
             for nom in ("garde_fou.py", "config.py"):
                 shutil.copy(self.RACINE / nom, d / nom)
             (d / "README.md").write_text(contenu_readme, encoding="utf-8")
-            subprocess.run(["git", "init", "-q", "."], cwd=str(d), check=True)
+            subprocess.run(["git", "-c", "init.defaultBranch=main", "init", "-q", "."], cwd=str(d), check=True)
             subprocess.run(["git", "add", "-A"], cwd=str(d), check=True)
             r = subprocess.run([sys.executable, str(d / "garde_fou.py")],
                                cwd=str(d), capture_output=True, text=True,
@@ -1703,7 +1703,7 @@ class TestUnHorodatageNaifEstSignaleParLeGardeFou(unittest.TestCase):
             (d / "sujet.py").write_text(
                 "from datetime import datetime, timezone\n\n" + corps_python,
                 encoding="utf-8")
-            subprocess.run(["git", "init", "-q", "."], cwd=str(d), check=True)
+            subprocess.run(["git", "-c", "init.defaultBranch=main", "init", "-q", "."], cwd=str(d), check=True)
             subprocess.run(["git", "add", "-A"], cwd=str(d), check=True)
             r = subprocess.run([sys.executable, str(d / "garde_fou.py")],
                                cwd=str(d), capture_output=True, text=True,
