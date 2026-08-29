@@ -34,6 +34,14 @@ flowchart LR
     C -- "no — the choice depended<br/>on data it could not have had" --> R["<b>REFUSE this symbol</b><br/>XLK, on every run"]
     C -- yes --> G["Risk gates<br/>size, sector, drawdown, losing streak"]
     G --> T["Paper order<br/>SPY, GLD, XLV"]
+
+    %% Une seule boite est mise en avant, et c'est le REFUS : dans un
+    %% diagramme ou toutes les cases se ressemblent, un lecteur presse suit
+    %% la fleche du bas et lit « ordre passe ». Or la these du dossier est
+    %% que le resultat a juger est celui de gauche. Couleurs posees en dur
+    %% plutot que par theme : GitHub rend ce bloc en clair ET en sombre.
+    classDef refus fill:#7f1d1d,stroke:#f87171,stroke-width:2px,color:#ffffff
+    class R refus
 ```
 
 Every box runs **before every decision**, not once at design time. The refusal
