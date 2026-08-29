@@ -91,10 +91,23 @@ if [ "$code" -eq 0 ]; then
     # data.json reste libre, exprès : c'est lui, et lui seul, que le
     # publicateur committe toutes les 30 minutes.
     #
-    # COÛT MESURÉ : 70 s avec la sentinelle anti-récursion, 139 s sans. On
-    # pose la sentinelle : à 139 s je contournerais le hook, et un garde
-    # qu'on contourne ne garde rien. Le prix assumé est que le test
-    # anti-récursion se saute ici ; il tourne entier en CI.
+    # COÛT : la sentinelle anti-récursion divise la durée par deux environ
+    # (70 s contre 139 s au 25/08). On la pose : au double je contournerais le
+    # hook, et un garde qu'on contourne ne garde rien. Le prix assumé est que
+    # le test anti-récursion se saute ici ; il tourne entier en CI.
+    #
+    # LE CHIFFRE ANNONCÉ N'EST PLUS ÉCRIT À LA MAIN, corrigé le 29/08/2026.
+    # Le message disait « ~70 s » — un nombre mesuré une fois, en juillet
+    # d'une suite plus petite, et jamais relu depuis. Mesure du 29/08 : 129 s
+    # sous la sentinelle, pour 667 tests. Presque le double, dans un message
+    # que quelqu'un lit pour décider combien de temps attendre. Il a coûté
+    # exactement ça : une commande de commit tuée à 120 s parce que j'avais
+    # dimensionné le délai sur ce « 70 ».
+    #
+    # La durée du dernier passage vert est désormais enregistrée et relue. La
+    # première fois, ou après un effacement, le hook dit qu'il ne la connaît
+    # pas — il n'en invente pas une. La borne DELAI, elle, reste à 300 s :
+    # mesurée le 29/08, la marge est de 2,3x.
     #
     # CE QUE CE HOOK PROUVE, ET CE QU'IL NE PROUVE PAS : il lance la suite
     # sur l'ARBRE DE TRAVAIL, pas sur le contenu indexé. Avec des
@@ -112,12 +125,22 @@ if [ "$code" -eq 0 ]; then
         exit 0
     fi
 
-    echo "[pre-commit] du code testé est indexé — lancement de la suite (~70 s)..."
+    # DÉPLACÉ ICI le 29/08 : l'annonce cite la borne, elle doit donc être
+    # définie avant. Sans ce déplacement le message disait « borne  s ».
+    DELAI="${HINDSIGHT_TESTS_TIMEOUT:-300}"
+    _duree_connue=""
+    _gd_duree=$(git rev-parse --git-dir 2>/dev/null)
+    [ -n "$_gd_duree" ] && _duree_connue=$(cat "$_gd_duree/duree-suite" 2>/dev/null)
+    case "$_duree_connue" in
+        ''|*[!0-9]*) _annonce="durée inconnue — aucun passage vert enregistré" ;;
+        *)           _annonce="~${_duree_connue} s au dernier passage vert" ;;
+    esac
+    echo "[pre-commit] du code testé est indexé — lancement de la suite ($_annonce, borne ${DELAI} s)..."
+    _debut=$(date +%s)
     # Borne de temps, même raison que dans le hook du catalogue : sans elle,
     # une suite qui s'emballe gèle `git commit` sans autre issue qu'un
     # Ctrl-C. `timeout` n'existe pas de base sur macOS, d'où cette
     # surveillance à la main.
-    DELAI="${HINDSIGHT_TESTS_TIMEOUT:-300}"
     _sortie=$(mktemp -t hindsight-tests 2>/dev/null) || _sortie=""
     if [ -z "$_sortie" ]; then
         _gd=$(git rev-parse --git-dir 2>/dev/null)
@@ -158,7 +181,9 @@ if [ "$code" -eq 0 ]; then
         [ "$_sortie" = /dev/null ] || rm -f "$_sortie"
         exit 1
     fi
-    echo "[pre-commit] suite verte."
+    _mis=$(( $(date +%s) - _debut ))
+    [ -n "$_gd_duree" ] && printf '%s' "$_mis" >"$_gd_duree/duree-suite" 2>/dev/null
+    echo "[pre-commit] suite verte en ${_mis} s."
     [ "$_sortie" = /dev/null ] || rm -f "$_sortie"
     exit 0
 fi

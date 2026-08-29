@@ -4378,6 +4378,97 @@ class TestAucunChampMortDansLesDonneesPubliees(unittest.TestCase):
         self.assertEqual(publie["symbol"], "SPY")
 
 
+class TestLeHookNAnnoncePasUneDureeEcriteALaMain(unittest.TestCase):
+    """Le hook annonçait « lancement de la suite (~70 s) ». Ce nombre avait
+    été mesuré une fois, sur une suite plus petite, et jamais relu.
+
+    Mesuré le 29/08/2026 : **129 s** sous la sentinelle anti-récursion, pour
+    667 tests. Presque le double, dans un message que quelqu'un lit pour
+    décider combien de temps attendre — et il a coûté exactement ça : une
+    commande de commit tuée à 120 s parce que le délai avait été dimensionné
+    sur ce « 70 ».
+
+    La borne du hook (300 s) n'était PAS en danger — la marge mesurée est de
+    2,3x, et elle est laissée telle quelle. Le défaut est le chiffre annoncé,
+    pas la garde.
+
+    Même famille que le paragraphe du banc corrigé le même jour : un message
+    qui nomme un nombre qu'il n'a pas mesuré. Ici la parade est de le mesurer
+    à chaque passage vert plutôt que de le corriger une fois de plus."""
+
+    HOOK = Path(__file__).parent / "githooks" / "pre-commit"
+
+    def _depot(self):
+        d = tempfile.mkdtemp(prefix="hindsight-duree-")
+        subprocess.run(["git", "init", "-q"], cwd=d, check=True)
+        Path(d, "githooks").mkdir()
+        shutil.copy(self.HOOK, Path(d, "githooks", "pre-commit"))
+        subprocess.run(["git", "config", "core.hooksPath", "githooks"],
+                       cwd=d, check=True)
+        Path(d, "garde_fou.py").write_text('print("VERDICT")\n',
+                                           encoding="utf-8")
+        Path(d, "test_zz.py").write_text(
+            "import unittest\n"
+            "class T(unittest.TestCase):\n"
+            "    def test_ok(self): self.assertTrue(True)\n",
+            encoding="utf-8")
+        return d
+
+    def _commit(self, d, message):
+        subprocess.run(["git", "add", "-A"], cwd=d, check=True)
+        r = subprocess.run(["git", "commit", "-m", message], cwd=d,
+                           capture_output=True, text=True, timeout=180)
+        return r.stdout + r.stderr
+
+    def test_le_premier_passage_dit_qu_il_ne_sait_pas(self):
+        """Sans mesure enregistrée, le hook doit DIRE qu'il ne connaît pas la
+        durée — pas en inventer une."""
+        d = self._depot()
+        try:
+            sortie = self._commit(d, "premier")
+            self.assertIn("durée inconnue", sortie, sortie[-600:])
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
+    def test_le_passage_suivant_annonce_la_duree_MESUREE(self):
+        d = self._depot()
+        try:
+            self._commit(d, "premier")
+            with open(Path(d, "test_zz.py"), "a", encoding="utf-8") as fh:
+                fh.write("# suite\n")
+            sortie = self._commit(d, "second")
+            self.assertIn("au dernier passage vert", sortie, sortie[-600:])
+            self.assertNotIn("durée inconnue", sortie, sortie[-600:])
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
+    def test_aucune_duree_en_dur_ne_subsiste_dans_le_message(self):
+        """TÉMOIN QUI MORD : réintroduire « ~70 s » dans l'annonce doit
+        échouer. Le message ne cite un nombre de secondes que s'il vient
+        d'une mesure ou de la borne."""
+        import re
+        texte = self.HOOK.read_text(encoding="utf-8")
+        annonces = [l for l in texte.splitlines()
+                    if "lancement de la suite" in l]
+        self.assertTrue(annonces, "la ligne d'annonce a disparu")
+        for l in annonces:
+            nus = re.findall(r"(?<![{$])\b\d+\s*s\b", l)
+            self.assertEqual(nus, [],
+                             "une durée écrite à la main est revenue dans "
+                             "l'annonce : %s" % l.strip())
+
+    def test_la_duree_annoncee_a_la_fin_est_celle_du_passage(self):
+        """SECOND TÉMOIN : le hook doit aussi DIRE combien il a mis, sinon la
+        mesure n'est vérifiable par personne."""
+        d = self._depot()
+        try:
+            sortie = self._commit(d, "premier")
+            self.assertRegex(sortie, r"suite verte en \d+ s",
+                             sortie[-600:])
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
+
 class TestHookPreCommitNeSeTaitPas(unittest.TestCase):
     """Le hook est la PREMIÈRE couche d'application. Mesuré de bout en bout,
     dans une copie du dépôt avec les hooks actifs :
