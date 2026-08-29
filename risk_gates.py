@@ -944,6 +944,12 @@ class ExitKind(str, Enum):
     # -- ni option reconnaissable, ni action declaree. Voir la boucle de
     # manage_exits() pour la raison.
     UNRECOGNISED = "unrecognised"
+    # AJOUTE le 29/08/2026. Position DECLAREE comme action ordinaire -- donc
+    # parfaitement classee, contrairement a UNRECOGNISED -- mais cet agent
+    # n'ouvre JAMAIS d'action : il n'achete que des options a 7-21 jours.
+    # Une ligne actions sur ce compte ne peut donc venir que d'un exercice ou
+    # d'une assignation a l'echeance. Voir manage_exits().
+    EQUITY_UNEXPECTED = "equity_unexpected"
 
 
 @dataclass
@@ -1181,6 +1187,43 @@ def manage_exits(dry_run: bool = False) -> List[ExitAction]:
                           "symbole non-OCC) ni declaree comme action -- aucun "
                           "stop-loss ne peut lui etre applique, verifier a la "
                           "main" % asset_class))
+            else:
+                # CORRIGE le 29/08/2026. Une action ordinaire etait ecartee en
+                # SILENCE, au motif qu'elle est « explicitement declaree comme
+                # telle, il n'y a pas de doute a signaler ».
+                #
+                # Ce raisonnement vaut pour un outil general. Il ne vaut pas
+                # ici : CET agent n'ouvre jamais d'action. DEFAULT_UNIVERSE ne
+                # sert qu'a choisir un CONTRAT, et find_near_the_money_contract
+                # ne rend que des symboles OCC a 7-21 jours. Une ligne actions
+                # sur ce compte ne peut donc venir que d'un EXERCICE ou d'une
+                # ASSIGNATION a l'echeance.
+                #
+                # Et c'est exactement le scenario mesure le 29/08 : la seule
+                # position ouverte est un put SPY 769 qui expire le 04/09, le
+                # jour de la date limite, avec SPY a 769,28 -- a la monnaie a
+                # 0,04 % pres. Une option laissee dans la monnaie a l'echeance
+                # est exercee automatiquement : 200 SPY short, ~154 000 $ de
+                # notionnel sur un compte de 100 000 $. Les regles +50/-50 %
+                # ne s'y opposent pas, et manage_exits est le SEUL mecanisme
+                # qui protege une position ouverte.
+                #
+                # AUCUN SEUIL N'EST AJOUTE et rien n'est ferme : ce serait un
+                # garde de risque, et aucun seuil de ce depot ne bouge sans
+                # decision humaine. On MESURE et on DIT -- meme choix que la
+                # marge avant la cloche et que le compte a rebours d'echeance.
+                #
+                # Zero bruit en fonctionnement normal : cette branche ne peut
+                # se declencher que si une action apparait, ce qui n'arrive
+                # jamais tant qu'aucune option n'est exercee.
+                actions.append(ExitAction(
+                    symbol, ExitKind.EQUITY_UNEXPECTED,
+                    error="position ACTIONS sur un compte qui n'en ouvre "
+                          "jamais (asset_class=%r) : cet agent n'achete que "
+                          "des options, donc celle-ci vient d'un exercice ou "
+                          "d'une assignation a l'echeance. Aucun stop-loss ne "
+                          "lui est applique -- a traiter a la main."
+                          % asset_class))
             continue
 
         try:

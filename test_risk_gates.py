@@ -1032,14 +1032,52 @@ class TestPositionNonReconnueALaSortie(BaseExit):
             "decision_log.jsonl, rien sur le tableau de bord")
         self.assertIn("CONTRAT-INCONNU-42", str(actions[0]))
 
-    def test_une_action_ordinaire_reste_geree(self):
-        """Témoin n°1 : une vraie action doit rester écartée en silence, sinon
-        chaque passage journaliserait du bruit."""
+    def test_une_action_ordinaire_est_desormais_SIGNALEE(self):
+        """DÉCISION RENVERSÉE le 29/08/2026, et il faut dire laquelle.
+
+        Ce test exigeait le contraire : « une vraie action doit rester écartée
+        en silence, sinon chaque passage journaliserait du bruit ». Le
+        raisonnement était juste pour un outil général, et il l'est resté
+        pendant deux jours.
+
+        Ce qui l'invalide ici : **cet agent n'ouvre jamais d'action.**
+        `find_near_the_money_contract` ne rend que des symboles OCC à 7-21
+        jours, et le compte est dédié au hackathon par règlement. Une ligne
+        actions ne peut donc venir que d'un EXERCICE ou d'une ASSIGNATION à
+        l'échéance — le scénario mesuré le 29/08, où la seule position ouverte
+        est un put SPY qui expire le jour de la date limite, à la monnaie à
+        0,04 % près.
+
+        La prémisse « bruit à chaque passage » est donc fausse sur ce compte :
+        la branche ne peut se déclencher que si une action apparaît, ce qui
+        n'arrive jamais tant qu'aucune option n'est exercée. Zéro alerte en
+        fonctionnement normal, une alerte forte exactement quand il le faut —
+        l'inverse de la fatigue d'alerte que ce témoin protégeait.
+
+        Le témoin qui compte vraiment est déplacé au test suivant : c'est
+        l'ABSENCE d'alerte sur une option ordinaire qui garantit le silence."""
+        import risk_gates
         actions = self._actions([self._pos("AAPL", asset_class="us_equity")])
-        self.assertEqual(
-            actions, [],
-            "une position actions ordinaire produit une alerte : le bruit "
-            "permanent est ce qui apprend à ignorer un journal")
+        self.assertEqual(len(actions), 1,
+                         "une position actions disparaît sans trace, alors "
+                         "qu'elle ne peut venir que d'un exercice")
+        self.assertEqual(actions[0].kind, risk_gates.ExitKind.EQUITY_UNEXPECTED)
+
+    def test_le_silence_est_garanti_par_les_OPTIONS_pas_par_les_actions(self):
+        """TÉMOIN DE REMPLACEMENT. Ce qui protège du bruit permanent, ce n'est
+        pas d'ignorer les actions — c'est qu'une option sous ses seuils ne
+        produit rien d'autre qu'un « holding » routinier, filtré avant le
+        journal. C'est le cas de 100 % des passages réels."""
+        import risk_gates
+        # -4,9 % : la position reelle du 28/08, loin des +/-50 %. Le helper
+        # de cette classe met -60 % par defaut, ce qui declencherait le
+        # stop-loss et ne mesurerait donc pas le passage ORDINAIRE.
+        actions = self._actions([self._pos("SPY260904P00769000",
+                                           asset_class="us_option",
+                                           unrealized_plpc="-0.049")])
+        self.assertTrue(all(a.is_routine() for a in actions),
+                        "un passage ordinaire produit du bruit journalisé : %s"
+                        % [a.kind for a in actions])
 
     def test_une_option_normale_est_toujours_fermee(self):
         """Témoin n°2 : le chemin nominal n'a pas bougé."""
@@ -3587,6 +3625,90 @@ class TestMauvaisCompteRefuseLaCloture(BaseExit):
         sorties — même choix que du côté des entrées."""
         _, fermetures = self._sortir("PAQUELCONQUE", None)
         self.assertEqual(len(fermetures), 1)
+
+
+
+class TestUnePositionACTIONSNEstPasSilencieuse(unittest.TestCase):
+    """`manage_exits()` écartait une position d'ACTIONS en silence, au motif
+    qu'elle est « explicitement déclarée comme telle, il n'y a pas de doute à
+    signaler ».
+
+    Ce raisonnement vaut pour un outil général. Il ne vaut pas ici : **cet
+    agent n'ouvre jamais d'action.** `find_near_the_money_contract` ne rend
+    que des symboles OCC à 7-21 jours. Une ligne actions sur ce compte ne
+    peut donc venir que d'un EXERCICE ou d'une ASSIGNATION à l'échéance.
+
+    Et c'est exactement le scénario mesuré le 29/08 : la seule position
+    ouverte est un put SPY 769 qui expire le 04/09 — le jour de la date
+    limite — avec SPY à 769,28, à la monnaie à 0,04 % près. Une option
+    laissée dans la monnaie est exercée automatiquement : 200 SPY short,
+    ~154 000 $ de notionnel sur un compte de 100 000 $. Les règles ±50 % ne
+    s'y opposent pas, et `manage_exits` est le SEUL mécanisme qui protège une
+    position ouverte.
+
+    Rien n'est fermé et aucun seuil n'est ajouté — ce serait un garde de
+    risque. On mesure et on dit."""
+
+    def _actions(self, positions):
+        import risk_gates, alpaca_cli
+        vrai = alpaca_cli.list_positions
+        alpaca_cli.list_positions = lambda: list(positions)
+        try:
+            return risk_gates.manage_exits(dry_run=True)
+        finally:
+            alpaca_cli.list_positions = vrai
+
+    def test_une_ligne_actions_produit_une_action_visible(self):
+        import risk_gates
+        actions = self._actions([{"symbol": "SPY", "asset_class": "us_equity",
+                                  "qty": "-200", "unrealized_plpc": "0.01"}])
+        self.assertEqual(len(actions), 1,
+                         "une position actions disparaît sans laisser de "
+                         "trace : ni journal, ni tableau de bord")
+        a = actions[0]
+        self.assertEqual(a.kind, risk_gates.ExitKind.EQUITY_UNEXPECTED)
+        self.assertIn("exercice", a.error)
+        self.assertFalse(a.is_routine(),
+                         "l'action est routinière, donc elle n'atteindrait "
+                         "pas le journal")
+
+    def test_elle_n_est_PAS_annoncee_comme_non_classee(self):
+        """TÉMOIN : `UNRECOGNISED` veut dire « je n'ai pas su la classer ».
+        Ici on l'a parfaitement classée — c'est une action. Réutiliser ce
+        verdict nommerait une cause qu'on n'a pas mesurée."""
+        import risk_gates
+        actions = self._actions([{"symbol": "SPY", "asset_class": "us_equity",
+                                  "qty": "-200"}])
+        self.assertNotEqual(actions[0].kind, risk_gates.ExitKind.UNRECOGNISED)
+
+    def test_une_OPTION_ordinaire_ne_declenche_rien_de_tel(self):
+        """SECOND TÉMOIN : crier sur toute position rendrait le signal
+        inutile. Une option sous les seuils reste « holding »."""
+        import risk_gates
+        actions = self._actions([{"symbol": "SPY260904P00769000",
+                                  "asset_class": "us_option", "qty": "2",
+                                  "unrealized_plpc": "-0.049"}])
+        self.assertEqual(len(actions), 1)
+        self.assertEqual(actions[0].kind, risk_gates.ExitKind.HOLDING)
+
+    def test_rien_n_est_ferme_sur_une_ligne_actions(self):
+        """TROISIÈME TÉMOIN, et c'est la contrainte du projet : mesurer, pas
+        décider à la place de l'opérateur."""
+        import risk_gates, alpaca_cli
+        appels = []
+        vrai_liste, vrai_close = alpaca_cli.list_positions, alpaca_cli.close_position
+        alpaca_cli.list_positions = lambda: [{"symbol": "SPY",
+                                              "asset_class": "us_equity",
+                                              "qty": "-200"}]
+        alpaca_cli.close_position = lambda *a, **k: appels.append(a)
+        try:
+            risk_gates.manage_exits(dry_run=False)
+        finally:
+            alpaca_cli.list_positions = vrai_liste
+            alpaca_cli.close_position = vrai_close
+        self.assertEqual(appels, [],
+                         "une position actions a été FERMÉE automatiquement : "
+                         "c'est une décision de risque, pas une mesure")
 
 
 if __name__ == "__main__":

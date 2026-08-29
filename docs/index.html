@@ -1128,6 +1128,13 @@ function outcomeBadge(d) {
       // La tentative de cloture a leve. La position est TOUJOURS OUVERTE.
       return '<span class="badge badge-red">close FAILED — position still open</span>';
     }
+    if (kinds.indexOf('equity_unexpected') !== -1) {
+      // AJOUTE le 29/08. Une ligne ACTIONS sur un compte qui n'ouvre que des
+      // options ne peut venir que d'un exercice ou d'une assignation. Elle
+      // porte du notionnel reel sans qu'aucun stop-loss ne s'y applique --
+      // meme severite qu'une position non classee.
+      return '<span class="badge badge-red">equity position — an option was exercised</span>';
+    }
     if (kinds.indexOf('unrecognised') !== -1) {
       // AJOUTE 27/08, et signale par le test de pont AVANT d'avoir pu passer
       // en gris : une position que manage_exits() ne sait pas classer. Elle
