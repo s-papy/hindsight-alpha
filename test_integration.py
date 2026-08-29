@@ -5210,7 +5210,19 @@ class TestChaqueDependanceTierceEstDECLAREE(unittest.TestCase):
         import ast
         import importlib.util
         import sysconfig
-        locaux = {f.stem for f in self.RACINE.glob("*.py")}
+        # ELARGI le 29/08/2026 : « local » ne voulait dire que « a la racine ».
+        # `submission/rendre_le_deck.py` est aussi local que n'importe quel
+        # module d'ici, mais ce controle l'a classe TIERS et a refuse le commit
+        # qui l'importait depuis un test.
+        #
+        # Le refus etait juste dans sa forme -- mieux vaut arreter un import
+        # inconnu que le laisser passer -- et faux dans son motif. La reponse
+        # n'est pas d'ecrire une exception pour ce fichier-la : c'est que la
+        # question « ce module vit-il dans ce depot ? » se pose sur TOUT le
+        # depot. Tout autre sous-dossier de code ajoute demain est couvert
+        # sans qu'on y pense.
+        locaux = {f.stem for f in self.RACINE.rglob("*.py")
+                  if ".git" not in f.parts and "worktrees" not in f.parts}
         stdlib = sysconfig.get_paths()["stdlib"]
         vus = {}
         for f in sorted(self.RACINE.glob("*.py")):

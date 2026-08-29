@@ -93,6 +93,17 @@ def _enfant_direct(noeud, nom):
     return None
 
 
+def _couleur_profonde(noeud) -> "str | None":
+    """La premiere couleur pleine trouvee N'IMPORTE OU sous ce noeud.
+    `<p:bg>` enveloppe sa couleur dans `<p:bgPr>`, donc le `_couleur` a
+    enfants directs ne la voit pas."""
+    if noeud is None:
+        return None
+    for c in noeud.getElementsByTagName("a:srgbClr"):
+        return "#" + c.getAttribute("val")
+    return None
+
+
 def _couleur(noeud) -> "str | None":
     """La couleur pleine d'un noeud, ou None. On ne lit que `srgbClr` :
     ce deck n'emploie pas de couleurs de theme, verifie a la mesure."""
@@ -325,11 +336,26 @@ def construire(chemin_deck: Path, seulement: "int | None") -> "tuple[str, list]"
         [n for n in z.namelist() if re.match(r"ppt/slides/slide\d+\.xml$", n)],
         key=lambda n: int(re.search(r"\d+", n.split("/")[-1]).group()))
 
-    problemes, slides = [], []
+    problemes, slides, fonds = [], [], {}
     for numero, nom in enumerate(noms, 1):
         if seulement is not None and numero != seulement:
             continue
         doc = minidom.parseString(z.read(nom))
+        # LE FOND DE LA DIAPO. Absent de la premiere version : toutes les
+        # diapos etaient peintes en blanc, y compris les trois qui sont en
+        # bleu nuit (1, 7, 11). Leur texte blanc y devenait invisible, et le
+        # lecteur du rendu voyait un defaut GRAVE la ou le deck va bien.
+        #
+        # C'est la pire panne possible pour un outil de mesure : il ne rate
+        # pas un defaut, il en FABRIQUE. Signale par Spap le 29/08 sur
+        # « s-papy.github.io/hindsight-alpha, blanc sur fond blanc » -- vrai
+        # dans mon rendu, faux dans le deck.
+        fond = "#FFFFFF"
+        bgs = doc.getElementsByTagName("p:bg")
+        if bgs:
+            c = _couleur_profonde(bgs[0])
+            if c:
+                fond = c
         formes = []
         for i, sp in enumerate(doc.getElementsByTagName("p:sp"), 1):
             frag, souci = _forme_en_html(sp, i, "slide%d" % numero)
@@ -350,10 +376,12 @@ def construire(chemin_deck: Path, seulement: "int | None") -> "tuple[str, list]"
                 '<div class="forme non-rendu" data-forme="slide%d#graphique" '
                 'style="position:absolute;left:%spx;top:%spx;width:%spx;'
                 'height:%spx">GRAPHIQUE NON RENDU</div>' % (numero, x, y, w, h))
-        slides.append('<figure><figcaption>slide %d — %s</figcaption>'
-                      '<div class="slide" style="width:%spx;height:%spx">%s</div>'
-                      '</figure>' % (numero, html.escape(nom.split("/")[-1]),
-                                     largeur, hauteur, "".join(formes)))
+        slides.append('<figure><figcaption>slide %d — %s (fond %s)</figcaption>'
+                      '<div class="slide" style="width:%spx;height:%spx;'
+                      'background:%s">%s</div></figure>'
+                      % (numero, html.escape(nom.split("/")[-1]), fond,
+                         largeur, hauteur, fond, "".join(formes)))
+        fonds[numero] = fond
 
     page = """<!doctype html><html lang="fr"><head><meta charset="utf-8">
 <title>Hindsight Alpha — rendu du deck</title><style>
@@ -366,7 +394,7 @@ def construire(chemin_deck: Path, seulement: "int | None") -> "tuple[str, list]"
  .avert{color:#fbbf24;margin:10px 0 20px;max-width:1280px}
  figure{margin:0 0 28px}
  figcaption{font:12px ui-monospace,monospace;color:#8b93a7;margin-bottom:6px}
- .slide{position:relative;background:#fff;color:#111;overflow:hidden;
+ .slide{position:relative;color:#111;overflow:hidden;
         box-shadow:0 2px 18px rgba(0,0,0,.55)}
  .forme{}
  .forme p{margin:0}
@@ -387,7 +415,7 @@ orange = la forme sort de la diapo.</p>
 %s
 <script>var PADV=0,PADH=0;%s</script>
 </body></html>""" % ("".join(slides), SONDE)
-    return page, problemes
+    return page, problemes, fonds
 
 
 # ---------------------------------------------------------------------------
@@ -716,15 +744,27 @@ def mesurer(chemin_deck: Path,
         for al in [a for a in alertes if a["slide"] == numero and "boite" in a]:
             x, y, w, h = al["boite"]
             debord = max(0.0, al["hauteur_texte_px"] - h) / 2.0
-            if debord <= 1:
+            al["touche"] = _collisions_causees(al["forme"], (x, y, w, h),
+                                               debord, boites)
+    return alertes, notes, non_mesurables, seuil_global
+
+
+def _collisions_causees(numero, boite, debord, boites):
+    """Numeros des formes que le DEBORD fait toucher — et elles seules.
+
+    Sortie en fonction pure le 29/08 pour la tester sans deck : les tests qui
+    l'exercaient affirmaient « aucune collision aujourd'hui », ce qui encodait
+    l'etat du fichier et non le comportement du code. Ils sont tombes des la
+    premiere correction de mise en page -- a juste titre."""
+    x, y, w, h = boite
+    haut, bas = y - debord, y + h + debord
+    touches = []
+    if debord > 1:
+        for j, (bx, by, bw, bh) in boites:
+            if j == numero:
                 continue
-            haut, bas = y - debord, y + h + debord
-            touches = []
-            for j, (bx, by, bw, bh) in boites:
-                if j == al["forme"]:
-                    continue
-                if not (bx < x + w and bx + bw > x):
-                    continue
+            if not (bx < x + w and bx + bw > x):
+                continue
                 # Le chevauchement doit etre CAUSE par le debordement.
                 # Corrige le 29/08 apres verification a la main : la premiere
                 # version signalait « le debord recouvre la forme 1 » sur la
@@ -733,12 +773,11 @@ def mesurer(chemin_deck: Path,
                 # bonnes formes pour la mauvaise raison -- et « ce debordement
                 # casse quelque chose » est precisement ce qu'un lecteur
                 # croirait sur parole.
-                deja = by < y + h and by + bh > y
-                apres = by < bas and by + bh > haut
-                if apres and not deja:
-                    touches.append(j)
-            al["touche"] = touches
-    return alertes, notes, non_mesurables, seuil_global
+            deja = by < y + h and by + bh > y
+            apres = by < bas and by + bh > haut
+            if apres and not deja:
+                touches.append(j)
+    return touches
 
 
 def main() -> None:
@@ -756,7 +795,7 @@ def main() -> None:
         print("deck introuvable : %s" % chemin, file=sys.stderr)
         raise SystemExit(2)
 
-    page, problemes = construire(chemin, args.slide)
+    page, problemes, fonds = construire(chemin, args.slide)
     Path(args.sortie).write_text(page, encoding="utf-8")
     print("ecrit : %s" % args.sortie)
     if problemes:

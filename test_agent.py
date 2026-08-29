@@ -31,6 +31,7 @@ import sys
 import tempfile
 import types
 import unittest
+import zipfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -1879,19 +1880,36 @@ class TestLeMoteurDeRenduDuDeckDitCeQuIlNeSaitPasFaire(unittest.TestCase):
                          "débordement :\n%s" % bloc[-800:])
 
     def test_une_collision_deja_presente_n_est_pas_imputee_au_debordement(self):
-        """Ma première version annonçait « le débord recouvre la forme 1 » sur
-        la slide 4. Vérifié à la main : les deux boîtes se chevauchent DÉJÀ
-        (43–77 contre 72–158) sans qu'aucun texte ne déborde. Elle nommait les
-        bonnes formes pour la mauvaise raison.
+        """Le moteur annonçait « le débord recouvre la forme 1 » sur des
+        boîtes qui se chevauchaient DÉJÀ, sans qu'aucun texte ne déborde. Il
+        nommait les bonnes formes pour la mauvaise raison, et « ce
+        débordement casse quelque chose » est le genre d'affirmation qu'un
+        lecteur croit sur parole.
 
-        « Ce débordement casse quelque chose » est exactement le genre
-        d'affirmation qu'un lecteur croit sur parole : elle doit donc être
-        causale, pas coïncidente."""
-        _code, sortie = self._lancer()
-        for ligne in sortie.splitlines():
-            if "RECOUVRE" in ligne:
-                self.fail("une collision est imputée au débordement alors "
-                          "qu'aucune ne l'est aujourd'hui : %s" % ligne.strip())
+        ÉCRIT SANS DECK, et c'est le point. Ma première version lançait le
+        script sur le vrai fichier et affirmait « aucune collision
+        aujourd'hui ». Elle est tombée à la première correction de mise en
+        page — parce qu'elle encodait l'état de l'artefact au lieu de la
+        règle. La règle se teste sur des rectangles."""
+        sys.path.insert(0, str(self.RACINE / "submission"))
+        from rendre_le_deck import _collisions_causees
+        # la victime : y de 72 à 158, son texte déborde de 10 px de chaque côté
+        boite = (58.0, 72.0, 1104.0, 86.0)
+        deja = [(1, (58.0, 43.0, 768.0, 34.0))]      # 43..77, chevauche 72..77
+        # 30..64 : sous le haut de la victime (72) donc AUCUN chevauchement
+        # préexistant, mais au-dessus du débord (72−10=62) donc touché par lui.
+        # Ma première version mettait ce témoin à 20..54 — trop loin pour être
+        # touché même avec le débord, donc il passait pour la mauvaise raison.
+        loin = [(1, (58.0, 30.0, 768.0, 34.0))]
+        self.assertEqual(
+            _collisions_causees(2, boite, 10.0, deja), [],
+            "un chevauchement PRÉEXISTANT est imputé au débordement")
+        self.assertEqual(
+            _collisions_causees(2, boite, 10.0, loin), [1],
+            "un chevauchement CRÉÉ par le débordement n'est pas signalé")
+        self.assertEqual(
+            _collisions_causees(2, boite, 0.0, loin), [],
+            "sans débordement, rien ne doit être signalé")
 
     def test_l_exactitude_est_annoncee_PAR_ZONE_et_pas_globalement(self):
         """Carlito et Caladea sont les clones libres métriquement compatibles
@@ -1909,13 +1927,44 @@ class TestLeMoteurDeRenduDuDeckDitCeQuIlNeSaitPasFaire(unittest.TestCase):
         self.assertIn("VERIFIE", sortie,
                       "la compatibilité métrique n'est plus vérifiée :\n%s"
                       % sortie[-900:])
-        self.assertIn("mesure exacte", sortie,
-                      "aucune zone n'est annoncée comme mesurée exactement, "
-                      "alors que Calibri est vérifiée :\n%s" % sortie[-900:])
         self.assertIn("PAR ZONE", sortie,
                       "le seuil ne se dit plus par zone")
+        # Volontairement PAS d'assertion sur « mesure exacte » : elle
+        # exigerait qu'une zone en Calibri déborde encore. La version
+        # précédente le faisait, et elle est tombée dès que le deck a été
+        # corrigé — un test d'outil ne doit pas encoder les défauts de
+        # l'artefact qu'il mesure.
 
-    def test_le_rendu_produit_bien_les_onze_diapos(self):
+    def test_le_FOND_de_chaque_diapo_est_rendu(self):
+        """LE DÉFAUT LE PLUS GRAVE QU'AIT EU CE MOTEUR, et le seul signalé par
+        un humain avant moi.
+
+        `p:bg` n'était pas lu : toutes les diapos étaient peintes en blanc, y
+        compris les trois qui sont en bleu nuit (#141B4D). Leur texte blanc y
+        devenait invisible, et Spap a rapporté « slide 11,
+        s-papy.github.io/hindsight-alpha, blanc sur fond blanc, illisible » —
+        vrai dans mon rendu, FAUX dans le deck. Le bleu clair « illisible sur
+        fond blanc » venait de la même cause.
+
+        Un outil de mesure qui rate un défaut est décevant ; un outil qui en
+        FABRIQUE envoie corriger ce qui va bien. C'est la pire des deux
+        pannes, et c'est celle-là qui était en place."""
+        d = Path(tempfile.mkdtemp(prefix="hindsight-fond-"))
+        try:
+            cible = d / "apercu.html"
+            subprocess.run([sys.executable, str(self.SCRIPT),
+                            "--sortie", str(cible)], cwd=str(self.RACINE),
+                           capture_output=True, text=True, timeout=180)
+            page = cible.read_text(encoding="utf-8")
+            self.assertIn("background:#141B4D", page,
+                          "les diapos en bleu nuit sont rendues sur fond "
+                          "blanc : leur texte blanc y devient invisible")
+            self.assertIn("background:#FFFFFF", page,
+                          "les diapos blanches ne sont plus rendues en blanc")
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
+    def test_le_rendu_produit_bien_les_dix_diapos(self):
         """TÉMOIN : un script qui n'écrirait rien passerait les deux tests
         précédents."""
         d = Path(tempfile.mkdtemp(prefix="hindsight-rendu2-"))
@@ -1925,9 +1974,26 @@ class TestLeMoteurDeRenduDuDeckDitCeQuIlNeSaitPasFaire(unittest.TestCase):
                             "--sortie", str(cible)], cwd=str(self.RACINE),
                            capture_output=True, text=True, timeout=180)
             page = cible.read_text(encoding="utf-8")
-            self.assertEqual(page.count('class="slide"'), 11, "11 diapos "
-                             "attendues, %d rendues" % page.count('class="slide"'))
-            self.assertIn("WHERE THIS SITS IN THE FIELD", page)
+            attendu = len(re.findall(
+                r"<p:sldId\b",
+                zipfile.ZipFile(self.RACINE / "submission"
+                                / "Hindsight_Alpha_Deck.pptx")
+                .read("ppt/presentation.xml").decode()))
+            self.assertEqual(page.count('class="slide"'), attendu,
+                             "%d diapos dans l'ordre de presentation, %d "
+                             "rendues" % (attendu, page.count('class="slide"')))
+            # Un titre lu DANS le deck, pas écrit en dur : la version
+            # précédente cherchait « WHERE THIS SITS IN THE FIELD », le titre
+            # de la slide 3 — et elle est tombée le jour où cette slide a été
+            # supprimée sur demande. Encore l'artefact encodé dans le test.
+            z = zipfile.ZipFile(self.RACINE / "submission"
+                                / "Hindsight_Alpha_Deck.pptx")
+            premier = re.findall(
+                r"<a:t>([^<]{6,60})</a:t>",
+                z.read("ppt/slides/slide1.xml").decode())[0]
+            self.assertIn(premier, page,
+                          "le titre de la première diapo n'apparaît pas dans "
+                          "le rendu")
         finally:
             shutil.rmtree(d, ignore_errors=True)
 
