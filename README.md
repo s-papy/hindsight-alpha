@@ -62,10 +62,22 @@ The two scores the guard compares overlap by 97 % — same ~700 bars, minus the
 last 20 — so the gap that decides a verdict is small by construction. On XLK
 today it is **0.024 of a Sharpe unit** in-sample (10 beats 90), and it
 disappears entirely if the bars are fetched from the IEX feed instead of the
-consolidated SIP one. And this repository's own benchmark
-([HINDSIGHT_HOLDOUT.md](HINDSIGHT_HOLDOUT.md)) puts the mechanism's **false-alarm
-rate at 22.6 % on deliberately clean synthetic data**, against a 32.2 %
-detection rate on planted leaks.
+consolidated SIP one. And this repository measures the mechanism's **false-alarm rate twice, by two
+different constructions — 22.6 % and 30.2 %**. The first
+([HINDSIGHT_HOLDOUT.md](HINDSIGHT_HOLDOUT.md)) plants an anomaly in synthetic
+prices and varies the holdout; the second
+([HINDSIGHT_BENCHMARK.md](HINDSIGHT_BENCHMARK.md)) works at the score level with
+known ground truth, and on a selection that genuinely has an edge and no leak it
+still cries leak 30.2 % of the time. Both are cited because quoting only the
+lower of two measured rates is the selective reporting this project exists to
+denounce.
+
+**And the same benchmark says something harder still.** On a selection with *no
+edge and no leak* — a winner picked by noise alone, pure overfitting — the guard
+certifies it **52 % of the time**, and the Sharpe threshold this project actually
+uses (0.0) protects against none of it: neutralising the threshold entirely moves
+that number by one point. The guard is not built to catch overfitting-without-
+look-ahead, it says so, and nothing else in the chain catches it either.
 
 So the honest reading is not "XLK leaks, proven". It is: *this agent applies a
 falsifiable test before every trade, the test fires on XLK on real bars every
@@ -108,6 +120,7 @@ Everything below that is depth for whoever wants it, not a prerequisite.
 | [Status](#status) | what is proven, what is running, what is left |
 | [LIVE_WEEK.md](LIVE_WEEK.md) | **what will be reported on 04/09 — decided before the results were known** |
 | [HINDSIGHT_HOLDOUT.md](HINDSIGHT_HOLDOUT.md) | the guard's own false-alarm and detection rates, measured — including the 22.6 % that argues against it |
+| [HINDSIGHT_BENCHMARK.md](HINDSIGHT_BENCHMARK.md) | the same guard against known ground truth — 30.2 % false alarms, and the 52 % of worthless selections it certifies |
 
 ## Backtest, at a glance
 

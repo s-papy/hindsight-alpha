@@ -6341,6 +6341,59 @@ class TestLeTauxDeFAUSSEALERTEEstPublie(unittest.TestCase):
                         "aucun pourcentage du deck n'est proche du taux "
                         "mesuré (%.1f%%) : %s" % (vrai, annonces))
 
+    def _passage_honnetete(self) -> str:
+        """Le PASSAGE explicatif, pas le fichier entier.
+
+        Mes deux premières mutations — retirer 30.2 % puis 52 % de la prose —
+        n'ont rien cassé : les deux chiffres figurent AUSSI dans la table des
+        matières que j'avais ajoutée, et `assertIn` sur le fichier entier les
+        y retrouvait. Un test de présence ne mesure pas ce qu'il croit
+        mesurer ; c'est la troisième fois aujourd'hui."""
+        readme = (self.RACINE / "README.md").read_text(encoding="utf-8")
+        debut = readme.index("How solid is that disagreement")
+        fin = readme.index("\n### ", debut)
+        return readme[debut:fin]
+
+    def test_les_DEUX_taux_mesures_sont_cites(self):
+        """LE DÉFAUT ÉTAIT LE MIEN, trouvé en fin de journée. J'ai publié
+        « 23 % » dans trois livrables en le présentant comme *le* taux de
+        fausse alerte du garde-fou. Le dépôt en mesure **deux**, par deux
+        constructions différentes :
+
+            HINDSIGHT_HOLDOUT.md     22.6 %  (anomalie plantée dans des prix)
+            HINDSIGHT_BENCHMARK.md   30.2 %  (vérité-terrain au niveau des scores)
+
+        Citer le plus bas des deux sans mentionner l'autre, c'est exactement
+        la sélection de résultats que ce projet dénonce. Les deux sont donc
+        cités, avec ce qui les distingue.
+
+        Ce test lit les deux taux DANS leurs bancs respectifs : si l'un est
+        relancé et bouge, il exige que le README suive."""
+        import re
+        readme = self._passage_honnetete()
+        for fichier, motif in (
+                ("HINDSIGHT_HOLDOUT.md", r"\*\*livré\*\*.*?([\d.]+)%"),
+                ("HINDSIGHT_BENCHMARK.md", r"fausse alerte\s*:\s*([\d.]+)%")):
+            texte = (self.RACINE / fichier).read_text(encoding="utf-8")
+            trouve = re.search(motif, texte)
+            self.assertIsNotNone(
+                trouve, "le taux n'est plus lisible dans %s" % fichier)
+            self.assertIn(trouve.group(1), readme,
+                          "le README ne cite pas le taux mesuré par %s "
+                          "(%s%%) — citer un seul des deux, c'est choisir "
+                          "celui qui arrange" % (fichier, trouve.group(1)))
+
+    def test_le_cas_le_plus_severe_est_dit_lui_aussi(self):
+        """TÉMOIN : le chiffre qui coûte le plus n'est ni 22.6 ni 30.2, c'est
+        le jeu D — sur une sélection sans le moindre edge et sans fuite, le
+        garde-fou certifie **52 %** du temps, et le seuil de Sharpe à 0.0 n'y
+        change rien. Un dossier qui publie ses taux d'erreur mais tait
+        celui-là aurait choisi ses aveux."""
+        passage = self._passage_honnetete()
+        self.assertIn("52 %", passage.replace("52%", "52 %"),
+                      "le passage d'honnêteté ne dit pas que le garde-fou "
+                      "certifie une sélection sans valeur une fois sur deux")
+
     def test_le_banc_est_ATTEIGNABLE_depuis_le_README(self):
         """Un fichier que personne ne peut trouver ne divulgue rien."""
         readme = (self.RACINE / "README.md").read_text(encoding="utf-8")
