@@ -21,7 +21,7 @@ says so itself when it goes stale.
 | **The mechanism** | scores each parameter twice — full history vs. yesterday-only — and refuses the symbol when the two winners disagree |
 | **Does it catch anything real?** | yes: XLK is refused live, every run, on real bars |
 | **Risk** | paper trading only, enforced in code; per-trade, total-exposure, sector, drawdown and consecutive-loss caps |
-| **Proof it runs** | real paper order filled and closed; 500+ offline regression tests; CI green on every push |
+| **Proof it runs** | a real paper order, filled on the submitted account and still open; the exit loop has closed positions for real, on the account used before the kickoff; 500+ offline regression tests; the full suite runs in CI on every push |
 
 ### The mechanism, in one picture
 

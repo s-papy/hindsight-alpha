@@ -5889,6 +5889,72 @@ class TestLaVerificationDeKickoff(unittest.TestCase):
                       sortie)
 
 
+class TestAucunLivrableNAffirmeUnETATQuIlNePeutPasVoir(unittest.TestCase):
+    """Le tableau de tête du README annonçait, sur la même ligne :
+
+        « real paper order filled and closed ; … ; CI green on every push »
+
+    Les deux sont tombés le 29/08, mesurés contre les sources réelles :
+
+      . CI. Les trois derniers passages poussés sont en ÉCHEC (garde-fou,
+        sur 0303c51, e7928ee et a22df6b). Le badge rouge est juste au-dessus
+        de la phrase qui promet du vert. Et « green on every push » est une
+        affirmation sur un HISTORIQUE que ce dépôt ne peut pas consulter
+        hors ligne : il ne pourra jamais la vérifier lui-même.
+
+      . « filled AND CLOSED ». Sur le compte SOUMIS, l'API renvoie UN ordre
+        — un achat, exécuté — et une position TOUJOURS OUVERTE. Rien n'y a
+        été clôturé. La clôture a bien eu lieu, mais sur le compte utilisé
+        avant la bascule, ce que LIVE_WEEK.md divulgue par ailleurs.
+
+    Ce test interdit la première classe : un livrable ne doit pas affirmer
+    l'ÉTAT d'un système extérieur que le dépôt ne peut pas mesurer. Dire que
+    la suite TOURNE en CI à chaque poussée est vérifiable ici (le workflow
+    est dans le dépôt) ; dire qu'elle passe ne l'est pas — c'est le rôle du
+    badge, qui est vivant."""
+
+    RACINE = Path(__file__).resolve().parent
+
+    INTERDITS = ("ci green", "green on every push", "ci passe a chaque",
+                 "toujours vert en ci")
+
+    def test_aucun_livrable_ne_promet_un_verdict_de_CI(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "gf_livrables", str(self.RACINE / "garde_fou.py"))
+        gf = importlib.util.module_from_spec(spec)
+        sys.modules["gf_livrables"] = gf
+        try:
+            spec.loader.exec_module(gf)
+        except SystemExit:
+            pass
+        # On réutilise l'extraction du garde-fou plutôt que d'en écrire une
+        # seconde : une règle écrite deux fois n'est vraie qu'à un endroit.
+        textes = gf._charger_textes_livrables()
+        self.assertTrue(textes, "aucun livrable n'a pu être lu — ce test ne "
+                                "vérifie alors plus rien")
+        for nom, texte in textes.items():
+            bas = texte.lower()
+            for phrase in self.INTERDITS:
+                self.assertNotIn(phrase, bas,
+                                 "%s promet un VERDICT de CI (« %s ») que ce "
+                                 "dépôt ne peut pas vérifier hors ligne ; le "
+                                 "badge le dit, lui, et il est vivant"
+                                 % (nom, phrase))
+
+    def test_le_temoin_du_mecanisme_reste_dicible(self):
+        """TÉMOIN : dire que la suite TOURNE en CI à chaque poussée est
+        vérifiable ici — le workflow est dans le dépôt. Interdire cette
+        phrase-là aussi viderait la ligne de son contenu."""
+        readme = (self.RACINE / "README.md").read_text(encoding="utf-8").lower()
+        self.assertIn("runs in ci on every push", readme,
+                      "la ligne ne dit plus ce qui EST vérifiable : que la "
+                      "suite complète tourne à chaque poussée")
+        workflow = self.RACINE / ".github" / "workflows" / "garde-fou.yml"
+        self.assertTrue(workflow.exists(),
+                        "la phrase s'appuie sur un workflow qui n'existe pas")
+
+
 class TestCeQueLAgentDePOUSSEELitVraiment(unittest.TestCase):
     """J'ai écrit, dans le README, dans le plist et dans un commentaire, que
     le chemin `--pousser-seulement` ne fait « aucun appel API, AUCUNE LECTURE
