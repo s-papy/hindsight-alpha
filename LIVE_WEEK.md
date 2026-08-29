@@ -101,6 +101,38 @@ dashboard, in date order, like everything else.
 The reconciliation, run 29/08: Alpaca reports **1 order since the kickoff**;
 the report says **`order_submitted 1`**. They agree, order for order.
 
+## A prediction for Monday, written before Monday
+
+*Added 29/08/2026 — a Saturday. The agent's next scheduled run is Monday
+31/08 at 19:37 UTC. Writing this down now costs nothing if it is right and
+costs credibility if it is wrong, which is the only reason it is worth
+writing.*
+
+Measured on Friday's closing bars, through the same code the agent runs:
+
+| symbol | hindsight guard | volatility regime | expected |
+|---|---|---|---|
+| SPY | agrees (10d window) | HV rank **16.3** — cheap | the strategy wants it |
+| GLD | agrees (90d) | HV rank 46.4 — not cheap | skip |
+| XLK | **disagrees** (90 vs 10) | — | refused |
+| XLV | agrees (10d) | HV rank 99.6 — not cheap | skip |
+
+So the only symbol the strategy wants is SPY — and a SPY option position is
+already open, which the risk gates refuse to stack on
+(*"already holding an open option position on SPY; not stacking a second one
+on the same underlying"*).
+
+**Predicted outcome: zero new entries on Monday**, with SPY blocked by a risk
+gate rather than by the market. That is the gates working, not a failure — but
+it means one open 7-day option on the only tradeable symbol can block that
+symbol for most of the judged week. Stated here so that a thin week of trades
+is read as a consequence of the design, not as an agent that did nothing.
+
+Monday's own bar will move all three HV ranks, so this is a projection, not a
+certainty. GLD at 46.4 and XLV at 99.6 are far from cheap; SPY at 16.3 is well
+inside. The one to watch is whether the open position exits first — it closes
+at ±50 %, and it sat at −4.9 % on Friday.
+
 ## What this week cannot prove
 
 Five sessions. Four symbols. A handful of trades. Nothing here establishes
