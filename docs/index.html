@@ -93,6 +93,16 @@
        celle-la -- une equite a sept chiffres deborderait pareil. */
     overflow-wrap: anywhere;
   }
+  .symbole-brut {
+    /* Le symbole OCC reste affiche sous sa traduction : c'est lui qu'on
+       recopie pour verifier la position chez Alpaca. Discret, mais present
+       et selectionnable -- traduire ne doit pas faire disparaitre la
+       reference. */
+    color: var(--muted);
+    font-size: 11px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    margin-top: 2px;
+  }
   .card .value.identifiant {
     /* Un identifiant n'est pas un nombre : on le lit caractere par
        caractere pour le comparer. Chasse fixe, et assez petit pour tenir
@@ -500,6 +510,52 @@ function renderAccount(account) {
   ).join('');
 }
 
+// LE SYMBOLE OCC, EN CLAIR. Ajoute le 29/08/2026.
+//
+// La table des positions affichait « SPY260904P00769000 » et rien d'autre.
+// C'est la seule ligne de la page ou le symbole est SEUL : ailleurs,
+// renderTrade dit deja « bearish (put) » et les verdicts donnent le
+// raisonnement. Un juge qui a cinq minutes ne decode pas dix-huit
+// caracteres a la main -- il passe, et la position ouverte ne lui apprend
+// rien : ni le strike, ni l'echeance, ni meme le sens.
+//
+// Format OCC, strictement : racine (1 a 6 lettres), AAMMJJ, C ou P, puis
+// le strike sur 8 chiffres en milliemes de dollar.
+//
+//     SPY 260904 P 00769000  ->  SPY 769 put · expires 4 Sep 2026
+//
+// ON N'INVENTE RIEN : si la chaine ne correspond pas EXACTEMENT a ce
+// format -- une action ordinaire, un futur, une graphie inattendue -- la
+// fonction rend null et l'appelant affiche le symbole tel quel. Le brut
+// reste affiche dans tous les cas, en dessous : c'est lui qu'on recopie
+// pour verifier chez Alpaca, la traduction ne le remplace pas.
+const _MOIS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+               'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+function _optionEnClair(symbole) {
+  if (typeof symbole !== 'string') return null;
+  const m = /^([A-Z]{1,6})(\d{2})(\d{2})(\d{2})([CP])(\d{8})$/.exec(symbole);
+  if (!m) return null;
+  const [, racine, aa, mm, jj, sens, strikeBrut] = m;
+  const mois = parseInt(mm, 10), jour = parseInt(jj, 10);
+  // Une date impossible n'est pas une date : plutot le symbole brut qu'une
+  // echeance inventee. (Le mois 00 et le jour 00 passeraient la regex.)
+  if (mois < 1 || mois > 12 || jour < 1 || jour > 31) return null;
+  const strike = parseInt(strikeBrut, 10) / 1000;
+  // `parseFloat(toFixed(3))` retire les zeros inutiles : 769.000 -> 769,
+  // 769.500 -> 769.5. Le strike garde ses milliemes quand il en a.
+  const strikeLisible = String(parseFloat(strike.toFixed(3)));
+  return racine + ' ' + strikeLisible + ' ' + (sens === 'P' ? 'put' : 'call')
+       + ' · expires ' + jour + ' ' + _MOIS[mois - 1] + ' 20' + aa;
+}
+
+function _symboleAffiche(symbole) {
+  const brut = esc(symbole || '—');
+  const clair = _optionEnClair(symbole);
+  // Sans traduction, exactement l'affichage d'avant.
+  if (!clair) return brut;
+  return esc(clair) + `<div class="symbole-brut">${brut}</div>`;
+}
+
 function renderPositions(positions) {
   const el = document.getElementById('positions-container');
   if (!positions.length) {
@@ -515,7 +571,7 @@ function renderPositions(positions) {
     // qui masque l'en-tete et reaffiche l'etiquette devant chaque valeur.
     // Sur grand ecran ces attributs ne changent rien a l'affichage.
     return `<tr>
-      <td data-colonne="Symbol">${esc(p.symbol || '—')}</td>
+      <td data-colonne="Symbol">${_symboleAffiche(p.symbol)}</td>
       <td data-colonne="Asset class">${esc(p.asset_class || '—')}</td>
       <td data-colonne="Qty">${esc(p.qty || '—')}</td>
       <td data-colonne="Cost basis">${fmtMoney(p.cost_basis)}</td>

@@ -1210,5 +1210,71 @@ class TestLaPageTientSurUnTelephone(BaseRendu):
                       "des positions s'empilent sans nom")
 
 
+class TestLeSymboleOptionSeLit(BaseRendu):
+    """La table des positions affichait « SPY260904P00769000 » et rien
+    d'autre. C'est le seul endroit de la page ou le symbole est SEUL :
+    ailleurs renderTrade dit deja « bearish (put) » et les verdicts donnent
+    le raisonnement. Un juge qui a cinq minutes ne decode pas dix-huit
+    caracteres a la main -- il passe, et la seule position ouverte du
+    portefeuille ne lui apprend ni le strike, ni l'echeance, ni le sens."""
+
+    def _pos(self, symbole):
+        r = self.executer("""
+            const p = document.getElementById('positions-container');
+            renderPositions([{symbol:%s, asset_class:"us_option", qty:"2",
+                              cost_basis:"778", unrealized_plpc:"-0.049"}]);
+            _resultats.pos = p.innerHTML;
+        """ % json.dumps(symbole))
+        return r["pos"]
+
+    def test_un_symbole_occ_se_lit_en_clair(self):
+        sortie = self._pos("SPY260904P00769000")
+        self.assertIn("SPY 769 put", sortie)
+        self.assertIn("expires 4 Sep 2026", sortie)
+
+    def test_le_symbole_brut_reste_affiche(self):
+        """TEMOIN QUI COMPTE : c'est le brut qu'on recopie pour verifier la
+        position chez Alpaca. Traduire ne doit pas faire disparaitre la
+        reference -- sinon la page devient plus lisible et moins
+        verifiable."""
+        self.assertIn("SPY260904P00769000", self._pos("SPY260904P00769000"))
+
+    def test_un_call_ne_devient_pas_un_put(self):
+        sortie = self._pos("SPY260904C00769000")
+        self.assertIn("SPY 769 call", sortie)
+        self.assertNotIn("put", sortie)
+
+    def test_un_strike_fractionnaire_garde_ses_decimales(self):
+        self.assertIn("SPY 769.5 put", self._pos("SPY260904P00769500"))
+
+    def test_ce_qui_n_est_pas_du_occ_reste_intact(self):
+        """TEMOIN : une action ordinaire ne doit rien gagner d'invente. Sans
+        lui, un decodage laxiste passerait les tests ci-dessus tout en
+        fabriquant une echeance pour n'importe quoi."""
+        sortie = self._pos("SPY")
+        self.assertIn("SPY", sortie)
+        self.assertNotIn("expires", sortie)
+        self.assertNotIn("put", sortie)
+        self.assertNotIn("call", sortie)
+
+    def test_une_date_impossible_n_est_pas_traduite(self):
+        """SECOND TEMOIN : le mois 00 passe la forme (deux chiffres) sans
+        etre un mois. Plutot le symbole brut qu'une echeance inventee --
+        _MOIS[-1] rendrait `undefined` en plein milieu de la ligne."""
+        sortie = self._pos("SPY260004P00769000")
+        self.assertIn("SPY260004P00769000", sortie)
+        self.assertNotIn("expires", sortie)
+        self.assertNotIn("undefined", sortie)
+
+    def test_un_symbole_absent_ne_casse_rien(self):
+        r = self.executer("""
+            const p = document.getElementById('positions-container');
+            renderPositions([{asset_class:"us_option", qty:"2"}]);
+            _resultats.pos = p.innerHTML;
+        """)
+        self.assertIn("—", r["pos"])
+        self.assertNotIn("undefined", r["pos"])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
