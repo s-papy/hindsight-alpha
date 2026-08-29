@@ -1388,6 +1388,47 @@ class TestLeMotifDesJUMELLESEstDetecteToutSeul(unittest.TestCase):
                          "deux appels également nus sont signalés :\n%s"
                          % sortie[-700:])
 
+    def test_un_try_NICHE_dans_une_boucle_n_est_pas_compte_des_deux_cotes(self):
+        """LE BUG DE MA PREMIÈRE VERSION, trouvé une heure après l'avoir
+        écrite, en prototypant la même idée sur les lectures de fichier :
+        certains appels étaient comptés DES DEUX CÔTÉS.
+
+        Elle notait un nœud puis descendait dedans, donc un `try` niché dans
+        une boucle était parcouru deux fois — une fois en état « nu » par le
+        marquage du parent, une fois en état « protégé » par la descente.
+        Sur ce cas construit, elle rendait protégés=[6] et nus=[6, 9] : le
+        rapport aurait nommé la ligne 6 comme non protégée alors qu'elle
+        l'est.
+
+        Une accusation que le contrôle n'avait pas mesurée — dans le contrôle
+        écrit pour trouver exactement ce défaut-là. Aucune occurrence dans le
+        dépôt aujourd'hui : le bug était latent, à un refactoring près."""
+        import ast, importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "gf_symetrie", str(self.RACINE / "garde_fou.py"))
+        gf = importlib.util.module_from_spec(spec)
+        sys.modules["gf_symetrie"] = gf
+        try:
+            spec.loader.exec_module(gf)
+        except SystemExit:
+            pass
+        source = ("import subprocess\n"
+                  "def f(y, a, b):\n"
+                  "    for x in y:\n"
+                  "        try:\n"
+                  "            subprocess.run(a, check=True)\n"
+                  "        except Exception:\n"
+                  "            pass\n"
+                  "    subprocess.run(b, check=True)\n")
+        fonction = [n for n in ast.walk(ast.parse(source))
+                    if isinstance(n, ast.FunctionDef)][0]
+        proteges, nus = gf._appels_verifies(fonction)
+        self.assertEqual(sorted(set(proteges) & set(nus)), [],
+                         "un même appel est compté protégé ET nu : "
+                         "protégés=%s nus=%s" % (proteges, nus))
+        self.assertEqual(proteges, [5], "l'appel dans le try est protégé")
+        self.assertEqual(nus, [8], "seul l'appel hors du try est nu")
+
     def test_le_depot_lui_meme_est_symetrique(self):
         """Le contrôle tourne sur le vrai dépôt et doit y être vert : c'est
         ce qui distingue une alerte qu'on peut résoudre d'une alerte qu'on

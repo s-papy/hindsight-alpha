@@ -2904,48 +2904,69 @@ def controle_pannes_traitees_symetriquement() -> None:
 def _appels_verifies(fonction: ast.AST) -> "tuple[list, list]":
     """(lignes protegees, lignes nues) des `subprocess.run(check=True)` de
     cette fonction. « Protege » = enveloppe d'un `try` dont un handler
-    attrape CalledProcessError, Exception, ou tout."""
+    attrape CalledProcessError, Exception, ou tout.
+
+    RECRIT le 29/08/2026, une heure apres sa premiere version, qui comptait
+    CERTAINS appels DES DEUX COTES. Elle notait un noeud puis descendait
+    dedans : un `try` niche dans une boucle etait donc parcouru deux fois,
+    une fois par le marquage du noeud parent (etat « nu ») et une fois par la
+    descente (etat « protege »). Cas construit :
+
+        def f(y, a, b):
+            for x in y:
+                try:
+                    subprocess.run(a, check=True)   # ligne 6
+                except Exception:
+                    pass
+            subprocess.run(b, check=True)
+
+        proteges = [6]      nus = [6, 9]
+
+    Le rapport aurait donc nomme la ligne 6 comme non protegee, alors qu'elle
+    l'est -- une accusation que le controle n'avait pas mesuree, dans le
+    controle ecrit pour trouver exactement ce defaut-la. Aucune occurrence
+    dans ce depot aujourd'hui, verifie : le bug etait latent, a un
+    refactoring pres.
+
+    Chaque noeud est desormais visite UNE fois, avec son etat de protection."""
     couverts, nus = [], []
     ATTRAPENT = {"Exception", "BaseException", "subprocess.CalledProcessError",
                  "CalledProcessError"}
 
-    def parcourir(noeud, sous_protection):
+    def _attrape(essai: ast.Try) -> bool:
+        for h in essai.handlers:
+            if h.type is None:
+                return True
+            noms = ({ast.unparse(e) for e in h.type.elts}
+                    if isinstance(h.type, ast.Tuple) else {ast.unparse(h.type)})
+            if noms & ATTRAPENT:
+                return True
+        return False
+
+    def _est_run_verifie(appel: ast.Call) -> bool:
+        if not ast.unparse(appel.func).endswith("subprocess.run"):
+            return False
+        return any(k.arg == "check" and isinstance(k.value, ast.Constant)
+                   and k.value.value is True for k in appel.keywords)
+
+    def visiter(noeud, protege):
+        # Une fonction imbriquee a ses propres jumelles : on ne melange pas.
+        if (isinstance(noeud, (ast.FunctionDef, ast.AsyncFunctionDef))
+                and noeud is not fonction):
+            return
+        if isinstance(noeud, ast.Call) and _est_run_verifie(noeud):
+            (couverts if protege else nus).append(noeud.lineno)
+        if isinstance(noeud, ast.Try):
+            dedans = protege or _attrape(noeud)
+            for x in noeud.body:
+                visiter(x, dedans)
+            for x in noeud.handlers + noeud.orelse + noeud.finalbody:
+                visiter(x, protege)
+            return
         for enfant in ast.iter_child_nodes(noeud):
-            if isinstance(enfant, ast.Try):
-                types = set()
-                for h in enfant.handlers:
-                    if h.type is None:
-                        types.add("Exception")
-                    elif isinstance(h.type, ast.Tuple):
-                        types |= {ast.unparse(e) for e in h.type.elts}
-                    else:
-                        types.add(ast.unparse(h.type))
-                dedans = sous_protection or bool(types & ATTRAPENT)
-                for x in enfant.body:
-                    parcourir(x, dedans)
-                    _noter(x, dedans)
-                for x in enfant.handlers + enfant.orelse + enfant.finalbody:
-                    parcourir(x, sous_protection)
-                    _noter(x, sous_protection)
-                continue
-            if isinstance(enfant, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                continue      # une fonction imbriquee a ses propres jumelles
-            _noter(enfant, sous_protection)
-            parcourir(enfant, sous_protection)
+            visiter(enfant, protege)
 
-    def _noter(noeud, protege):
-        for appel in ast.walk(noeud):
-            if not isinstance(appel, ast.Call):
-                continue
-            if not ast.unparse(appel.func).endswith("subprocess.run"):
-                continue
-            if not any(k.arg == "check"
-                       and isinstance(k.value, ast.Constant)
-                       and k.value.value is True for k in appel.keywords):
-                continue
-            (couverts if protege else nus).append(appel.lineno)
-
-    parcourir(fonction, False)
+    visiter(fonction, False)
     return sorted(set(couverts)), sorted(set(nus))
 
 
