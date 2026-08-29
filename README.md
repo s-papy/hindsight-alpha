@@ -11,6 +11,28 @@ at design time.**
 Entry for the **Alpaca AI Trading Agents Hackathon** (lablab.ai, deadline
 04/09/2026). Team: Hindsight Alpha.
 
+### Pre-event work, disclosed
+
+The organisers' FAQ permits setting up infrastructure and boilerplate before
+kickoff, and requires that it be disclosed. So, precisely, measured from the
+git history rather than remembered:
+
+**187 of this repository's 286 commits — 65% — predate the kickoff instant**
+(Friday 28 August 2026, 09:30 ET). The first is 24 August. The agent, the risk
+gates, the hindsight check, the dashboard and the guardrail script were all
+built in those four days; the 99 commits since are corrections, measurements
+and the live-week record.
+
+Nothing was traded on the competition account before kickoff — that account's
+order history contains exactly one pre-Monday order, submitted 28/08 at 19:37
+UTC, which is *after* kickoff. Development and testing ran on a **separate**
+paper account, as the rules allow. The full account provenance is in
+[LIVE\_WEEK.md](LIVE_WEEK.md).
+
+This is stated here because the FAQ asks for it, and because a project whose
+whole claim is "don't assert what you haven't verified" cannot let a judge
+discover its own timeline from `git log`.
+
 **Public dashboard: [s-papy.github.io/hindsight-alpha](https://s-papy.github.io/hindsight-alpha)** —
 every run, every refusal, every real order. It is a *snapshot*, not a live feed: republished every
 30 minutes on weekdays from 15:30 to 22:00 CEST, plus once at 22:05 after the US close. The page

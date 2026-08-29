@@ -4379,6 +4379,61 @@ class TestAucunChampMortDansLesDonneesPubliees(unittest.TestCase):
         self.assertEqual(publie["symbol"], "SPY")
 
 
+class TestLeTravailAnterieurAuKickoffEstDivulgue(unittest.TestCase):
+    """La FAQ officielle du hackathon, lue le 29/08/2026 :
+
+        « May I set up infrastructure, boilerplate, or other supporting
+          components before kickoff? » → Yes.
+        « If pre-event work is permitted, must it be disclosed in the README
+          or final submission? » → **Yes.**
+
+    Le dépôt a 187 de ses 286 commits ANTÉRIEURS au kickoff (28/08 09:30 ET),
+    soit 65 %. Le README n'en disait rien : il divulguait la provenance du
+    COMPTE, jamais celle du CODE.
+
+    Un projet dont la thèse est « ne pas affirmer ce qu'on n'a pas vérifié »
+    ne peut pas laisser un juge découvrir sa propre chronologie dans
+    `git log`. Ce test compte les commits pour de vrai et exige que le
+    chiffre publié soit celui-là."""
+
+    RACINE = Path(__file__).parent
+    KICKOFF = "2026-08-28T13:30:00Z"      # 09:30 ET
+
+    def _compter(self, *args):
+        r = subprocess.run(["git", "rev-list", "--count"] + list(args),
+                           cwd=str(self.RACINE), capture_output=True, text=True)
+        return int(r.stdout.strip() or 0)
+
+    def test_le_README_divulgue_le_travail_anterieur(self):
+        texte = (self.RACINE / "README.md").read_text(encoding="utf-8")
+        self.assertIn("Pre-event work", texte,
+                      "le README ne divulgue pas le travail antérieur au "
+                      "kickoff, que la FAQ exige de divulguer")
+
+    def test_le_nombre_publie_est_celui_du_depot(self):
+        """TÉMOIN QUI MORD : un chiffre écrit à la main dérive au premier
+        commit suivant. Celui-ci est comparé au vrai décompte — c'est le
+        défaut que ce dépôt a passé la journée à corriger ailleurs."""
+        import re
+        texte = (self.RACINE / "README.md").read_text(encoding="utf-8")
+        m = re.search(r"\*\*(\d+) of this repository's (\d+) commits", texte)
+        self.assertIsNotNone(m, "le README n'annonce plus de décompte de "
+                                "commits sous la forme attendue")
+        annonce_avant, annonce_total = int(m.group(1)), int(m.group(2))
+        vrai_total = self._compter("HEAD")
+        vrai_avant = self._compter("HEAD", "--until=" + self.KICKOFF)
+        if vrai_total == 0:
+            self.skipTest("pas d'historique git ici (clone superficiel)")
+        # Le total bouge a chaque commit : on tolere la derive du total, pas
+        # celle du nombre ANTERIEUR, qui est fige par definition.
+        self.assertEqual(annonce_avant, vrai_avant,
+                         "le README annonce %d commits avant le kickoff, le "
+                         "dépôt en compte %d" % (annonce_avant, vrai_avant))
+        self.assertLessEqual(annonce_total, vrai_total,
+                             "le README annonce plus de commits qu'il n'en "
+                             "existe (%d > %d)" % (annonce_total, vrai_total))
+
+
 class TestLeHookNAnnoncePasUneDureeEcriteALaMain(unittest.TestCase):
     """Le hook annonçait « lancement de la suite (~70 s) ». Ce nombre avait
     été mesuré une fois, sur une suite plus petite, et jamais relu.
