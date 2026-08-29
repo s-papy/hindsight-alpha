@@ -69,6 +69,38 @@ accuses the agent of something a failure to read a file caused. Nothing about
 what will be reported has changed; this only says what happens when it cannot
 be.*
 
+## One record inside the window is not from the submitted account
+
+*Disclosed 29/08/2026, after cross-checking the log against Alpaca's own
+ledger. It cuts against this project, which is why it is written here rather
+than left to be noticed.*
+
+The hackathon requires a brand-new account. The one submitted — its number is
+published on the dashboard, and only there — was created on 24/08 and funded
+with exactly $100,000; its order history contains **one order**, submitted
+28/08 at 19:37 UTC, the first live agent run. Nothing was traded on it before
+the kickoff.
+
+But the operator was still on a **different** paper account until that
+evening, and `decision_log.jsonl` is a single append-only file that does not
+record which account a run touched. One record therefore falls inside the live
+window without belonging to the submitted account:
+
+    2026-08-28T15:00:06Z   exit_monitor   SPY260903P00770000 closed, stop-loss −55%
+
+That is **six seconds after the kickoff**, and the contract it names appears
+nowhere in the submitted account's order history — which is how it can be
+identified with certainty rather than by memory.
+
+It is **not removed**: deleting a dated record because it is inconvenient is
+the curation this repository argues against everywhere else. It also does not
+enter the week's report — `bilan_semaine.py` counts agent runs, verdicts and
+trades, and that record carries none of the three. It is visible on the public
+dashboard, in date order, like everything else.
+
+The reconciliation, run 29/08: Alpaca reports **1 order since the kickoff**;
+the report says **`order_submitted 1`**. They agree, order for order.
+
 ## What this week cannot prove
 
 Five sessions. Four symbols. A handful of trades. Nothing here establishes
