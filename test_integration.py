@@ -5889,6 +5889,91 @@ class TestLaVerificationDeKickoff(unittest.TestCase):
                       sortie)
 
 
+class TestUnPushREJETESeRaconte(unittest.TestCase):
+    """`git_publish()` traitait deux pannes sur trois.
+
+    Un `git commit` refusé juste au-dessus est attrapé, expliqué (« le hook
+    pre-commit lance garde_fou.py ») et relevé. Un `git push` qui EXPIRE est
+    attrapé et expliqué (« UNKNOWN, not a failure »). Un `git push` REJETÉ —
+    le plus courant des trois — ne disait rien : `CalledProcessError`
+    remontait sur une trace brute.
+
+    REPRODUIT le 29/08 dans un dépôt jetable dont le remote ne répond pas :
+    le commit est fait LOCALEMENT, le script meurt sans un mot. Sous launchd
+    cela se répète toutes les 30 minutes dans `publish_dashboard.log` — un
+    fichier gitignoré que personne ne lit — pendant que la page publique
+    vieillit en silence.
+
+    Et ce n'est pas théorique : ce dépôt a rencontré un push rejeté par
+    GitHub (GH007, adresse privée) le 28/08."""
+
+    def _publier_avec_push(self, effet_du_push):
+        """Joue git_publish() en remplaçant subprocess.run : add et commit
+        réussissent, `diff --cached` signale un changement, et le push fait
+        ce que le test demande."""
+        import importlib, io, contextlib, subprocess as sp
+        import publish_dashboard as pd
+        importlib.reload(pd)
+        vrai = pd.subprocess.run
+
+        def faux(cmd, *a, **kw):
+            if cmd[:2] == ["git", "push"]:
+                return effet_du_push(cmd)
+            if cmd[:3] == ["git", "diff", "--cached"]:
+                return sp.CompletedProcess(cmd, 1)   # « quelque chose a changé »
+            return sp.CompletedProcess(cmd, 0)
+
+        pd.subprocess.run = faux
+        tampon = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(tampon):
+                try:
+                    pd.git_publish()
+                    leve = None
+                except Exception as e:
+                    leve = type(e).__name__
+        finally:
+            pd.subprocess.run = vrai
+        return leve, tampon.getvalue()
+
+    def test_un_push_rejete_est_EXPLIQUE_et_reste_une_erreur(self):
+        import subprocess as sp
+        def rejet(cmd):
+            raise sp.CalledProcessError(128, cmd)
+        leve, sortie = self._publier_avec_push(rejet)
+        self.assertEqual(leve, "CalledProcessError",
+                         "un push rejeté doit rester une erreur, sinon "
+                         "launchd croit à une publication réussie")
+        self.assertIn("REJECTED", sortie, sortie)
+        self.assertIn("committed locally", sortie,
+                      "le message ne dit pas dans quel état on se trouve : "
+                      "%s" % sortie)
+        self.assertIn("git push", sortie,
+                      "le message ne dit pas quoi faire : %s" % sortie)
+
+    def test_il_n_est_PAS_annonce_comme_un_delai_depasse(self):
+        """TÉMOIN : les deux pannes appellent des gestes différents. Un délai
+        dépassé veut dire « on ne sait pas si c'est parti » ; un rejet veut
+        dire « ce n'est pas parti »."""
+        import subprocess as sp
+        def rejet(cmd):
+            raise sp.CalledProcessError(128, cmd)
+        _, sortie = self._publier_avec_push(rejet)
+        self.assertNotIn("MAY OR MAY NOT", sortie,
+                         "un rejet est présenté comme une incertitude : %s"
+                         % sortie)
+
+    def test_un_push_qui_marche_ne_dit_rien_d_alarmant(self):
+        """SECOND TÉMOIN : à force d'expliquer les pannes, crier sur un
+        succès passerait les deux tests ci-dessus."""
+        import subprocess as sp
+        leve, sortie = self._publier_avec_push(
+            lambda cmd: sp.CompletedProcess(cmd, 0))
+        self.assertIsNone(leve, sortie)
+        self.assertNotIn("REJECTED", sortie, sortie)
+        self.assertNotIn("ERROR", sortie, sortie)
+
+
 class TestUneComparaisonIMPOSSIBLENEstPasUnSUCCES(unittest.TestCase):
     """`travail_pousse()` comptait les commits d'avance avec
 

@@ -438,6 +438,37 @@ def git_publish() -> None:
               "and check the repo before assuming the dashboard is stale."
               % _DELAI_RESEAU, flush=True)
         return
+    except subprocess.CalledProcessError as refus:
+        # LA TROISIEME BRANCHE, ajoutee le 29/08/2026. Les deux voisines
+        # etaient deja expliquees -- un `git commit` refuse juste au-dessus, un
+        # push qui expire juste avant -- et un push REJETE, le cas le plus
+        # courant des trois, ne disait rien du tout.
+        #
+        # Reproduit dans un depot jetable dont le remote ne repond pas : le
+        # commit est fait LOCALEMENT, CalledProcessError remonte, et le script
+        # meurt sur une trace brute. Sous launchd, cela se repete toutes les
+        # 30 minutes dans publish_dashboard.log -- un fichier gitignore que
+        # personne ne lit -- pendant que la page publique vieillit en silence.
+        #
+        # Ce n'est pas theorique : ce depot a deja rencontre un push rejete
+        # par GitHub (GH007, adresse privee) le 28/08.
+        #
+        # L'etat exact, parce que c'est lui qui dit quoi faire : le commit
+        # EXISTE, il n'est PAS publie, et l'historique local continue de
+        # s'accumuler. Un seul `git push` a la main republie tout le retard.
+        print(
+            "  ERROR: `git push` was REJECTED (exit %d) -- this is a failure, "
+            "not a timeout. The snapshot IS committed locally but is NOT "
+            "published: the public dashboard will age and its banner will say "
+            "so without saying why. Local commits keep piling up, and a single "
+            "successful `git push` publishes the whole backlog at once. Common "
+            "causes: credentials expired, GitHub refusing the commit e-mail "
+            "(GH007), or the remote having moved ahead of this branch. Run "
+            "`git push` by hand to see the exact refusal."
+            % refus.returncode,
+            flush=True,
+        )
+        raise
 
 
 def pousser_les_commits_en_attente() -> None:
