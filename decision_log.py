@@ -114,7 +114,20 @@ def caviarder(texte: str) -> str:
 
     Le marqueur reste une chaine JSON valide : la ligne doit rester
     relisible apres caviardage, sinon on protege le secret en detruisant la
-    preuve. Un temoin le verifie."""
+    preuve. Un temoin le verifie.
+
+    ET LA SECONDE COUCHE NE RATTRAPE PAS CE CAS -- verifie le 29/08 plutot
+    que suppose. `garde_fou.controle_aucun_identifiant_dans_les_fichiers_
+    publies` cherche bien la valeur dans tout ce que git suit, mais il ne
+    cherche QUE des valeurs qui « ressemblent a un identifiant » :
+    `[A-Za-z0-9_-]+`. Une valeur contenant un guillemet ou un antislash est
+    ecartee par ce filtre avant meme la recherche -- deliberement, pour qu'il
+    n'y ait aucun faux positif, et sa docstring le dit deja : « ce qui reste
+    decouvert, c'est une valeur qui ne ressemble pas a une cle ».
+
+    Les deux couches ont donc des frontieres COMPLEMENTAIRES, et c'est
+    exactement pour cela que celle-ci ne doit pas dependre de la forme du
+    secret : elle est la seule des deux a n'avoir aucun filtre."""
     for nom in _VARIABLES_SECRETES:
         valeur = os.environ.get(nom) or ""
         if len(valeur) < _LONGUEUR_MINIMALE:

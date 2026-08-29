@@ -1471,6 +1471,47 @@ class TestAucunIdentifiantPublie(unittest.TestCase):
                                  % (etiquette, ligne[:160]))
                 self.assertIn("CAVIARDE", ligne)
 
+    def test_les_deux_couches_ont_des_frontieres_COMPLEMENTAIRES(self):
+        """J'ai soupçonné que la seconde couche était aveugle de la même
+        façon que la première. **Elle ne l'est pas**, et la raison compte.
+
+        `controle_aucun_identifiant_dans_les_fichiers_publies` cherche la
+        valeur dans tout ce que git suit — mais uniquement des valeurs qui
+        « ressemblent à un identifiant » : `[A-Za-z0-9_-]+`. Une valeur
+        contenant un guillemet ou un antislash est écartée par ce filtre
+        AVANT la recherche, délibérément, pour qu'il n'y ait aucun faux
+        positif. Sa docstring énonce déjà cette limite.
+
+        Conséquence : les valeurs que le filtre accepte ne sont jamais
+        échappées par `json.dumps` — et celles qu'il rejette sont exactement
+        celles que le caviardage doit attraper seul. Ce test verrouille cette
+        complémentarité : si le filtre s'élargissait aux guillemets, les deux
+        couches couvriraient le même terrain et laisseraient le même trou
+        ailleurs."""
+        import importlib.util, json as _json
+        spec = importlib.util.spec_from_file_location(
+            "gf_filtre", str(Path(__file__).resolve().parent / "garde_fou.py"))
+        gf = importlib.util.module_from_spec(spec)
+        sys.modules["gf_filtre"] = gf
+        try:
+            spec.loader.exec_module(gf)
+        except SystemExit:
+            pass
+        source = (Path(__file__).resolve().parent / "garde_fou.py").read_text(
+            encoding="utf-8")
+        self.assertIn('re.fullmatch(r"[A-Za-z0-9_-]+", v)', source,
+                      "le filtre de plausibilité a changé de forme : "
+                      "revérifier que les deux couches restent "
+                      "complémentaires")
+        # Une valeur acceptée par ce filtre traverse json.dumps sans être
+        # échappée — donc la couche 2 la verrait telle quelle.
+        for valeur in ("aB3xY9QwErTyUiOpAsDfGhJkL", "PA3K8MP3MF0U",
+                       "clef_avec-tirets_1234567890"):
+            self.assertEqual(_json.dumps(valeur)[1:-1], valeur,
+                             "%r est accepté par le filtre ET modifié par "
+                             "json.dumps : les deux couches se recouvrent "
+                             "mal" % valeur)
+
     def test_la_ligne_reste_du_JSON_relisible_apres_caviardage(self):
         """TÉMOIN : on protégerait aussi le secret en détruisant la ligne.
         Le fichier est la PREUVE publiée du projet — il doit rester
