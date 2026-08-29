@@ -36,6 +36,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 import tempfile
 import types
 import unittest
@@ -4506,6 +4507,96 @@ class TestLeJournalNeRendQueDesEnregistrements(unittest.TestCase):
         perdue en ajoutant la nouvelle."""
         self._ecrire('{"run_type":"a"}\n{tronqu\n{"run_type":"b"}\n')
         self.assertEqual([r["run_type"] for r in self.d.read_log()], ["b", "a"])
+
+
+class TestLaPorteDeFraicheurNeDependPasDuFuseauDeLaMachine(unittest.TestCase):
+    """`_check_bar_quality` calculait l'âge de la barre la plus récente avec
+    `datetime.now(last_ts.tzinfo) - last_ts`.
+
+    C'est astucieux — ça ne lève jamais de TypeError — mais quand
+    l'horodatage est NAÏF, `tzinfo` vaut None et `datetime.now(None)` rend
+    l'heure LOCALE de la machine, comparée à un horodatage qui, lui, est en
+    UTC. Le verdict d'une porte de données se mettait donc à dépendre de
+    l'endroit où tourne l'agent.
+
+    Mesuré le 29/08/2026 sur une barre vieille de 5 j 3 h, limite à 5 jours :
+    Paris 5.21 j → REFUSE, UTC 5.13 j → REFUSE, Los Angeles 4.83 j →
+    ACCEPTE, Honolulu 4.71 j → ACCEPTE.
+
+    Le SENS est ce qui rend ça grave : à l'ouest d'UTC la porte sous-estime
+    l'âge, donc elle AUTORISE un flux gelé qu'elle devrait refuser. Une porte
+    qui laisse passer est pire qu'une porte qui refuse à tort — c'est le motif
+    de cette session, un défaut qui AUTORISE."""
+
+    FUSEAUX = ("Europe/Paris", "UTC", "America/Los_Angeles", "Pacific/Honolulu")
+
+    def setUp(self):
+        self._tz = os.environ.get("TZ")
+
+    def tearDown(self):
+        if self._tz is None:
+            os.environ.pop("TZ", None)
+        else:
+            os.environ["TZ"] = self._tz
+        time.tzset()
+
+    def _barres(self, age, naif=True):
+        from datetime import datetime, timedelta, timezone
+        recente = datetime.now(timezone.utc) - age
+        lignes = []
+        for i in (2, 1, 0):
+            t = recente - timedelta(days=i)
+            lignes.append({"t": t.replace(tzinfo=None).isoformat() if naif
+                           else t.isoformat(),
+                           "o": 1.0, "h": 1.0, "l": 1.0, "c": 1.0, "v": 100})
+        return lignes
+
+    def _verdicts(self, age, naif=True):
+        import alpaca_cli
+        barres = self._verdicts_barres = self._barres(age, naif)
+        out = {}
+        for tz in self.FUSEAUX:
+            os.environ["TZ"] = tz
+            time.tzset()
+            try:
+                alpaca_cli._check_bar_quality("SPY", barres, minimum_usable=1)
+                out[tz] = "accepte"
+            except alpaca_cli.DataQualityError:
+                out[tz] = "refuse"
+        return out
+
+    def test_un_flux_gele_est_refuse_dans_tous_les_fuseaux(self):
+        from datetime import timedelta
+        v = self._verdicts(timedelta(days=5, hours=3))
+        self.assertEqual(set(v.values()), {"refuse"},
+                         "le verdict de la porte dépend du fuseau de la "
+                         "machine : %s" % v)
+
+    def test_un_flux_frais_est_accepte_dans_tous_les_fuseaux(self):
+        """TÉMOIN : une porte qui refuserait partout passerait le test
+        précédent sans rien valoir."""
+        from datetime import timedelta
+        v = self._verdicts(timedelta(hours=6))
+        self.assertEqual(set(v.values()), {"accepte"},
+                         "un flux frais est refusé quelque part : %s" % v)
+
+    def test_un_horodatage_avec_fuseau_est_inchange(self):
+        """SECOND TÉMOIN : la normalisation ne doit pas déplacer un
+        horodatage qui portait déjà son fuseau."""
+        from datetime import timedelta
+        self.assertEqual(set(self._verdicts(timedelta(days=5, hours=3),
+                                            naif=False).values()), {"refuse"})
+        self.assertEqual(set(self._verdicts(timedelta(hours=6),
+                                            naif=False).values()), {"accepte"})
+
+    def test_un_horodatage_illisible_saute_le_controle_sans_tuer_l_appel(self):
+        """La protection d'origine — un horodatage impossible à lire ne fait
+        que sauter le contrôle de fraîcheur — ne doit pas avoir été perdue en
+        sortant le `raise` de son propre `try`."""
+        import alpaca_cli
+        barres = [{"t": "pas une date", "o": 1.0, "h": 1.0, "l": 1.0,
+                   "c": 1.0, "v": 100}]
+        alpaca_cli._check_bar_quality("SPY", barres, minimum_usable=1)
 
 
 class TestLaPhraseDuPalierEstLueDansLaMesure(unittest.TestCase):

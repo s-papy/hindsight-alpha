@@ -455,6 +455,37 @@ def _extract_bars(data: Any, expected_symbol: Optional[str] = None) -> List[dict
 
 
 MAX_STALE_DAYS = 5           # refuse to trade if the most recent bar is older than this (calendar days)
+
+
+def _horodatage_utc(brut: object) -> "datetime | None":
+    """Analyse un horodatage de barre et le rend TOUJOURS conscient du fuseau.
+
+    AJOUTE le 29/08/2026. Le controle de fraicheur calculait l'age avec
+    `datetime.now(last_ts.tzinfo) - last_ts`. C'est astucieux -- ca ne leve
+    jamais de TypeError -- mais quand `last_ts` est NAIF, `tzinfo` vaut None et
+    `datetime.now(None)` rend l'heure LOCALE de la machine, comparee a un
+    horodatage qui, lui, est en UTC. Le verdict de la porte se met alors a
+    dependre de l'endroit ou tourne l'agent.
+
+    Mesure sur une barre vieille de 5 j 3 h, limite a 5 jours :
+
+        Europe/Paris          age 5.21 j  -> REFUSE
+        UTC                   age 5.13 j  -> REFUSE
+        America/Los_Angeles   age 4.83 j  -> ACCEPTE
+        Pacific/Honolulu      age 4.71 j  -> ACCEPTE
+
+    Le sens compte : a l'ouest de UTC la porte SOUS-ESTIME l'age, donc elle
+    AUTORISE un flux gele qu'elle devrait refuser. Une porte qui laisse passer
+    est toujours plus grave qu'une porte qui refuse a tort.
+
+    Naif est interprete comme UTC : c'est le fuseau des barres Alpaca, et c'est
+    deja ce que font `agent.py` et `bilan_semaine.py` au meme endroit logique.
+    """
+    try:
+        t = datetime.fromisoformat(str(brut).replace("Z", "+00:00"))
+    except (ValueError, AttributeError, TypeError):
+        return None
+    return t if t.tzinfo is not None else t.replace(tzinfo=timezone.utc)
 MAX_IDENTICAL_CLOSES = 5     # a liquid ETF does not print the same close a full trading week running
 MAX_DAILY_JUMP_PCT = 0.50    # refuse to trade if any adjacent-day close moves more than this -- likely bad data, not a real move, for a liquid sector ETF
 
@@ -493,9 +524,8 @@ def _check_bar_quality(symbol: str, rows: List[dict], minimum_usable: Optional[i
         brut = ligne.get("t")
         if not brut:
             continue
-        try:
-            ts = datetime.fromisoformat(str(brut).replace("Z", "+00:00"))
-        except ValueError:
+        ts = _horodatage_utc(brut)
+        if ts is None:
             continue
         if precedent is not None and ts < precedent[1]:
             raise DataQualityError(
@@ -508,16 +538,16 @@ def _check_bar_quality(symbol: str, rows: List[dict], minimum_usable: Optional[i
 
     last_ts_raw = rows[-1].get("t")
     if last_ts_raw:
-        try:
-            last_ts = datetime.fromisoformat(str(last_ts_raw).replace("Z", "+00:00"))
-            age_days = (datetime.now(last_ts.tzinfo) - last_ts).total_seconds() / 86400
+        last_ts = _horodatage_utc(last_ts_raw)
+        if last_ts is None:
+            print(f"  WARNING: {symbol}: could not parse bar timestamp {last_ts_raw!r}, skipping staleness check")
+        else:
+            age_days = (datetime.now(timezone.utc) - last_ts).total_seconds() / 86400
             if age_days > MAX_STALE_DAYS:
                 raise DataQualityError(
                     f"{symbol}: most recent bar is {age_days:.1f} days old (timestamp {last_ts_raw}), "
                     f"> {MAX_STALE_DAYS}-day staleness limit -- feed may be frozen, refusing to trade on it"
                 )
-        except ValueError:
-            print(f"  WARNING: {symbol}: could not parse bar timestamp {last_ts_raw!r}, skipping staleness check")
 
     # AJOUTE le 27/08/2026 : « exploitable » exige desormais un nombre FINI.
     #
