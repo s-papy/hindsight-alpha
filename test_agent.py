@@ -1230,5 +1230,78 @@ class TestRunInterrompu(unittest.TestCase):
                          "journal public : le filtre anti-bruit ne filtre plus")
 
 
+
+class TestLExemptionDesChiffresPerimes(unittest.TestCase):
+    """PREMIER USAGE du champ `exemption` de `MOTIFS_PERIMES`, en place
+    depuis le 25/08 et jamais exercé jusqu'ici — donc jamais vérifié.
+
+    Le 29/08, le nombre d'équipes inscrites au hackathon est passé de 546
+    (chiffre du deck, mesuré le 25/08) à ~975, vérifié à la main sur le
+    tableau de bord live de lablab.ai. « 546 » entre donc dans la liste
+    noire — mais le deck le cite maintenant comme repère historique :
+
+        « 975 teams registered on 29 Aug, up from 546 four days earlier »
+
+    Sans exemption, le contrôle bloquerait la phrase même qui corrige
+    l'erreur. Avec une exemption trop large, il ne bloquerait plus rien.
+
+    Un mécanisme qui existe sans avoir jamais été branché est exactement la
+    forme d'échec que ce dépôt traque ailleurs. Ces trois tests le
+    branchent."""
+
+    RACINE = Path(__file__).resolve().parent
+
+    def _lancer(self, texte_readme):
+        d = Path(tempfile.mkdtemp(prefix="hindsight-exemption-"))
+        try:
+            for nom in ("garde_fou.py", "config.py"):
+                shutil.copy(self.RACINE / nom, d / nom)
+            (d / "README.md").write_text(texte_readme, encoding="utf-8")
+            r = subprocess.run([sys.executable, str(d / "garde_fou.py")],
+                               cwd=str(d), capture_output=True, text=True,
+                               timeout=120)
+            return r.stdout + r.stderr
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
+    def test_le_chiffre_perime_seul_est_BLOQUE(self):
+        sortie = self._lancer("# Projet\n\n546 teams registered so far.\n")
+        self.assertIn("CHIFFRE PÉRIMÉ « 546 »", sortie,
+                      "l'ancien nombre d'équipes passe comme chiffre "
+                      "courant :\n%s" % sortie[-700:])
+
+    def test_le_meme_chiffre_cite_comme_REPERE_passe(self):
+        """Le cas réel du deck. Sans cette exemption, le contrôle
+        interdirait de dire d'où l'on vient — et la seule façon de le
+        satisfaire serait d'effacer l'historique du chiffre."""
+        sortie = self._lancer(
+            "# Projet\n\n975 teams registered on 29 Aug, up from 546 four "
+            "days earlier.\n")
+        self.assertNotIn("CHIFFRE PÉRIMÉ « 546 »", sortie,
+                         "le repère historique est bloqué comme s'il était "
+                         "le chiffre courant :\n%s" % sortie[-700:])
+
+    def test_une_exemption_LOINTAINE_ne_couvre_pas(self):
+        r"""TÉMOIN, et c'est lui qui compte : si « up from » traîne ailleurs
+        dans la page, le chiffre reste bloqué — sinon un seul emploi de ces
+        deux mots blanchirait tout le document.
+
+        CE QUI BLOQUE ICI, PRÉCISÉMENT — vérifié par mutation plutôt que
+        supposé : c'est l'ancre `\s*$` du motif d'exemption, qui exige
+        « up from » JUSTE avant le nombre. La fenêtre de 40 caractères
+        borne en plus jusqu'où le contrôle regarde en arrière. Ma première
+        rédaction de ce texte attribuait le refus à la seule fenêtre ; en
+        élargissant celle-ci au document entier, le cas reste bloqué — donc
+        ce n'était pas elle qui le tenait."""
+        sortie = self._lancer(
+            "# Projet\n\nThe count is up from where it was, and there is a "
+            "good deal of prose between that clause and the figure, so the "
+            "window has long since closed by the time we reach 546 teams.\n")
+        self.assertIn("CHIFFRE PÉRIMÉ « 546 »", sortie,
+                      "une exemption située hors de la fenêtre de 40 "
+                      "caractères blanchit quand même le chiffre :\n%s"
+                      % sortie[-700:])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

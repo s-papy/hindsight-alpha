@@ -435,8 +435,23 @@ def controle_garde_live_trading() -> None:
 # recalculer lui-même.
 MOTIFS_PERIMES = [
     ("442", "ancien nombre d'équipes inscrites (remplacé par 546 le 25/08, "
-             "lui-même destiné à re-périmer — voir l'alerte dédiée plus bas, "
-             "aucune source mécanique possible pour ce chiffre précis)", None),
+             "puis par 975 le 29/08 — voir l'alerte dédiée plus bas, aucune "
+             "source mécanique possible pour ce chiffre précis)", None),
+    # AJOUTÉ le 29/08/2026, après vérification À LA MAIN sur le tableau de
+    # bord live de lablab.ai (mis à jour 08:48) : ~975 équipes et ~3 100
+    # participants, contre 546 le 25/08. Le chiffre a presque doublé en
+    # quatre jours, et montait encore de +158 équipes sur la seule journée.
+    #
+    # L'EXEMPTION, ET POURQUOI ELLE EXISTE : le deck cite désormais 546
+    # comme REPÈRE HISTORIQUE — « 975 teams registered on 29 Aug, up from
+    # 546 four days earlier ». Sans l'exemption, ce contrôle bloquerait la
+    # phrase même qui corrige l'erreur. Le champ était en place depuis le
+    # 25/08 et n'avait jamais servi : c'est son premier usage, et il est
+    # testé par test_agent.py plutôt que supposé bon.
+    ("546", "nombre d'équipes inscrites au 25/08 — mesuré à ~975 le 29/08 "
+             "sur le tableau de bord live de lablab.ai. Il ne peut plus être "
+             "cité comme chiffre COURANT ; comme repère historique il doit "
+             "être précédé de « up from ».", r"up from\s*$"),
 ]
 
 FICHIERS_TEXTE_LIVRABLES = [
