@@ -20,7 +20,7 @@ La colonne qui compte est la dernière : détection **moins** fausse alerte. Un 
 
 Meilleur écart utile sur cette grille : **holdout = 20 j** (+9.6 pts). Le projet livre **20 j** (+9.6 pts).
 
-Plancher de significativité à 500 essais : une différence de pourcentages n'est lisible qu'au-delà de **~3.2 points**.
+Plancher de significativité à 500 essais : une différence de deux pourcentages n'est lisible qu'au-delà de **~3.2 points** ; comparer deux écarts utiles entre eux en met quatre en jeu, donc **~4.5 points**.
 
 **Le choix livré est le meilleur de la grille, et son avance (5.2 pts) dépasse le plancher.** Ce nombre n'avait jamais été mesuré ; il l'est maintenant.
 
@@ -30,5 +30,5 @@ Plancher de significativité à 500 essais : une différence de pourcentages n'e
 
 - Une seule forme d'anomalie (un changement de régime de volatilité, facteur ×2.6). Une fuite peut prendre d'autres formes.
 - Séries synthétiques à volatilité sinusoïdale. Ce n'est pas un marché.
-- 500 essais par cellule : les écarts de moins de ~4 points ne sont pas significatifs.
+- 500 essais par cellule : comparer deux écarts utiles entre eux met quatre pourcentages en jeu, donc une avance de moins de ~4.5 points ne se lit pas.
 - La règle de gagnant utilisée ici reproduit celle du garde-fou mais court-circuite ses autres verdicts (`NO EDGE`, `CANNOT CONCLUDE`) : on mesure le **désaccord de gagnants**, qui est le mécanisme sous-jacent, pas l'étiquette finale.
