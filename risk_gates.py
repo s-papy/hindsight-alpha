@@ -51,10 +51,9 @@ Added 24/08, second pass, after a direct question "we improved the
 strategy, but the agent is the real deliverable -- what improves the AGENT?"
 and pointed at researching competitors and past hackathons for the answer.
 Found in an Alpaca-published reference architecture (alpaca.markets/learn,
-May 2026) and a separate trading-agent architecture guide (ampcome.com,
-Aug 2026) -- both independently list "portfolio-level exposure caps that
-[cannot be] individually breached" / max_sector_exposure_pct as a named
-control, distinct from a per-position cap:
+May 2026), which lists "portfolio-level exposure caps that [cannot be]
+individually breached" / max_sector_exposure_pct as a named control,
+distinct from a per-position cap:
 
   MAX_SECTOR_EXPOSURE_PCT caps committed premium per SECTOR (SECTOR_MAP),
   not just per underlying. With today's 1-symbol-per-sector universe

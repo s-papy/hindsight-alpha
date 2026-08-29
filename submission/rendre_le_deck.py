@@ -11,9 +11,10 @@
 
 POURQUOI CE FICHIER EXISTE
 ==========================
-Cette machine n'a ni LibreOffice, ni `pdftoppm`, ni `markitdown`, et le
-validateur pptx du skill exige Python 3.10 quand la machine a 3.9.6. La mise
-en page du deck etait donc la seule chose du dossier que PERSONNE ne pouvait
+Cette machine n'a aucun moteur de rendu de presentation, et aucun des
+validateurs pptx disponibles ne tourne sous le Python 3.9.6 qu'elle porte. La
+mise en page du deck etait donc la seule chose du dossier que PERSONNE ne
+pouvait
 verifier autrement qu'a l'oeil, sur une autre machine -- ce qui, dans un
 projet dont la these est « ne rien affirmer qu'on n'a pas mesure », est
 exactement le trou qu'il ne faut pas laisser.

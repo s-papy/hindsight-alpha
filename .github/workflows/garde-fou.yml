@@ -1,9 +1,9 @@
 # .github/workflows/garde-fou.yml
 #
 # AJOUTÉ le 25/08/2026, revue « et sur GitHub ? » : le hook local
-# (githooks/pre-commit) a deux trous que gitleaks documente lui-même comme
-# la raison d'être d'un "programme de scan en couches" — pre-commit local
-# PUIS scan en CI sur chaque push/PR, jamais l'un sans l'autre :
+# (githooks/pre-commit) a deux trous, et c'est la raison d'être d'un
+# contrôle EN COUCHES — un hook local PUIS un scan en CI sur chaque
+# push/PR, jamais l'un sans l'autre :
 #   1. Le hook local ne protège que les machines où quelqu'un a pensé à
 #      lancer `git config core.hooksPath githooks` une fois. Un clone neuf,
 #      sans cette étape, n'a AUCUNE protection.
@@ -34,9 +34,9 @@
 # le log de ce job dit explicitement « ce contrôle n'a RIEN vérifié », pour
 # qu'une coche verte ne se lise jamais comme « aucun identifiant publié ».
 # La protection réelle contre ce cas reste le hook local, sur la machine qui
-# détient les clés. Un scan par MOTIF (façon gitleaks) le couvrirait ici, au
-# prix de faux positifs que ce projet a délibérément refusés jusque-là — c'est
-# un arbitrage à faire, pas un oubli.
+# détient les clés. Un scan par MOTIF le couvrirait ici, au prix de faux
+# positifs que ce projet a délibérément refusés jusque-là — c'est un
+# arbitrage à faire, pas un oubli.
 name: garde-fou
 
 on:

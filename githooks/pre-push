@@ -1,10 +1,9 @@
 #!/bin/sh
 # githooks/pre-push — hindsight-alpha
 #
-# AJOUTÉ le 25/08/2026, en adaptant (pas en copiant) le principe de /careful
-# de gstack (github.com/garrytan/gstack, lu en référence) : avertir
-# avant une commande destructrice, ici un push non-fast-forward (ce qu'un
-# `--force` ou `--force-with-lease` produit).
+# AJOUTÉ le 25/08/2026 sur un principe simple : avertir avant une commande
+# destructrice, ici un push non-fast-forward (ce qu'un `--force` ou
+# `--force-with-lease` produit).
 #
 # Pourquoi celui-là précisément : « Jamais de git push --force » est une
 # contrainte non négociable du projet, répétée littéralement dans CLAUDE.md

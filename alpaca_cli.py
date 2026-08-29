@@ -21,7 +21,7 @@ this agent used — is a deliberate choice, not an implementation detail:
    runs as one command per invocation (a scheduled sweep + trade-or-refuse
    decision), then exits — exactly the CLI's designed use case, not the
    MCP server's (which expects a persistent session with an AI host
-   attached, e.g. Claude Desktop or Cursor, driving it interactively).
+   attached, driving it interactively).
 
 Requires the `alpaca` binary on PATH:
     brew install alpacahq/tap/cli          (macOS/Linux)

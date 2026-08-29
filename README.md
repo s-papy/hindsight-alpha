@@ -382,7 +382,7 @@ official CLI (`github.com/alpacahq/cli`) instead of the MCP server because
 Alpaca's own docs say so explicitly: the CLI is built for "scripts, cron,
 CI, focused agent actions" (one command per call, then exit); the MCP
 server is built for "long-lived AI sessions, multi-tool orchestration" with
-a human-driven AI host attached (Claude Desktop, Cursor). This agent runs
+a human-driven AI host attached. This agent runs
 as a scheduled sweep-then-decide command — the CLI's exact use case, not
 the MCP server's. See `alpaca_cli.py` for the subprocess wrapper.
 

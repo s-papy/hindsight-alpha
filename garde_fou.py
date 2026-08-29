@@ -16,10 +16,9 @@ POURQUOI IL EXISTE
 Né le 25/08/2026, après avoir remarqué qu'aucun garde-fou ne tournait
 sur ce projet — contrairement à d'autres projets internes, qui en ont un
 depuis longtemps. Ce script
-démarre PETIT, volontairement : chaque contrôle ci-dessous vient soit du
-strict minimum recommandé par la méthode (skill garde-fou-generique :
-journal + horodatage), soit d'une vraie erreur déjà commise et documentée
-dans CE projet, jamais d'une anticipation. Le détail de chaque incident cité
+démarre PETIT, volontairement : chaque contrôle ci-dessous vient soit de la
+forme minimale retenue au départ (journal + horodatage), soit d'une vraie
+erreur déjà commise et documentée dans CE projet, jamais d'une anticipation. Le détail de chaque incident cité
 en commentaire est conservé dans le journal d'ingénierie du projet.
 
 Règle non négociable, héritée d'un projet antérieur : ON NE MODIFIE JAMAIS
@@ -59,8 +58,8 @@ def alerte(fichier: str, message: str) -> None:
 
 
 # ── CONTRÔLE 1 : LE JOURNAL EXISTE ET NE MENT PAS SUR LA DATE ──────────────
-# Forme minimale recommandée par le skill garde-fou-generique, appliquée
-# telle quelle : PLAN_SPRINT.md fait office de journal de bord de ce
+# La forme minimale retenue au départ, appliquée telle quelle :
+# PLAN_SPRINT.md fait office de journal de bord de ce
 # projet. Chaque section datée (「## ... JJ/MM ...」) est relue ; une
 # date qui tombe dans le futur par rapport à `date` est bloquante — même
 # piège qu'un défaut déjà trouvé et corrigé sur un projet antérieur les
@@ -258,14 +257,13 @@ def controle_env_hackathon_scelle() -> None:
             "git rm --cached .env.hackathon IMMÉDIATEMENT, ne pas pousser.",
         )
 
-    # 🔴 AJOUTÉ le 25/08, en comparant ce script à gitleaks (27k+ étoiles,
-    # MIT, référence du secret-scanning) : `git ls-files` ne voit que l'état
-    # ACTUEL de l'index. Un fichier ajouté par erreur puis retiré avec
+    # 🔴 AJOUTÉ le 25/08 : `git ls-files` ne voit que l'état ACTUEL de
+    # l'index. Un fichier ajouté par erreur puis retiré avec
     # `git rm --cached` disparaît de `git ls-files` mais RESTE dans
-    # l'historique — récupérable par quiconque clone le dépôt. gitleaks
-    # scanne l'historique complet pour cette raison précise ; ce contrôle
-    # fait la version minimale pour un seul nom de fichier connu, sans
-    # dépendance externe.
+    # l'historique — récupérable par quiconque clone le dépôt. C'est la
+    # raison pour laquelle un scan de secrets doit lire l'historique
+    # complet ; ce contrôle en fait la version minimale, pour un seul nom
+    # de fichier connu et sans dépendance externe.
     try:
         historique = subprocess.run(
             ["git", "log", "--all", "--full-history", "--oneline", "--", ".env.hackathon"],
@@ -552,15 +550,13 @@ def controle_chiffres_perimes() -> None:
 
 
 # ── CONTRÔLE 5 : SOURCE DE VÉRITÉ MÉCANIQUE, PAS UNE LISTE NOIRE ──────────
-# Demandé explicitement le 25/08, après la comparaison à doc-drift/
-# DriftGuard (détection de dérive documentaire, motif réel trouvé sur
-# GitHub) : une liste noire de chaînes déjà fausses (contrôle 4 ci-dessus)
-# ne rattrape que la RÉCIDIVE d'une erreur déjà vue une fois. Elle ne dirait
-# RIEN le jour où `BACKTEST_RESULTS.md` change (nouveau run de backtest,
-# nouveau symbole vetté) et qu'un livrable n'est pas mis à jour en
-# conséquence — exactement le point mort que doc-drift comble en
-# régénérant depuis la source et en comparant, plutôt qu'en mémorisant les
-# erreurs passées.
+# Demandé explicitement le 25/08 : une liste noire de chaînes déjà fausses
+# (contrôle 4 ci-dessus) ne rattrape que la RÉCIDIVE d'une erreur déjà vue
+# une fois. Elle ne dirait RIEN le jour où `BACKTEST_RESULTS.md` change
+# (nouveau run de backtest, nouveau symbole vetté) et qu'un livrable n'est
+# pas mis à jour en conséquence. Le point mort se comble en RÉGÉNÉRANT
+# depuis la source et en comparant, plutôt qu'en mémorisant les erreurs
+# passées.
 #
 # Ce contrôle fait ça pour les 4 catégories de chiffres qui ONT une vraie
 # source mécanique dans ce dépôt :
@@ -832,9 +828,8 @@ def _fmt(x: float) -> str:
     return ("%.1f" % x).rstrip("0").rstrip(".") if x == int(x) else "%.1f" % x
 
 
-# 🟢 AJOUTÉ le 25/08 en revue croisée multi-agents avant commit (inspirée du
-# plugin officiel Anthropic `/code-review`, lu en référence) :
-# deux agents indépendants ont trouvé, chacun à confiance 85, que
+# 🟢 AJOUTÉ le 25/08 en revue croisée avant commit : deux relectures
+# indépendantes ont trouvé, chacune à confiance 85, que
 # README.md citait 181.6% pour la concentration de XLK — le chiffre de sa
 # fenêtre 10j, alors que XLK est jugé sur sa fenêtre 90j vettée (136.7%).
 # Le reste du contrôle 5 ci-dessous ne pouvait PAS l'attraper : `propres`
@@ -3352,8 +3347,7 @@ def main() -> int:
         print("VERDICT : 🟢 APPROUVÉ — aucun contrôle en défaut.")
         code = 0
 
-    # Emprunté tel quel au garde-fou d'un projet antérieur, affiché à
-    # CHAQUE run, même vert : le nombre de contrôles est maintenant DÉRIVÉ de
+    # Affiché à CHAQUE run, même vert : le nombre de contrôles est maintenant DÉRIVÉ de
     # la liste CONTROLES ci-dessus (27/08). Il était recopié à la main et a
     # périmé deux fois — ce commentaire admettait lui-même qu'il « trainait
     # encore à 4 » après le passage à 6, trouvé par une revue croisée. Tous
