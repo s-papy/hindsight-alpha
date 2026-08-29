@@ -163,6 +163,25 @@ def _style_de_forme(sp) -> str:
     return ";".join(morceaux)
 
 
+def _insets(sp) -> "tuple[dict, object]":
+    """Les marges internes de la zone de texte, et son `a:bodyPr`.
+
+    SORTI EN FONCTION le 30/08/2026. Ces sept lignes etaient ecrites deux
+    fois : une fois dans le rendu, une fois dans la mesure. Or la mesure ne
+    vaut que si elle decrit EXACTEMENT la boite que le rendu dessine ; deux
+    lectures separees divergent au premier changement. Meme raison que
+    `_reglages` plus bas, un cran au-dessus."""
+    corps = _premier(sp, "p:txBody")
+    bodyPr = _premier(corps, "a:bodyPr") if corps is not None else None
+    insets = dict(INSETS_DEFAUT)
+    if bodyPr is not None:
+        for cle in insets:
+            v = bodyPr.getAttribute(cle)
+            if v:
+                insets[cle] = float(v)
+    return insets, bodyPr
+
+
 def _paragraphes(sp) -> "list[dict]":
     corps = _premier(sp, "p:txBody")
     if corps is None:
@@ -172,6 +191,7 @@ def _paragraphes(sp) -> "list[dict]":
         pPr = _enfant_direct(p, "a:pPr")
         algn = pPr.getAttribute("algn") if pPr is not None else ""
         interligne = None
+        sortie_apres = 0.0
         if pPr is not None:
             lnSpc = _enfant_direct(pPr, "a:lnSpc")
             if lnSpc is not None:
@@ -179,16 +199,9 @@ def _paragraphes(sp) -> "list[dict]":
                 if pct is not None:
                     interligne = float(pct.getAttribute("val")) / 100000.0
             aft = _enfant_direct(pPr, "a:spcAft")
-            if aft is not None:
-                pts = _enfant_direct(aft, "a:spcPts")
-                if pts is not None:
-                    sortie_apres = float(pts.getAttribute("val")) / 100.0
-                else:
-                    sortie_apres = 0.0
-            else:
-                sortie_apres = 0.0
-        else:
-            sortie_apres = 0.0
+            pts = _enfant_direct(aft, "a:spcPts") if aft is not None else None
+            if pts is not None:
+                sortie_apres = float(pts.getAttribute("val")) / 100.0
 
         runs = []
         for r in p.getElementsByTagName("a:r"):
@@ -237,14 +250,7 @@ def _forme_en_html(sp, index: int, nom_slide: str) -> "tuple[str, str | None]":
                     "plutot qu'inventee" % (nom_slide, index))
     x, y, w, h = geo
 
-    corps = _premier(sp, "p:txBody")
-    bodyPr = _premier(corps, "a:bodyPr") if corps is not None else None
-    insets = dict(INSETS_DEFAUT)
-    if bodyPr is not None:
-        for cle in insets:
-            v = bodyPr.getAttribute(cle)
-            if v:
-                insets[cle] = float(v)
+    insets, bodyPr = _insets(sp)
     ancre = bodyPr.getAttribute("anchor") if bodyPr is not None else ""
     justif = {"ctr": "center", "b": "flex-end"}.get(ancre, "flex-start")
 
@@ -279,6 +285,13 @@ def _forme_en_html(sp, index: int, nom_slide: str) -> "tuple[str, str | None]":
             % (nom_slide, index, style_boite, style_texte, "".join(lignes))), None
 
 
+def _noms_de_slides(z) -> "list[str]":
+    """Les `slideN.xml` du paquet, dans l'ordre de la presentation."""
+    return sorted(
+        [n for n in z.namelist() if re.match(r"ppt/slides/slide\d+\.xml$", n)],
+        key=lambda n: int(re.search(r"\d+", n.split("/")[-1]).group()))
+
+
 SONDE = """
 // Mesure des debordements. Le navigateur vient de faire le retour a la ligne
 // avec les vraies polices : c'est le seul moment ou « ce texte deborde-t-il »
@@ -294,8 +307,8 @@ document.querySelectorAll('.forme').forEach(function (f) {
   t.querySelectorAll('p').forEach(function (p) {
     large = Math.max(large, p.scrollWidth);
   });
-  var depasse_bas = ht - (hb - PADV);
-  var depasse_droite = large - (lb - PADH);
+  var depasse_bas = ht - hb;
+  var depasse_droite = large - lb;
   if (depasse_bas > 1 || depasse_droite > 1) {
     f.classList.add('deborde');
     window.__DEBORDEMENTS.push({
@@ -333,11 +346,9 @@ def construire(chemin_deck: Path, seulement: "int | None") -> "tuple[str, list]"
     taille = _premier(pres, "p:sldSz")
     largeur, hauteur = px(taille.getAttribute("cx")), px(taille.getAttribute("cy"))
 
-    noms = sorted(
-        [n for n in z.namelist() if re.match(r"ppt/slides/slide\d+\.xml$", n)],
-        key=lambda n: int(re.search(r"\d+", n.split("/")[-1]).group()))
+    noms = _noms_de_slides(z)
 
-    problemes, slides, fonds = [], [], {}
+    problemes, slides = [], []
     for numero, nom in enumerate(noms, 1):
         if seulement is not None and numero != seulement:
             continue
@@ -382,7 +393,6 @@ def construire(chemin_deck: Path, seulement: "int | None") -> "tuple[str, list]"
                       'background:%s">%s</div></figure>'
                       % (numero, html.escape(nom.split("/")[-1]), fond,
                          largeur, hauteur, fond, "".join(formes)))
-        fonds[numero] = fond
 
     page = """<!doctype html><html lang="fr"><head><meta charset="utf-8">
 <title>Hindsight Alpha — rendu du deck</title><style>
@@ -397,7 +407,6 @@ def construire(chemin_deck: Path, seulement: "int | None") -> "tuple[str, list]"
  figcaption{font:12px ui-monospace,monospace;color:#8b93a7;margin-bottom:6px}
  .slide{position:relative;color:#111;overflow:hidden;
         box-shadow:0 2px 18px rgba(0,0,0,.55)}
- .forme{}
  .forme p{margin:0}
  .deborde{outline:2px solid #ef4444;outline-offset:1px}
  .hors-cadre{outline:2px dashed #f59e0b}
@@ -415,9 +424,9 @@ dont les <b>largeurs diffèrent</b> — c'est la limite qui compte pour un
 contrôle de débordement. Cadre rouge = le texte dépasse sa boîte. Cadre
 orange = la forme sort de la diapo.</p>
 %s
-<script>var PADV=0,PADH=0;%s</script>
+<script>%s</script>
 </body></html>""" % ("".join(slides), SONDE)
-    return page, problemes, fonds
+    return page, problemes
 
 
 # ---------------------------------------------------------------------------
@@ -499,7 +508,7 @@ def _lire_metriques(chemin: str) -> dict:
     upem = struct.unpack(">H", d[ho + 18:ho + 20])[0]
     hh = tables["hhea"][0]
     nhm = struct.unpack(">H", d[hh + 34:hh + 36])[0]
-    asc, desc, gap = struct.unpack(">hhh", d[hh + 4:hh + 10])
+    asc, desc, _gap = struct.unpack(">hhh", d[hh + 4:hh + 10])
     hm = tables["hmtx"][0]
     aw = [struct.unpack(">H", d[hm + 4 * i:hm + 4 * i + 2])[0] for i in range(nhm)]
     co = tables["cmap"][0]
@@ -532,8 +541,8 @@ def _lire_metriques(chemin: str) -> dict:
                         g = (g + deltas[i]) & 0xFFFF
                 if g:
                     carte[c] = g
-    return {"upem": upem, "asc": asc, "desc": desc, "gap": gap,
-            "aw": aw, "carte": carte, "fichier": Path(chemin).name}
+    return {"upem": upem, "asc": asc, "desc": desc,
+            "aw": aw, "carte": carte}
 
 
 def _largeur(m: dict, texte: str, pt: float, interlettrage: float = 0.0) -> float:
@@ -585,8 +594,8 @@ def _reglages(paras, caches):
 
 
 def mesurer(chemin_deck: Path,
-            seulement: "int | None") -> "tuple[list, list, list, float, set]":
-    """(alertes, notes). Une alerte = une zone dont le texte remplit plus que
+            seulement: "int | None") -> "tuple[list, list, list, set]":
+    """(alertes, notes, non_mesurables, sans_police). Une alerte = une zone dont le texte remplit plus que
     du seuil de remplissage, ou dont un mot depasse en largeur."""
     caches, notes, exact_par_cle, sans_police = {}, [], {}, set()
     for demandee, variantes in POLICES.items():
@@ -596,11 +605,10 @@ def mesurer(chemin_deck: Path,
                     m = _lire_metriques(c)
                     caches[(demandee, graisse)] = m
                     attendu = METRIQUES_ATTENDUES.get(demandee)
-                    compatible = attendu is None or (
+                    exact = attendu is not None and (
                         m["upem"], m["asc"], m["desc"]) == attendu
-                    exact_par_cle[(demandee, graisse)] = bool(
-                        attendu is not None and compatible)
-                    if attendu is not None and compatible:
+                    exact_par_cle[(demandee, graisse)] = exact
+                    if exact:
                         notes.append(
                             "« %s »%s : mesure avec %s — metriquement "
                             "compatible, VERIFIE (upem %d, asc %d, desc %d, "
@@ -634,18 +642,8 @@ def mesurer(chemin_deck: Path,
                 notes.append("« %s »%s : aucune police trouvee — les zones "
                              "qui l'emploient ne sont PAS mesurees"
                              % (demandee, " gras" if graisse else ""))
-    # Le seuil est propre a CHAQUE forme, pas global. Ma premiere version
-    # gardait un seul drapeau « exactes » : une seule famille non verifiee
-    # (Cambria, 35 emplois) faisait annoncer « mesure approchee » sur les 128
-    # zones en Calibri, qui sont mesurees exactement. Un fait par element,
-    # resume en un drapeau unique, redevient faux pour presque tous.
-    seuil_global = (SEUIL_EXACT if exact_par_cle and all(exact_par_cle.values())
-                    else SEUIL_APPROCHE)
-
     z = zipfile.ZipFile(chemin_deck)
-    noms = sorted(
-        [n for n in z.namelist() if re.match(r"ppt/slides/slide\d+\.xml$", n)],
-        key=lambda n: int(re.search(r"\d+", n.split("/")[-1]).group()))
+    noms = _noms_de_slides(z)
 
     alertes, non_mesurables = [], []
     for numero, nom in enumerate(noms, 1):
@@ -658,14 +656,7 @@ def mesurer(chemin_deck: Path,
             if geo is None or not any(p["runs"] for p in paras):
                 continue
             _x, _y, w, h = geo
-            corps = _premier(sp, "p:txBody")
-            bodyPr = _premier(corps, "a:bodyPr") if corps is not None else None
-            insets = dict(INSETS_DEFAUT)
-            if bodyPr is not None:
-                for cle in insets:
-                    v = bodyPr.getAttribute(cle)
-                    if v:
-                        insets[cle] = float(v)
+            insets, _bodyPr = _insets(sp)
             # px -> pt : 96 px/pouce, 72 pt/pouce
             dispo_l = (w - px(insets["lIns"]) - px(insets["rIns"])) * 0.75
             dispo_h = (h - px(insets["tIns"]) - px(insets["bIns"])) * 0.75
@@ -673,12 +664,14 @@ def mesurer(chemin_deck: Path,
             hauteur = 0.0
             plus_large = 0.0
             reglages = list(_reglages(paras, caches))
+            une_seule_ligne = bool(reglages)
             mesure_partielle = (
                 len(reglages) != len([p for p in paras if p["runs"]]))
             for para, cle, pt, spc in reglages:
                 met = caches[cle]
                 texte = "".join(t for t, _s in para["runs"])
                 n = _lignes(met, texte.split(), pt, spc, dispo_l)
+                une_seule_ligne = une_seule_ligne and n == 1
                 interligne = para["interligne"] or 1.2
                 hauteur += n * pt * interligne + para["apres"]
                 # NON CLAMPEE, exprès. Ma premiere version prenait
@@ -707,11 +700,18 @@ def mesurer(chemin_deck: Path,
             # Un texte qui se replie n'est pas « trop large » : il tient,
             # sur plusieurs lignes. Seule une zone d'une SEULE ligne peut
             # deborder en largeur.
-            une_seule_ligne = all(
-                _lignes(caches[cle], "".join(t for t, _s in p["runs"]).split(),
-                        pt_, spc_, dispo_l) == 1
-                for p, cle, pt_, spc_ in reglages)
             trop_large = (plus_large - dispo_l) if une_seule_ligne else 0.0
+            # Le seuil est propre a CHAQUE forme, pas global. Ma premiere
+            # version gardait un seul drapeau « exactes » : une seule famille
+            # non verifiee (Cambria, 35 emplois) faisait annoncer « mesure
+            # approchee » sur les 128 zones en Calibri, qui sont mesurees
+            # exactement. Un fait par element, resume en un drapeau unique,
+            # redevient faux pour presque tous.
+            #
+            # 30/08 : le drapeau global survivait encore dans le retour de
+            # `mesurer`, sans plus aucun lecteur -- une signature qui laissait
+            # croire qu'un seuil global existait toujours. Retire ; ce
+            # commentaire descend ici, a l'endroit ou la decision se prend.
             exact_ici = bool(reglages) and all(
                 exact_par_cle.get(cle) for _p, cle, _pt, _spc in reglages)
             seuil = SEUIL_EXACT if exact_ici else SEUIL_APPROCHE
@@ -728,7 +728,6 @@ def mesurer(chemin_deck: Path,
                 alertes.append({
                     "slide": numero, "forme": i,
                     "remplissage": round(taux * 100, 1),
-                    "debord_largeur": round(trop_large, 1),
                     "police_plus_etroite": besoin,
                     "boite": (_x, _y, w, h), "exact": exact_ici,
                     "hauteur_texte_px": hauteur / 0.75,
@@ -744,12 +743,12 @@ def mesurer(chemin_deck: Path,
             g = _geometrie(sp)
             if g is not None:
                 boites.append((i, g))
-        for al in [a for a in alertes if a["slide"] == numero and "boite" in a]:
+        for al in [a for a in alertes if a["slide"] == numero]:
             x, y, w, h = al["boite"]
             debord = max(0.0, al["hauteur_texte_px"] - h) / 2.0
             al["touche"] = _collisions_causees(al["forme"], (x, y, w, h),
                                                debord, boites)
-    return alertes, notes, non_mesurables, seuil_global, sans_police
+    return alertes, notes, non_mesurables, sans_police
 
 
 def _collisions_causees(numero, boite, debord, boites):
@@ -798,15 +797,14 @@ def main() -> None:
         print("deck introuvable : %s" % chemin, file=sys.stderr)
         raise SystemExit(2)
 
-    page, problemes, fonds = construire(chemin, args.slide)
+    page, problemes = construire(chemin, args.slide)
     Path(args.sortie).write_text(page, encoding="utf-8")
     print("ecrit : %s" % args.sortie)
     if problemes:
         print("\nCE QUI N'A PAS ETE RENDU FIDELEMENT (%d) :" % len(problemes))
         for p in problemes:
             print("  . %s" % p)
-    alertes, notes, non_mesurables, seuil_utilise, sans_police = mesurer(
-        chemin, args.slide)
+    alertes, notes, non_mesurables, sans_police = mesurer(chemin, args.slide)
     print("\nMESURE DES DEBORDEMENTS (metriques de police lues dans le "
           "fichier TTF, sans navigateur)")
     for n in notes:
@@ -828,7 +826,7 @@ def main() -> None:
               % ", ".join(sorted(sans_police)))
     elif not alertes:
         print("\n  aucune zone au-dela du seuil.")
-    elif alertes:
+    else:
         print("\n  %d zone(s) a regarder :" % len(alertes))
         for al in sorted(alertes, key=lambda x: -x["remplissage"]):
             print("    slide %-2d forme %-3d  %5.1f %% de la hauteur"

@@ -339,6 +339,34 @@ class LeakageReport:
         return "\n".join(lines)
 
 
+def recouvrement_pct(n_barres: int, retenues: int) -> int:
+    """De combien de pour cent les deux series comparees se recouvrent-elles.
+
+    ECRIT ICI le 30/08/2026, pour la meme raison que `marge()` juste
+    au-dessus, et contre le meme defaut a un cran de plus.
+
+    La phrase qui accompagne un verdict disait « the two series overlap by
+    97 % » -- avec le 97 ECRIT A LA MAIN, dans backtest.py ET dans
+    compare_strategies.py, deux fichiers qui GENERENT des .md publies. Or ce
+    nombre n'est pas une propriete du monde : c'est
+    `1 - IN_SAMPLE_HOLDOUT_DAYS / len(bars)`, soit 1 - 20/700. Le jour ou le
+    holdout bouge -- et `hindsight_holdout.py` existe precisement pour
+    remettre ce 20 en question -- les deux rapports continuent d'affirmer
+    97 % en silence.
+
+    C'est le jumeau exact du defaut corrige le 29/08 dans
+    hindsight_benchmark.py, dont la docstring citait des pourcentages
+    qu'aucune version du code n'avait produits. La lecon avait ete appliquee
+    a un fichier et pas a son jumeau.
+
+    Ne prend PAS le holdout dans une constante de strategie : cette
+    bibliotheque ne touche jamais aux donnees de l'appelant, et n'a pas a
+    savoir que vol_strategy existe. Les deux nombres se passent."""
+    if n_barres <= 0:
+        return 0
+    return round(100.0 * (1.0 - float(retenues) / float(n_barres)))
+
+
 def check_selection_leakage(
     candidates: Sequence[Any],
     score_fn: Callable[[Any, str], float],

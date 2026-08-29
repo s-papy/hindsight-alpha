@@ -3629,7 +3629,7 @@ class TestMauvaisCompteRefuseLaCloture(BaseExit):
 
 
 
-class TestUnePositionACTIONSNEstPasSilencieuse(unittest.TestCase):
+class TestUnePositionACTIONSNEstPasSilencieuse(BaseExit):
     """`manage_exits()` écartait une position d'ACTIONS en silence, au motif
     qu'elle est « explicitement déclarée comme telle, il n'y a pas de doute à
     signaler ».
@@ -3651,16 +3651,10 @@ class TestUnePositionACTIONSNEstPasSilencieuse(unittest.TestCase):
     risque. On mesure et on dit."""
 
     def _actions(self, positions):
-        import risk_gates, alpaca_cli
-        vrai = alpaca_cli.list_positions
-        alpaca_cli.list_positions = lambda: list(positions)
-        try:
-            return risk_gates.manage_exits(dry_run=True)
-        finally:
-            alpaca_cli.list_positions = vrai
+        self.positions = list(positions)
+        return risk_gates.manage_exits(dry_run=True)
 
     def test_une_ligne_actions_produit_une_action_visible(self):
-        import risk_gates
         actions = self._actions([{"symbol": "SPY", "asset_class": "us_equity",
                                   "qty": "-200", "unrealized_plpc": "0.01"}])
         self.assertEqual(len(actions), 1,
@@ -3677,7 +3671,6 @@ class TestUnePositionACTIONSNEstPasSilencieuse(unittest.TestCase):
         """TÉMOIN : `UNRECOGNISED` veut dire « je n'ai pas su la classer ».
         Ici on l'a parfaitement classée — c'est une action. Réutiliser ce
         verdict nommerait une cause qu'on n'a pas mesurée."""
-        import risk_gates
         actions = self._actions([{"symbol": "SPY", "asset_class": "us_equity",
                                   "qty": "-200"}])
         self.assertNotEqual(actions[0].kind, risk_gates.ExitKind.UNRECOGNISED)
@@ -3685,7 +3678,6 @@ class TestUnePositionACTIONSNEstPasSilencieuse(unittest.TestCase):
     def test_une_OPTION_ordinaire_ne_declenche_rien_de_tel(self):
         """SECOND TÉMOIN : crier sur toute position rendrait le signal
         inutile. Une option sous les seuils reste « holding »."""
-        import risk_gates
         actions = self._actions([{"symbol": "SPY260904P00769000",
                                   "asset_class": "us_option", "qty": "2",
                                   "unrealized_plpc": "-0.049"}])
@@ -3694,20 +3686,15 @@ class TestUnePositionACTIONSNEstPasSilencieuse(unittest.TestCase):
 
     def test_rien_n_est_ferme_sur_une_ligne_actions(self):
         """TROISIÈME TÉMOIN, et c'est la contrainte du projet : mesurer, pas
-        décider à la place de l'opérateur."""
-        import risk_gates, alpaca_cli
-        appels = []
-        vrai_liste, vrai_close = alpaca_cli.list_positions, alpaca_cli.close_position
-        alpaca_cli.list_positions = lambda: [{"symbol": "SPY",
-                                              "asset_class": "us_equity",
-                                              "qty": "-200"}]
-        alpaca_cli.close_position = lambda *a, **k: appels.append(a)
-        try:
-            risk_gates.manage_exits(dry_run=False)
-        finally:
-            alpaca_cli.list_positions = vrai_liste
-            alpaca_cli.close_position = vrai_close
-        self.assertEqual(appels, [],
+        décider à la place de l'opérateur.
+
+        `self.closed` vient de BaseExit, qui enregistre toute fermeture --
+        et qui ferme aussi la porte au réseau et à la configuration de
+        l'opérateur, ce que ce test bricolait à la main."""
+        self.positions = [{"symbol": "SPY", "asset_class": "us_equity",
+                           "qty": "-200"}]
+        risk_gates.manage_exits(dry_run=False)
+        self.assertEqual(self.closed, [],
                          "une position actions a été FERMÉE automatiquement : "
                          "c'est une décision de risque, pas une mesure")
 

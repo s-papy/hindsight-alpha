@@ -378,7 +378,7 @@ class TestLeMessageNeNommePasUneCauseNonMESUREE(BaseBilan):
 if __name__ == "__main__":
     unittest.main(verbosity=2)
 
-class TestUnHorodatageSansFuseauNeTuePasLeBilan(unittest.TestCase):
+class TestUnHorodatageSansFuseauNeTuePasLeBilan(BaseBilan):
     """Un horodatage sans fuseau ne leve rien a l'ANALYSE : il explose une
     ligne plus loin, a la COMPARAISON, avec « can't compare offset-naive and
     offset-aware datetimes ».
@@ -396,32 +396,31 @@ class TestUnHorodatageSansFuseauNeTuePasLeBilan(unittest.TestCase):
     LIVE_WEEK.md, qu'une ligne illisible est ignoree et comptee. Mourir sur
     une ligne est le contraire exact de ce contrat."""
 
-    KICKOFF = "2026-08-28T15:00:00+00:00"
+    def _lancer_avec(self, kickoff, horodatage):
+        """La fixture vient de `BaseBilan`, pas d'une quatrieme copie.
 
-    def _lancer(self, kickoff, horodatage):
-        d = Path(tempfile.mkdtemp(prefix="hindsight-naif-"))
+        Cette classe redeclarait `KICKOFF` a la meme valeur et reecrivait un
+        `_lancer` de 22 lignes qui refaisait exactement `_dossier` +
+        `_lancer` : copie de `bilan_semaine.py`, `kickoff_freeze.json`,
+        `state.json`, `decision_log.jsonl`, sous-processus, `rmtree`. Or
+        `_dossier` prend DEJA le kickoff en parametre, qui est precisement le
+        bouton que ces tests tournent.
+
+        L'entree est passee telle quelle, sans passer par `_passage()` : ce
+        dernier ajoute un champ `outcome` que ces temoins n'ont pas, et un
+        temoin doit dire ce qu'il veut dire."""
+        d = self._dossier(
+            [{"timestamp": horodatage, "run_type": "agent",
+              "verdicts": [{"symbol": "SPY", "tradeable": False,
+                            "reason": "hindsight guard"}]}],
+            kickoff=kickoff)
         try:
-            (d / "bilan_semaine.py").write_bytes(
-                (RACINE / "bilan_semaine.py").read_bytes())
-            (d / "kickoff_freeze.json").write_text(
-                json.dumps({"kickoff": kickoff, "valeurs": {}}), encoding="utf-8")
-            (d / "state.json").write_text(
-                json.dumps({"starting_equity": 100000.0}), encoding="utf-8")
-            (d / "decision_log.jsonl").write_text(json.dumps({
-                "timestamp": horodatage, "run_type": "agent",
-                "verdicts": [{"symbol": "SPY", "tradeable": False,
-                              "reason": "hindsight guard"}],
-            }) + "\n", encoding="utf-8")
-            r = subprocess.run([sys.executable, str(d / "bilan_semaine.py")],
-                               cwd=str(d), capture_output=True, text=True,
-                               timeout=120)
-            return r.returncode, r.stdout + r.stderr
+            return self._lancer(d)
         finally:
-            import shutil
-            shutil.rmtree(d, ignore_errors=True)
+            __import__("shutil").rmtree(d, ignore_errors=True)
 
     def test_une_ligne_de_journal_sans_fuseau_ne_fait_pas_tomber_le_rapport(self):
-        code, sortie = self._lancer(self.KICKOFF, "2026-08-28T16:00:00")
+        code, sortie = self._lancer_avec(self.KICKOFF, "2026-08-28T16:00:00")
         self.assertNotIn("offset-naive", sortie, sortie[-800:])
         self.assertEqual(code, 0, sortie[-800:])
 
@@ -431,7 +430,7 @@ class TestUnHorodatageSansFuseauNeTuePasLeBilan(unittest.TestCase):
         ligne. Un bilan qui perd silencieusement des verdicts est flatte, ce
         que tout ce fichier de tests existe pour empecher. La ligne doit
         APPARAITRE dans le decompte."""
-        _code, sortie = self._lancer(self.KICKOFF, "2026-08-28T16:00:00")
+        _code, sortie = self._lancer_avec(self.KICKOFF, "2026-08-28T16:00:00")
         self.assertIn("hindsight guard", sortie,
                       "le verdict de la ligne naive a disparu du "
                       "decompte :\n%s" % sortie[-800:])
@@ -440,7 +439,7 @@ class TestUnHorodatageSansFuseauNeTuePasLeBilan(unittest.TestCase):
         """LA VARIANTE LA PLUS GRAVE : ce n'est pas une ligne du journal mais
         la FENETRE qui est naive. Toutes les lignes bien formees explosent
         alors, pas seulement une."""
-        code, sortie = self._lancer("2026-08-28T15:00:00",
+        code, sortie = self._lancer_avec("2026-08-28T15:00:00",
                                     "2026-08-28T16:00:00+00:00")
         self.assertNotIn("offset-naive", sortie, sortie[-800:])
         self.assertEqual(code, 0, sortie[-800:])
@@ -450,7 +449,7 @@ class TestUnHorodatageSansFuseauNeTuePasLeBilan(unittest.TestCase):
         """SECOND TÉMOIN : la protection d'origine ne doit pas avoir ete
         perdue en la deplacant. Une chaine qui n'est pas une date du tout doit
         encore etre sautee sans tuer le rapport."""
-        code, sortie = self._lancer(self.KICKOFF, "pas une date")
+        code, sortie = self._lancer_avec(self.KICKOFF, "pas une date")
         self.assertEqual(code, 0, sortie[-800:])
         self.assertNotIn("Traceback", sortie, sortie[-800:])
 

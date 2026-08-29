@@ -1292,6 +1292,25 @@ class TestReadmeEtPlistsSAccordent(unittest.TestCase):
 
 GIT = shutil.which("git")
 
+# UNE SEULE FACON DE LANCER GIT DANS CETTE SUITE. Pose le 30/08/2026.
+#
+# Un runner de CI n'a pas de `~/.gitconfig` : ni identite d'auteur, ni
+# `init.defaultBranch`. Trois tests sont tombes en CI PUBLIQUE pour cette
+# seule raison, et ont ete corriges UN PAR UN -- sept sites recoivent
+# `-c init.defaultBranch=main`, dix n'en ont pas ; l'identite s'ecrit de
+# trois facons differentes selon l'endroit. C'est exactement le motif « une
+# regle appliquee ici mais pas a son jumeau » que le garde-fou attrape
+# ailleurs, laisse sans mecanisme dans la suite elle-meme.
+#
+# Le huitieme `git init` ecrit a la main n'aurait rien pour l'attraper :
+# `_fichiers_python_du_depot()` exclut les `test_*.py`. Le seul filet etait
+# la CI publique au rouge. Ceci est le mecanisme : une constante a appeler,
+# et le prefixe qu'il faut est deja dedans.
+GIT_NEUTRE = [GIT, "-c", "init.defaultBranch=main",
+              "-c", "user.name=hindsight-test",
+              "-c", "user.email=test@example.invalid"]
+
+
 
 class TestAucunIdentifiantPublie(unittest.TestCase):
     """decision_log.jsonl et docs/data.json ne sont PAS gitignorés : ce sont les
@@ -1380,7 +1399,7 @@ class TestAucunIdentifiantPublie(unittest.TestCase):
         depot = tempfile.mkdtemp(prefix="hindsight-arme-")
         vraie_racine = garde_fou.RACINE
         try:
-            subprocess.run(["git", "-c", "init.defaultBranch=main", "init", "-q", depot], check=True)
+            subprocess.run([*GIT_NEUTRE, "init", "-q", depot], check=True)
             Path(depot, "fuite.py").write_text(
                 'CLE = "%s"\n' % self.CLE, encoding="utf-8")
             subprocess.run(["git", "-C", depot, "add", "-A"], check=True)
@@ -1590,7 +1609,7 @@ class TestAucunIdentifiantPublie(unittest.TestCase):
             (d / nom).parent.mkdir(parents=True, exist_ok=True)
             (d / nom).write_text(contenu, encoding="utf-8")
         for args in (["init", "-q", "."], ["add", "-A"]):
-            subprocess.run([GIT] + args, cwd=str(d), capture_output=True,
+            subprocess.run(GIT_NEUTRE + args, cwd=str(d), capture_output=True,
                            timeout=30)
         proc = subprocess.run([sys.executable, "garde_fou.py"], cwd=str(d),
                               capture_output=True, text=True, timeout=120)
@@ -1682,7 +1701,7 @@ class TestAucunIdentifiantPublie(unittest.TestCase):
                         d / "garde_fou.py")
             (d / ("." + "env")).write_text("ALPACA_API_KEY=%s\n" % self.CLE,
                                            encoding="utf-8")
-            subprocess.run([GIT, "init", "-q", "."], cwd=str(d),
+            subprocess.run([*GIT_NEUTRE, "init", "-q", "."], cwd=str(d),
                            capture_output=True, timeout=30)
             subprocess.run([GIT, "add", "garde_fou.py"], cwd=str(d),
                            capture_output=True, timeout=30)
@@ -1718,7 +1737,7 @@ class TestAucunIdentifiantPublie(unittest.TestCase):
                 "les tests utilisent cle-de-test et secret-de-test\n",
                 encoding="utf-8")
             for args in (["init", "-q", "."], ["add", "-A"]):
-                subprocess.run([GIT] + args, cwd=str(d), capture_output=True,
+                subprocess.run(GIT_NEUTRE + args, cwd=str(d), capture_output=True,
                                timeout=30)
             proc = subprocess.run([sys.executable, "garde_fou.py"], cwd=str(d),
                                   capture_output=True, text=True, timeout=120)
@@ -1771,7 +1790,7 @@ class TestAucunIdentifiantPublie(unittest.TestCase):
             (d / ".gitignore").write_text("." + "env\n", encoding="utf-8")
             for args in (["init", "-q", "."], ["config", "user.email", "t@t"],
                          ["config", "user.name", "t"]):
-                subprocess.run([GIT] + args, cwd=str(d), capture_output=True,
+                subprocess.run(GIT_NEUTRE + args, cwd=str(d), capture_output=True,
                                timeout=30)
             # commit fautif, puis retrait du fichier
             (d / "notes.md").write_text("cle: %s\n" % self.CLE, encoding="utf-8")
@@ -1829,7 +1848,7 @@ class TestAucunIdentifiantPublie(unittest.TestCase):
             for args in (["init", "-q", "."], ["config", "user.email", "t@t"],
                          ["config", "user.name", "t"], ["add", "-A"],
                          ["commit", "-qm", "propre", "--no-verify"]):
-                subprocess.run([GIT] + args, cwd=str(d), capture_output=True,
+                subprocess.run(GIT_NEUTRE + args, cwd=str(d), capture_output=True,
                                timeout=30)
             proc = subprocess.run([sys.executable, "garde_fou.py"], cwd=str(d),
                                   capture_output=True, text=True, timeout=180)
@@ -1948,7 +1967,7 @@ class TestRenvoisResolvent(unittest.TestCase):
             for nom in fichiers:
                 (d / nom).write_text("x\n", encoding="utf-8")
             for args in (["init", "-q", "."], ["add", "-A"]):
-                subprocess.run([shutil.which("git")] + args, cwd=str(d),
+                subprocess.run(GIT_NEUTRE + args, cwd=str(d),
                                capture_output=True, timeout=30)
             proc = subprocess.run([sys.executable, "garde_fou.py"], cwd=str(d),
                                   capture_output=True, text=True, timeout=120)
@@ -3059,7 +3078,7 @@ class TestMotifsDIdentifiants(unittest.TestCase):
         vraie = garde_fou.RACINE
         depot = tempfile.mkdtemp(prefix="hindsight-motif-")
         try:
-            subprocess.run(["git", "-c", "init.defaultBranch=main", "init", "-q", depot], check=True)
+            subprocess.run([*GIT_NEUTRE, "init", "-q", depot], check=True)
             Path(depot, nom).write_text(contenu, encoding="utf-8")
             subprocess.run(["git", "-C", depot, "add", "-A"], check=True)
             garde_fou.RACINE = depot
@@ -4456,7 +4475,7 @@ class TestLeHookNAnnoncePasUneDureeEcriteALaMain(unittest.TestCase):
 
     def _depot(self):
         d = tempfile.mkdtemp(prefix="hindsight-duree-")
-        subprocess.run(["git", "-c", "init.defaultBranch=main", "init", "-q"], cwd=d, check=True)
+        subprocess.run([*GIT_NEUTRE, "init", "-q"], cwd=d, check=True)
         Path(d, "githooks").mkdir()
         shutil.copy(self.HOOK, Path(d, "githooks", "pre-commit"))
         subprocess.run(["git", "config", "core.hooksPath", "githooks"],
@@ -4558,7 +4577,7 @@ class TestHookPreCommitNeSeTaitPas(unittest.TestCase):
         None = fichier absent."""
         dossier = tempfile.mkdtemp(prefix="hindsight-hook-")
         try:
-            subprocess.run(["git", "-c", "init.defaultBranch=main", "init", "-q"], cwd=dossier, check=True)
+            subprocess.run([*GIT_NEUTRE, "init", "-q"], cwd=dossier, check=True)
             if contenu_garde_fou is not None:
                 Path(dossier, "garde_fou.py").write_text(contenu_garde_fou,
                                                          encoding="utf-8")
@@ -6163,7 +6182,7 @@ class TestLaVerificationDeKickoff(unittest.TestCase):
         ca."""
         import subprocess
         def g(*a, **kw):
-            return subprocess.run(["git", "-C", dossier, *a],
+            return subprocess.run([*GIT_NEUTRE, "-C", dossier, *a],
                                   capture_output=True, text=True, timeout=60, **kw)
         g("init", "-q", ".")
         g("config", "user.email", "t@t")
@@ -7171,7 +7190,7 @@ class TestUneComparaisonIMPOSSIBLENEstPasUnSUCCES(unittest.TestCase):
         import importlib.util, io, contextlib, shutil, subprocess, tempfile
         d = Path(tempfile.mkdtemp(prefix="hindsight-push-"))
         try:
-            subprocess.run(["git", "-c", "init.defaultBranch=main", "init", "-q", "."], cwd=str(d), check=True)
+            subprocess.run([*GIT_NEUTRE, "init", "-q", "."], cwd=str(d), check=True)
             subprocess.run(["git", "-c", "user.email=a@b", "-c", "user.name=a",
                             "commit", "-q", "--allow-empty", "-m", "un"],
                            cwd=str(d), check=True)

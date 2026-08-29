@@ -50,6 +50,7 @@ import alpaca_cli
 import hindsight_guard
 from vol_strategy import (
     CANDIDATE_HV_WINDOWS,
+    IN_SAMPLE_HOLDOUT_DAYS,
     MIN_TRADING_DAYS_FOR_SWEEP,
     Bar,
     _vol_strategy_returns,
@@ -246,12 +247,18 @@ def format_report(results: List[dict]) -> str:
         v = r['hindsight_guard_verdict']
         marges = ""
         if v.get("marge_plein") is not None and v.get("marge_in_sample") is not None:
+            # Le taux de recouvrement est DERIVE, pas recopie : ce fichier
+            # genere un .md publie, et « 97 % » y etait ecrit a la main --
+            # alors qu'il vaut 1 - IN_SAMPLE_HOLDOUT_DAYS / bars_used. Voir
+            # hindsight_guard.recouvrement_pct.
             marges = (" *Winner's lead over the runner-up: %.3f of a Sharpe unit "
                       "on the full window, %.3f in-sample. The two series overlap "
-                      "by 97%%, so the gap that decides a verdict is small by "
+                      "by %d%%, so the gap that decides a verdict is small by "
                       "construction — which is why it is published with the "
                       "verdict rather than left to be discovered.*"
-                      % (v["marge_plein"], v["marge_in_sample"]))
+                      % (v["marge_plein"], v["marge_in_sample"],
+                         hindsight_guard.recouvrement_pct(
+                             r["bars_used"], IN_SAMPLE_HOLDOUT_DAYS)))
         lines.append(f"**hindsight_guard verdict for this symbol:** {v['verdict']} — full-window winner: {v['full_winner']} days, in-sample winner: {v['in_sample_winner']} days.{marges}")
         lines.append("")
     return "\n".join(lines)

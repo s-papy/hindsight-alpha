@@ -717,6 +717,25 @@ class TestGardeFouMordVraiment(unittest.TestCase):
 
 GIT = shutil.which("git")
 
+# UNE SEULE FACON DE LANCER GIT DANS CETTE SUITE. Pose le 30/08/2026.
+#
+# Un runner de CI n'a pas de `~/.gitconfig` : ni identite d'auteur, ni
+# `init.defaultBranch`. Trois tests sont tombes en CI PUBLIQUE pour cette
+# seule raison, et ont ete corriges UN PAR UN -- sept sites recoivent
+# `-c init.defaultBranch=main`, dix n'en ont pas ; l'identite s'ecrit de
+# trois facons differentes selon l'endroit. C'est exactement le motif « une
+# regle appliquee ici mais pas a son jumeau » que le garde-fou attrape
+# ailleurs, laisse sans mecanisme dans la suite elle-meme.
+#
+# Le huitieme `git init` ecrit a la main n'aurait rien pour l'attraper :
+# `_fichiers_python_du_depot()` exclut les `test_*.py`. Le seul filet etait
+# la CI publique au rouge. Ceci est le mecanisme : une constante a appeler,
+# et le prefixe qu'il faut est deja dedans.
+GIT_NEUTRE = [GIT, "-c", "init.defaultBranch=main",
+              "-c", "user.name=hindsight-test",
+              "-c", "user.email=test@example.invalid"]
+
+
 
 @unittest.skipUnless(GIT, "git absent — contrôles de dépôt sautés")
 class TestGardeFouDitQuandIlEstAveugle(unittest.TestCase):
@@ -745,7 +764,7 @@ class TestGardeFouDitQuandIlEstAveugle(unittest.TestCase):
         return proc.stdout + proc.stderr
 
     def _git(self, dossier, *args):
-        subprocess.run([GIT, *args], cwd=str(dossier), capture_output=True,
+        subprocess.run([*GIT_NEUTRE, *args], cwd=str(dossier), capture_output=True,
                        text=True, timeout=30, check=True)
 
     def test_hors_depot_le_controle_avoue_n_avoir_rien_prouve(self):
@@ -943,14 +962,14 @@ class TestLeHookRefuseUnCodeNonTESTE(unittest.TestCase):
         for a in (["init", "-q", "."], ["config", "user.email", "t@t"],
                   ["config", "user.name", "t"],
                   ["config", "core.hooksPath", "githooks"]):
-            subprocess.run([GIT, *a], cwd=str(d), check=True,
+            subprocess.run([*GIT_NEUTRE, *a], cwd=str(d), check=True,
                            capture_output=True, timeout=30)
         return d
 
     def _commiter(self, d, message):
         subprocess.run([GIT, "add", "-A"], cwd=str(d), check=True,
                        capture_output=True, timeout=30)
-        r = subprocess.run([GIT, "commit", "-m", message], cwd=str(d),
+        r = subprocess.run([*GIT_NEUTRE, "commit", "-m", message], cwd=str(d),
                            capture_output=True, text=True, timeout=300)
         return r.returncode, r.stdout + r.stderr
 
@@ -1012,7 +1031,7 @@ class TestHooksBranches(unittest.TestCase):
         d = Path(tempfile.mkdtemp(prefix="hindsight-hooks-"))
         shutil.copy(self.RACINE / "garde_fou.py", d / "garde_fou.py")
         shutil.copytree(self.RACINE / "githooks", d / "githooks")
-        subprocess.run([GIT, "init", "-q", "."], cwd=str(d), check=True,
+        subprocess.run([*GIT_NEUTRE, "init", "-q", "."], cwd=str(d), check=True,
                        capture_output=True, timeout=30)
         if hooks_path is not None:
             subprocess.run([GIT, "config", "core.hooksPath", hooks_path],
@@ -1624,7 +1643,7 @@ class TestUneANCREMorteEstSignalee(unittest.TestCase):
             for nom in ("garde_fou.py", "config.py"):
                 shutil.copy(self.RACINE / nom, d / nom)
             (d / "README.md").write_text(contenu_readme, encoding="utf-8")
-            subprocess.run(["git", "-c", "init.defaultBranch=main", "init", "-q", "."], cwd=str(d), check=True)
+            subprocess.run([*GIT_NEUTRE, "init", "-q", "."], cwd=str(d), check=True)
             subprocess.run(["git", "add", "-A"], cwd=str(d), check=True)
             r = subprocess.run([sys.executable, str(d / "garde_fou.py")],
                                cwd=str(d), capture_output=True, text=True,
@@ -1703,7 +1722,7 @@ class TestUnHorodatageNaifEstSignaleParLeGardeFou(unittest.TestCase):
             (d / "sujet.py").write_text(
                 "from datetime import datetime, timezone\n\n" + corps_python,
                 encoding="utf-8")
-            subprocess.run(["git", "-c", "init.defaultBranch=main", "init", "-q", "."], cwd=str(d), check=True)
+            subprocess.run([*GIT_NEUTRE, "init", "-q", "."], cwd=str(d), check=True)
             subprocess.run(["git", "add", "-A"], cwd=str(d), check=True)
             r = subprocess.run([sys.executable, str(d / "garde_fou.py")],
                                cwd=str(d), capture_output=True, text=True,
@@ -1816,17 +1835,32 @@ class TestLeMoteurDeRenduDuDeckDitCeQuIlNeSaitPasFaire(unittest.TestCase):
     RACINE = Path(__file__).resolve().parent
     SCRIPT = RACINE / "submission" / "rendre_le_deck.py"
 
-    def _lancer(self):
-        d = Path(tempfile.mkdtemp(prefix="hindsight-rendu-"))
-        try:
-            r = subprocess.run(
-                [sys.executable, str(self.SCRIPT),
-                 "--sortie", str(d / "apercu.html")],
-                cwd=str(self.RACINE), capture_output=True, text=True,
-                timeout=180)
-            return r.returncode, r.stdout + r.stderr
-        finally:
-            shutil.rmtree(d, ignore_errors=True)
+    @classmethod
+    def setUpClass(cls):
+        """UN SEUL LANCEMENT POUR TOUTE LA CLASSE.
+
+        Cinq tests lançaient `rendre_le_deck.py` sur le MÊME deck, inchangé
+        entre eux, pour cinq sorties identiques — 0,70 s des 0,79 s de la
+        classe, mesuré le 30/08/2026. Trois d'entre eux réécrivaient en plus
+        le lancement à la main parce que `_lancer()` jetait le HTML qu'ils
+        voulaient lire.
+
+        La sortie ET la page sont gardées : les tests qui n'avaient que
+        `sortie` ne perdent rien, ceux qui inlinaient le lancement pour avoir
+        `page` non plus. Un script qui n'écrirait rien laisse `page` vide et
+        fait toujours tomber le témoin des dix diapos."""
+        cls._tmp = Path(tempfile.mkdtemp(prefix="hindsight-rendu-"))
+        cible = cls._tmp / "apercu.html"
+        r = subprocess.run([sys.executable, str(cls.SCRIPT),
+                            "--sortie", str(cible)], cwd=str(cls.RACINE),
+                           capture_output=True, text=True, timeout=180)
+        cls.code = r.returncode
+        cls.sortie = r.stdout + r.stderr
+        cls.page = cible.read_text(encoding="utf-8") if cible.exists() else ""
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls._tmp, ignore_errors=True)
 
     def test_le_graphique_NON_RENDU_est_annonce(self):
         """Le rapport « ce qui n'a pas été rendu fidèlement » annonçait ZÉRO
@@ -1838,29 +1872,20 @@ class TestLeMoteurDeRenduDuDeckDitCeQuIlNeSaitPasFaire(unittest.TestCase):
 
         C'est exactement le motif de ce dépôt : un événement réel qui perd sa
         trace dans la comptabilité censée le suivre."""
-        d = Path(tempfile.mkdtemp(prefix="hindsight-rendu3-"))
-        try:
-            cible = d / "apercu.html"
-            r = subprocess.run([sys.executable, str(self.SCRIPT),
-                                "--sortie", str(cible)], cwd=str(self.RACINE),
-                               capture_output=True, text=True, timeout=180)
-            sortie = r.stdout + r.stderr
-            self.assertEqual(r.returncode, 0, sortie[-600:])
-            self.assertIn("graphique OOXML", sortie,
-                          "le script ne dit plus qu'il ne rend pas le "
-                          "graphique :\n%s" % sortie[-800:])
-            # ET il faut que sa PLACE soit visible sur le rendu, sinon le
-            # lecteur regarde une slide 8 amputee sans le voir. C'est cette
-            # moitie-la qui exige de lire `p:xfrm` : le message, lui, part
-            # desormais sans condition.
-            page = cible.read_text(encoding="utf-8")
-            self.assertIn("GRAPHIQUE NON RENDU", page,
-                          "le message annonce le graphique mais rien ne "
-                          "marque sa place sur le rendu")
-            self.assertNotIn("n'a meme pas de geometrie lisible", sortie,
-                             "la geometrie du graphique n'est plus lue")
-        finally:
-            shutil.rmtree(d, ignore_errors=True)
+        sortie = self.sortie
+        self.assertEqual(self.code, 0, sortie[-600:])
+        self.assertIn("graphique OOXML", sortie,
+                      "le script ne dit plus qu'il ne rend pas le "
+                      "graphique :\n%s" % sortie[-800:])
+        # ET il faut que sa PLACE soit visible sur le rendu, sinon le
+        # lecteur regarde une slide 8 amputee sans le voir. C'est cette
+        # moitie-la qui exige de lire `p:xfrm` : le message, lui, part
+        # desormais sans condition.
+        self.assertIn("GRAPHIQUE NON RENDU", self.page,
+                      "le message annonce le graphique mais rien ne "
+                      "marque sa place sur le rendu")
+        self.assertNotIn("n'a meme pas de geometrie lisible", sortie,
+                         "la geometrie du graphique n'est plus lue")
 
     def test_une_boite_plus_etroite_que_ses_marges_n_est_pas_un_debordement(self):
         """Les quatre flèches décoratives de la slide 4 vivent dans des boîtes
@@ -1872,7 +1897,7 @@ class TestLeMoteurDeRenduDuDeckDitCeQuIlNeSaitPasFaire(unittest.TestCase):
         fausses alertes sur dix. Une mesure impossible n'est pas une mesure
         ratée : elle se dit, elle ne se convertit pas en verdict. Un outil qui
         crie sur ce qu'il n'a pas su mesurer apprend à être ignoré."""
-        _code, sortie = self._lancer()
+        sortie = self.sortie
         self.assertIn("NON MESURE", sortie, sortie[-800:])
         # ET la section doit sortir MEME quand tout le reste est vert : elle
         # etait imbriquee dans la branche « il y a des alertes », donc le
@@ -1933,7 +1958,7 @@ class TestLeMoteurDeRenduDuDeckDitCeQuIlNeSaitPasFaire(unittest.TestCase):
         qui sont mesurées exactement. Un fait par élément, résumé en un
         drapeau unique, redevient faux pour presque tous — c'est le motif que
         ce dépôt attrape le plus souvent."""
-        _code, sortie = self._lancer()
+        sortie = self.sortie
 
         # CE QUI EST VRAI PARTOUT : chaque famille reçoit un verdict nommé, et
         # le seuil se dit par zone. Ces deux-là ne dépendent d'aucune police.
@@ -1987,20 +2012,11 @@ class TestLeMoteurDeRenduDuDeckDitCeQuIlNeSaitPasFaire(unittest.TestCase):
         Un outil de mesure qui rate un défaut est décevant ; un outil qui en
         FABRIQUE envoie corriger ce qui va bien. C'est la pire des deux
         pannes, et c'est celle-là qui était en place."""
-        d = Path(tempfile.mkdtemp(prefix="hindsight-fond-"))
-        try:
-            cible = d / "apercu.html"
-            subprocess.run([sys.executable, str(self.SCRIPT),
-                            "--sortie", str(cible)], cwd=str(self.RACINE),
-                           capture_output=True, text=True, timeout=180)
-            page = cible.read_text(encoding="utf-8")
-            self.assertIn("background:#141B4D", page,
-                          "les diapos en bleu nuit sont rendues sur fond "
-                          "blanc : leur texte blanc y devient invisible")
-            self.assertIn("background:#FFFFFF", page,
-                          "les diapos blanches ne sont plus rendues en blanc")
-        finally:
-            shutil.rmtree(d, ignore_errors=True)
+        self.assertIn("background:#141B4D", self.page,
+                      "les diapos en bleu nuit sont rendues sur fond "
+                      "blanc : leur texte blanc y devient invisible")
+        self.assertIn("background:#FFFFFF", self.page,
+                      "les diapos blanches ne sont plus rendues en blanc")
 
     def test_sans_police_le_verdict_REFUSE_de_rassurer(self):
         """Sans police pour Calibri, aucune zone du deck n'est mesurée — et
@@ -2019,7 +2035,7 @@ class TestLeMoteurDeRenduDuDeckDitCeQuIlNeSaitPasFaire(unittest.TestCase):
         R.POLICES = {f: {g: ["/introuvable.ttf"] for g in v}
                      for f, v in vraies.items()}
         try:
-            _a, notes, _nm, _s, sans = R.mesurer(
+            _a, notes, _nm, sans = R.mesurer(
                 self.RACINE / "submission" / "Hindsight_Alpha_Deck.pptx", None)
             self.assertEqual(sorted(sans), ["Calibri", "Cambria"],
                              "les familles sans police ne sont pas remontées")
@@ -2032,18 +2048,13 @@ class TestLeMoteurDeRenduDuDeckDitCeQuIlNeSaitPasFaire(unittest.TestCase):
     def test_le_rendu_produit_bien_les_dix_diapos(self):
         """TÉMOIN : un script qui n'écrirait rien passerait les deux tests
         précédents."""
-        d = Path(tempfile.mkdtemp(prefix="hindsight-rendu2-"))
+        page = self.page
+        z = zipfile.ZipFile(self.RACINE / "submission"
+                            / "Hindsight_Alpha_Deck.pptx")
         try:
-            cible = d / "apercu.html"
-            subprocess.run([sys.executable, str(self.SCRIPT),
-                            "--sortie", str(cible)], cwd=str(self.RACINE),
-                           capture_output=True, text=True, timeout=180)
-            page = cible.read_text(encoding="utf-8")
             attendu = len(re.findall(
                 r"<p:sldId\b",
-                zipfile.ZipFile(self.RACINE / "submission"
-                                / "Hindsight_Alpha_Deck.pptx")
-                .read("ppt/presentation.xml").decode()))
+                z.read("ppt/presentation.xml").decode()))
             self.assertEqual(page.count('class="slide"'), attendu,
                              "%d diapos dans l'ordre de presentation, %d "
                              "rendues" % (attendu, page.count('class="slide"')))
@@ -2051,8 +2062,6 @@ class TestLeMoteurDeRenduDuDeckDitCeQuIlNeSaitPasFaire(unittest.TestCase):
             # précédente cherchait « WHERE THIS SITS IN THE FIELD », le titre
             # de la slide 3 — et elle est tombée le jour où cette slide a été
             # supprimée sur demande. Encore l'artefact encodé dans le test.
-            z = zipfile.ZipFile(self.RACINE / "submission"
-                                / "Hindsight_Alpha_Deck.pptx")
             premier = re.findall(
                 r"<a:t>([^<]{6,60})</a:t>",
                 z.read("ppt/slides/slide1.xml").decode())[0]
@@ -2060,7 +2069,7 @@ class TestLeMoteurDeRenduDuDeckDitCeQuIlNeSaitPasFaire(unittest.TestCase):
                           "le titre de la première diapo n'apparaît pas dans "
                           "le rendu")
         finally:
-            shutil.rmtree(d, ignore_errors=True)
+            z.close()
 
 
 if __name__ == "__main__":

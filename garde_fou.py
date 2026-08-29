@@ -3080,27 +3080,17 @@ def controle_pannes_traitees_symetriquement() -> None:
 
     NON BLOQUANT : une asymetrie est une piste, pas une preuve. Elle peut
     etre deliberee -- encore faut-il l avoir decidee."""
-    for rel, chemin in _fichiers_python_du_depot():
-        try:
-            with open(chemin, encoding="utf-8") as fh:
-                arbre = ast.parse(fh.read())
-        except (OSError, SyntaxError):
-            # Ni vert ni silencieux : un fichier qu on ne sait pas lire n a
-            # pas « aucune asymetrie ».
-            alerte(rel, "n'a pas pu etre analyse pour la symetrie des pannes "
-                        "— ce n'est pas « aucune asymetrie trouvee ».")
-            continue
-        for fonction in [n for n in ast.walk(arbre)
-                         if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]:
-            couverts, nus = _appels_verifies(fonction)
-            if couverts and nus:
-                alerte(
-                    rel,
-                    "dans %s(), %d appel(s) subprocess check=True sont "
-                    "proteges par un handler et %d ne le sont pas (ligne(s) "
-                    "%s) : une panne jumelle remonterait sans explication."
-                    % (fonction.name, len(couverts), len(nus),
-                       ", ".join(str(l) for l in nus)))
+    for rel, fonction in _fonctions_du_depot(
+            "la symetrie des pannes", "aucune asymetrie trouvee"):
+        couverts, nus = _appels_verifies(fonction)
+        if couverts and nus:
+            alerte(
+                rel,
+                "dans %s(), %d appel(s) subprocess check=True sont "
+                "proteges par un handler et %d ne le sont pas (ligne(s) "
+                "%s) : une panne jumelle remonterait sans explication."
+                % (fonction.name, len(couverts), len(nus),
+                   ", ".join(str(l) for l in nus)))
 
 
 def _fuseau_garanti(fonction: ast.AST) -> "str | None":
@@ -3191,20 +3181,11 @@ def controle_horodatages_toujours_conscients_du_fuseau() -> None:
     NON BLOQUANT : comme le controle des pannes jumelles, une absence de
     parade est une piste. Elle peut etre deliberee — encore faut-il l'avoir
     decidee."""
-    for rel, chemin in _fichiers_python_du_depot():
-        try:
-            with open(chemin, encoding="utf-8") as fh:
-                arbre = ast.parse(fh.read())
-        except (OSError, SyntaxError):
-            alerte(rel, "n'a pas pu etre analyse pour les fuseaux horaires "
-                        "— ce n'est pas « aucun horodatage naif ».")
-            continue
-        for fonction in [n for n in ast.walk(arbre)
-                         if isinstance(n, (ast.FunctionDef,
-                                           ast.AsyncFunctionDef))]:
-            motif = _fuseau_garanti(fonction)
-            if motif:
-                alerte(rel, "dans %s(), %s." % (fonction.name, motif))
+    for rel, fonction in _fonctions_du_depot(
+            "les fuseaux horaires", "aucun horodatage naif"):
+        motif = _fuseau_garanti(fonction)
+        if motif:
+            alerte(rel, "dans %s(), %s." % (fonction.name, motif))
 
 
 def _appels_verifies(fonction: ast.AST) -> "tuple[list, list]":
@@ -3274,6 +3255,49 @@ def _appels_verifies(fonction: ast.AST) -> "tuple[list, list]":
 
     visiter(fonction, False)
     return sorted(set(couverts)), sorted(set(nus))
+
+
+_ARBRES_DU_DEPOT = {}
+
+
+def _fonctions_du_depot(quoi: str, sinon: str):
+    """Les (fichier, fonction) de tout le dossier, arbre syntaxique deja lu.
+
+    SORTI EN GENERATEUR le 30/08/2026. Les deux controles qui lisent l'AST --
+    la symetrie des pannes et les fuseaux horaires -- avaient chacun leur
+    copie de cet echafaudage : meme ouverture, meme `ast.parse`, meme
+    `except (OSError, SyntaxError)` suivi de la meme alerte, meme `ast.walk`.
+    Seule la regle par fonction differait.
+
+    Le vrai cout n'etait pas le temps (les 21 fichiers etaient parses deux
+    fois, 60 ms sur 1,5 s). C'etait qu'une propriete jamais ecrite --
+    « un fichier illisible n'est pas un fichier propre » -- se trouvait
+    implementee DEUX FOIS. Un troisieme controle AST l'aurait implementee une
+    troisieme fois, ou pas du tout. C'est le motif meme que
+    `controle_pannes_traitees_symetriquement` a ete ecrit pour attraper,
+    dans le fichier qui l'attrape.
+
+    `quoi` et `sinon` rendent le message d'alerte identique au caractere
+    pres a ce que chaque controle disait deja."""
+    for rel, chemin in _fichiers_python_du_depot():
+        if chemin not in _ARBRES_DU_DEPOT:
+            try:
+                with open(chemin, encoding="utf-8") as fh:
+                    _ARBRES_DU_DEPOT[chemin] = ast.parse(fh.read())
+            except (OSError, SyntaxError):
+                _ARBRES_DU_DEPOT[chemin] = None
+        arbre = _ARBRES_DU_DEPOT[chemin]
+        if arbre is None:
+            # Ni vert ni silencieux : un fichier qu on ne sait pas lire n a
+            # pas « aucune asymetrie ». L alerte part dans CHAQUE controle,
+            # meme si le fichier n est lu qu une fois.
+            alerte(rel, "n'a pas pu etre analyse pour %s — ce n'est pas "
+                        "« %s »." % (quoi, sinon))
+            continue
+        for fonction in [n for n in ast.walk(arbre)
+                         if isinstance(n, (ast.FunctionDef,
+                                           ast.AsyncFunctionDef))]:
+            yield rel, fonction
 
 
 def _fichiers_python_du_depot() -> list:

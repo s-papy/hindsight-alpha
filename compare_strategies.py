@@ -59,6 +59,7 @@ import alpaca_cli
 import hindsight_guard
 from vol_strategy import (
     CANDIDATE_HV_WINDOWS,
+    IN_SAMPLE_HOLDOUT_DAYS,
     MIN_TRADING_DAYS_FOR_SWEEP,
     _vol_strategy_returns,
     score_hv_window,
@@ -192,14 +193,21 @@ def compare_symbol(symbol: str, bars) -> dict:
     return result
 
 
-def _phrase_de_marge(marge) -> str:
+def _phrase_de_marge(marge, n_barres) -> str:
     """La phrase qui accompagne un verdict, ou rien s'il n'y a pas d'ecart
-    mesurable. Ecrite une fois : les deux familles s'en servent."""
+    mesurable. Ecrite une fois : les deux familles s'en servent.
+
+    Le taux de recouvrement est DERIVE (voir
+    `hindsight_guard.recouvrement_pct`) et non plus ecrit a la main : ce
+    fichier genere un .md publie, et un nombre recopie y vieillit sans
+    prevenir."""
     if marge is None:
         return ""
     return (" Winner's lead over the runner-up in-sample: %.3f of a Sharpe "
-            "unit — the two series overlap by 97%%, so the gap that decides "
-            "the verdict is small by construction." % marge)
+            "unit — the two series overlap by %d%%, so the gap that decides "
+            "the verdict is small by construction."
+            % (marge, hindsight_guard.recouvrement_pct(
+                n_barres, IN_SAMPLE_HOLDOUT_DAYS)))
 
 
 def format_report(results: List[dict]) -> str:
@@ -281,7 +289,7 @@ def format_report(results: List[dict]) -> str:
             f"(mean/day {v['mean_daily']:+}, sd/day {v['stdev_daily']}), "
             f"{v['trade_days']}/{v['total_days_scored']} days traded ({v['win_rate_pct']}% win rate on those days), "
             f"cumulative proxy payoff {v['cumulative_proxy_payoff']}."
-            + _phrase_de_marge(v.get("marge_in_sample"))
+            + _phrase_de_marge(v.get("marge_in_sample"), r["bars_used"])
         )
         lines.append(
             f"- **momentum_strategy** — vetted lookback {m['vetted_lookback_days']}d, "
