@@ -81,6 +81,25 @@
     font-weight: 600;
     margin-top: 6px;
     font-variant-numeric: tabular-nums;
+    /* MESURE le 29/08/2026 dans un navigateur, a 1280 px : la valeur de la
+       carte « Account ID » occupait 177 px dans une boite de 139 px. Le
+       debordement etait `visible`, donc le texte ne s'arretait pas -- il
+       passait SOUS la carte suivante, dont le fond est opaque et peint
+       apres. Le dernier caractere de PA3K8MP3MF0U disparaissait ainsi
+       derriere « Equity », sans une ellipse pour prevenir que quelque chose
+       manquait. Un numero de compte tronque en silence est precisement le
+       champ qu'il ne fallait pas tronquer : c'est celui qu'on compare a
+       celui declare. La regle vaut pour toutes les cartes, pas seulement
+       celle-la -- une equite a sept chiffres deborderait pareil. */
+    overflow-wrap: anywhere;
+  }
+  .card .value.identifiant {
+    /* Un identifiant n'est pas un nombre : on le lit caractere par
+       caractere pour le comparer. Chasse fixe, et assez petit pour tenir
+       en entier plutot que de se couper en deux lignes. */
+    font-size: 15px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    letter-spacing: 0.03em;
   }
   section {
     margin: 28px 0;
@@ -198,6 +217,65 @@
        contraste noie la semaine live. On baisse le contraste : le texte reste
        lisible et selectionnable, et le separateur juste au-dessus dit pourquoi. */
     tr.avant-kickoff td { opacity: 0.62; }
+
+    /* SUR UN TELEPHONE, LES TABLEAUX NE TIENNENT PAS -- et c'est la colonne
+       qui porte la these qui sortait de l'ecran.
+
+       Mesure le 29/08/2026 a 375 px de large : le tableau des decisions fait
+       427 px dans un conteneur de 327. Le conteneur defile bien
+       horizontalement (overflow-x: auto), donc rien n'etait perdu -- mais
+       « Symbol verdicts » n'etait visible que sur 37 de ses 112 px, derriere
+       une barre de defilement qui n'apparait, sur iOS, que pendant qu'on
+       defile. Or le bloc « How to read this page », trois ecrans plus haut,
+       dit noir sur blanc : « Look for [refus] in the verdicts below ». La
+       page envoyait donc le juge vers ce qu'elle avait mis hors-champ.
+
+       On empile au lieu de comprimer : chaque decision devient un bloc --
+       date, verdict, ordre, puis les symboles ligne a ligne. Mesure apres :
+       327 px de large (plus aucun defilement lateral), et 4020 px de haut
+       contre 4085 avant, car les cellules cessent de s'etrangler. Rien n'est
+       retire ni replie : c'est la meme table, dans le meme ordre.
+
+       Le seuil de 700 px vise la largeur, pas l'appareil : une fenetre
+       etroite sur un portable a exactement le meme probleme. */
+    @media (max-width: 700px) {
+      #decisions-container thead { display: none; }
+      #decisions-container table,
+      #decisions-container tbody,
+      #decisions-container tr,
+      #decisions-container td { display: block; width: auto; }
+      #decisions-container tr {
+        border-bottom: 1px solid var(--border);
+        padding: 10px 0;
+      }
+      #decisions-container td { border-bottom: none; padding: 2px 12px; }
+      /* Une cellule vide occuperait une ligne blanche sans rien dire. */
+      #decisions-container td:empty { display: none; }
+      #decisions-container tr.kickoff-divider td { padding: 10px 12px; }
+
+      /* Les positions gardent leurs etiquettes : « us_option », « 2 »,
+         « $778,00 » empiles sans en-tete ne veulent plus rien dire, alors
+         qu'une decision se lit toute seule. */
+      #positions-container thead { display: none; }
+      #positions-container table,
+      #positions-container tbody,
+      #positions-container tr,
+      #positions-container td { display: block; width: auto; }
+      #positions-container tr {
+        border-bottom: 1px solid var(--border);
+        padding: 10px 0;
+      }
+      #positions-container td { border-bottom: none; padding: 2px 12px; }
+      #positions-container td::before {
+        content: attr(data-colonne);
+        color: var(--muted);
+        text-transform: uppercase;
+        font-size: 11px;
+        letter-spacing: 0.04em;
+        display: inline-block;
+        min-width: 108px;
+      }
+    }
   #monitor-health-banner.health-green,
   #agent-health-banner.health-green {
     background: rgba(52,211,153,0.1);
@@ -411,14 +489,14 @@ function renderAccount(account) {
     // declencher -- mais il suggerait a un futur lecteur de « reparer » la
     // page en republiant l'UUID. Un repli mort vers un champ qu'on a
     // deliberement cesse de publier est une invitation a annuler ce choix.
-    ['Account ID', esc(account.account_number || '—')],
+    ['Account ID', esc(account.account_number || '—'), 'identifiant'],
     ['Equity', fmtMoney(account.equity)],
     ['Cash', fmtMoney(account.cash)],
     ['Buying Power', fmtMoney(account.buying_power)],
     ['Status', esc(account.status || '—')],
   ];
-  el.innerHTML = cards.map(([label, value]) =>
-    `<div class="card"><div class="label">${label}</div><div class="value">${value}</div></div>`
+  el.innerHTML = cards.map(([label, value, classe]) =>
+    `<div class="card"><div class="label">${label}</div><div class="value${classe ? ' ' + classe : ''}">${value}</div></div>`
   ).join('');
 }
 
@@ -433,12 +511,15 @@ function renderPositions(positions) {
     const plpc = parseFloat(p.unrealized_plpc);
     const plClass = isNaN(plpc) ? 'badge-muted' : (plpc >= 0 ? 'badge-green' : 'badge-red');
     const plLabel = isNaN(plpc) ? '—' : (plpc >= 0 ? '+' : '') + (plpc * 100).toFixed(1) + '%';
+    // `data-colonne` n'est lu que par le CSS telephone (max-width: 700px),
+    // qui masque l'en-tete et reaffiche l'etiquette devant chaque valeur.
+    // Sur grand ecran ces attributs ne changent rien a l'affichage.
     return `<tr>
-      <td>${esc(p.symbol || '—')}</td>
-      <td>${esc(p.asset_class || '—')}</td>
-      <td>${esc(p.qty || '—')}</td>
-      <td>${fmtMoney(p.cost_basis)}</td>
-      <td><span class="badge ${plClass}">${plLabel}</span></td>
+      <td data-colonne="Symbol">${esc(p.symbol || '—')}</td>
+      <td data-colonne="Asset class">${esc(p.asset_class || '—')}</td>
+      <td data-colonne="Qty">${esc(p.qty || '—')}</td>
+      <td data-colonne="Cost basis">${fmtMoney(p.cost_basis)}</td>
+      <td data-colonne="Unrealized P&L"><span class="badge ${plClass}">${plLabel}</span></td>
     </tr>`;
   }).join('');
   el.innerHTML = `<div style="overflow-x:auto"><table>

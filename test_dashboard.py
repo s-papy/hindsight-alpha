@@ -1053,5 +1053,129 @@ class TestLeSensDuTradeEstLisible(BaseRendu):
         self.assertIn("7", self._rendu(7))
 
 
+class TestAucuneValeurNeDeborde(BaseRendu):
+    """MESURE dans un navigateur le 29/08/2026, a 1280 px de large : la valeur
+    de la carte « Account ID » occupait 177 px dans une boite de 139 px.
+
+    Le debordement etait `visible`, donc le texte ne s'arretait pas a la
+    bordure -- il continuait SOUS la carte suivante, dont le fond est opaque
+    et peint apres. Le « U » final de PA3K8MP3MF0U etait invisible, et aucune
+    ellipse ne prevenait qu'il manquait quelque chose.
+
+    Le champ tronque etait le seul de la page qui serve a PROUVER sur quel
+    compte tourne l'agent -- celui qu'on compare a la valeur declaree. Un
+    juge lisant PA3K8MP3MF0 et cherchant PA3K8MP3MF0U conclut a un ecart.
+
+    Ce que ces tests peuvent et ne peuvent pas faire : le harnais est Node
+    avec un DOM simule, sans moteur de rendu. Il ne MESURE donc aucune
+    largeur -- c'est le navigateur qui l'a fait, une fois. Ce qu'il verrouille
+    ici, c'est la cause : la classe posee par le rendu, et la regle CSS qui
+    la sert. Si l'une des deux disparait, le defaut revient sans bruit."""
+
+    def test_la_carte_identifiant_porte_sa_classe(self):
+        r = self.executer("""
+            const a = document.getElementById('account-cards');
+            renderAccount({account_number:"PA3K8MP3MF0U", status:"ACTIVE"});
+            _resultats.compte = a.innerHTML;
+        """)
+        self.assertIn("identifiant", r["compte"],
+                      "la carte du numero de compte ne porte plus la classe "
+                      "qui l'empeche de deborder")
+        self.assertIn("PA3K8MP3MF0U", r["compte"],
+                      "prerequis : le numero est bien rendu en entier")
+
+    def test_les_autres_cartes_ne_la_portent_pas(self):
+        """TEMOIN : mettre la classe partout passerait le test ci-dessus tout
+        en rapetissant les montants, qu'on veut lisibles de loin."""
+        r = self.executer("""
+            const a = document.getElementById('account-cards');
+            renderAccount({account_number:"PA1", equity:"1", cash:"2",
+                           buying_power:"3", status:"ACTIVE"});
+            _resultats.compte = a.innerHTML;
+        """)
+        # Le message couvre les DEUX sens de l'echec : ma premiere version
+        # disait « s'applique a plus d'une carte » et sortait ce texte-la
+        # quand la classe avait en fait disparu de partout. Un message qui
+        # nomme une cause qu'il n'a pas mesuree, c'est le defaut que ce depot
+        # traque ailleurs -- il n'a pas sa place dans un test non plus.
+        self.assertEqual(1, r["compte"].count("identifiant"),
+                         "exactement une carte doit porter la classe des "
+                         "identifiants ; il y en a %d"
+                         % r["compte"].count("identifiant"))
+
+    def test_la_regle_css_qui_retient_les_valeurs_existe(self):
+        page = PAGE.read_text(encoding="utf-8")
+        self.assertIn("overflow-wrap: anywhere", page,
+                      "plus rien n'empeche une valeur longue de passer sous "
+                      "la carte voisine")
+        self.assertIn(".card .value.identifiant", page,
+                      "la regle qui fait tenir un numero de compte a disparu")
+
+
+class TestLaPageTientSurUnTelephone(BaseRendu):
+    """MESURE dans un navigateur a 375 px le 29/08/2026 : le tableau des
+    decisions faisait 427 px dans un conteneur de 327.
+
+    Le conteneur defile bien horizontalement, donc rien n'etait PERDU. Mais la
+    colonne « Symbol verdicts » n'etait visible que sur 37 de ses 112 px,
+    derriere une barre de defilement qui, sur iOS, n'apparait que pendant
+    qu'on defile -- pendant que le bloc « How to read this page », trois
+    ecrans plus haut, dit « Look for [le refus] in the verdicts below ». La
+    page dirigeait le lecteur vers ce qu'elle avait mis hors-champ.
+
+    Mesure apres empilement : 327 px de large, plus aucun defilement lateral,
+    et 4020 px de haut contre 4085 -- les cellules cessent de s'etrangler.
+
+    CE QUE CES TESTS NE FONT PAS : le harnais est Node avec un DOM simule,
+    sans moteur de rendu ; aucune largeur n'y est mesurable. Les chiffres
+    ci-dessus viennent du navigateur, une fois. Ce qui est verrouille ici,
+    c'est ce dont la mise en page depend : les etiquettes que le CSS
+    telephone reaffiche, et le bloc de regles lui-meme."""
+
+    def test_chaque_cellule_de_position_porte_son_etiquette(self):
+        """Sans en-tete, « us_option / 2 / $778,00 » empile ne veut plus rien
+        dire. Le CSS telephone masque le thead et reaffiche `data-colonne`
+        devant chaque valeur -- si l'attribut disparait, il ne reste que des
+        nombres nus."""
+        r = self.executer("""
+            const p = document.getElementById('positions-container');
+            renderPositions([{symbol:"SPY260904P00769000", asset_class:"us_option",
+                              qty:"2", cost_basis:"778", unrealized_plpc:"-0.049"}]);
+            _resultats.pos = p.innerHTML;
+        """)
+        for etiquette in ("Symbol", "Asset class", "Qty", "Cost basis",
+                          "Unrealized P&L"):
+            self.assertIn('data-colonne="%s"' % etiquette, r["pos"],
+                          "la colonne %r n'a plus d'etiquette : empilee sur "
+                          "un telephone, sa valeur est un nombre sans nom"
+                          % etiquette)
+
+    def test_l_etiquette_ne_remplace_pas_la_valeur(self):
+        """TEMOIN : rendre les etiquettes sans les valeurs passerait le test
+        ci-dessus."""
+        r = self.executer("""
+            const p = document.getElementById('positions-container');
+            renderPositions([{symbol:"SPY260904P00769000", asset_class:"us_option",
+                              qty:"2", cost_basis:"778", unrealized_plpc:"-0.049"}]);
+            _resultats.pos = p.innerHTML;
+        """)
+        self.assertIn("SPY260904P00769000", r["pos"])
+        self.assertIn("us_option", r["pos"])
+        self.assertIn("-4.9%", r["pos"])
+
+    def test_le_bloc_de_regles_telephone_existe(self):
+        page = PAGE.read_text(encoding="utf-8")
+        self.assertIn("@media (max-width: 700px)", page,
+                      "la mise en page etroite a disparu : sur un telephone, "
+                      "la colonne des verdicts ressort de l'ecran")
+        for cible in ("#decisions-container thead { display: none; }",
+                      "#positions-container thead { display: none; }"):
+            self.assertIn(cible, page,
+                          "regle manquante : %s" % cible)
+        self.assertIn("content: attr(data-colonne)", page,
+                      "les etiquettes ne sont plus reaffichees : les valeurs "
+                      "des positions s'empilent sans nom")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
