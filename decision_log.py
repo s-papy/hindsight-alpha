@@ -87,11 +87,42 @@ _LONGUEUR_MINIMALE = 8
 
 
 def caviarder(texte: str) -> str:
-    """Remplace toute occurrence d'un identifiant connu par un marqueur."""
+    """Remplace toute occurrence d'un identifiant connu par un marqueur.
+
+    ON CHERCHE DEUX FORMES, ET LA SECONDE MANQUAIT. Ce caviardage tourne sur
+    la ligne DEJA SERIALISEE -- choix deliberé, documente dans log_run() :
+    une cle enfouie a n'importe quelle profondeur est ainsi attrapee sans
+    parcourir la structure. Mais json.dumps ECHAPPE certains caracteres, et
+    la valeur brute ne se retrouve alors plus telle quelle dans la ligne.
+
+    Mesure du 29/08/2026, en relisant la ligne publiee avec json.loads :
+
+        secret base64 ordinaire    caviarde
+        secret contenant un \\      RECUPERABLE dans le fichier public
+        secret contenant un "      RECUPERABLE
+        secret non-ASCII           RECUPERABLE  (json.dumps ecrit \\uXXXX)
+
+    Trois formes sur quatre traversaient le garde et finissaient dans
+    decision_log.jsonl -- un fichier COMMITE, republie tel quel dans
+    docs/data.json. Un lecteur n'avait qu'a de-echapper.
+
+    Les cles Alpaca d'aujourd'hui sont alphanumeriques et n'auraient pas
+    declenche ce cas. Mais ce garde est la DERNIERE barriere avant un fichier
+    public, et il ne doit pas dependre du format qu'un fournisseur choisit
+    aujourd'hui. On remplace donc AUSSI la forme echappee -- ce que
+    json.dumps aurait ecrit pour cette valeur.
+
+    Le marqueur reste une chaine JSON valide : la ligne doit rester
+    relisible apres caviardage, sinon on protege le secret en detruisant la
+    preuve. Un temoin le verifie."""
     for nom in _VARIABLES_SECRETES:
         valeur = os.environ.get(nom) or ""
-        if len(valeur) >= _LONGUEUR_MINIMALE and valeur in texte:
-            texte = texte.replace(valeur, "[%s CAVIARDE]" % nom)
+        if len(valeur) < _LONGUEUR_MINIMALE:
+            continue
+        marqueur = "[%s CAVIARDE]" % nom
+        for forme in (valeur, json.dumps(valeur)[1:-1]):
+            if forme and forme in texte:
+                texte = texte.replace(forme, marqueur)
     return texte
 
 

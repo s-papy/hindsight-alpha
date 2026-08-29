@@ -1437,6 +1437,53 @@ class TestAucunIdentifiantPublie(unittest.TestCase):
                                   "error": "secret=%s" % self.SECRET})
         self.assertNotIn(self.SECRET, ligne)
 
+    def test_un_secret_a_ECHAPPER_ne_traverse_pas_le_caviardage(self):
+        """LE DÉFAUT, mesuré le 29/08/2026. Le caviardage tourne sur la ligne
+        DÉJÀ SÉRIALISÉE — choix délibéré, pour attraper une clé enfouie à
+        n'importe quelle profondeur. Mais `json.dumps` ÉCHAPPE certains
+        caractères, et la valeur brute ne se retrouve alors plus telle quelle
+        dans la ligne :
+
+            secret base64 ordinaire   caviardé
+            secret contenant \\       RÉCUPÉRABLE dans le fichier public
+            secret contenant "        RÉCUPÉRABLE
+            secret non-ASCII          RÉCUPÉRABLE  (écrit \\uXXXX)
+
+        Trois formes sur quatre traversaient le garde et finissaient dans
+        `decision_log.jsonl` — un fichier COMMITÉ, republié tel quel dans
+        `docs/data.json`. Un lecteur n'avait qu'à dé-échapper.
+
+        La question posée ici est donc la bonne : non pas « la chaîne brute
+        est-elle absente de la ligne », mais **« en relisant la ligne publiée,
+        retrouve-t-on le secret ? »**"""
+        for etiquette, secret in (("antislash", "aB3\\xY9QwErTyUiOpAsDfGhJkL"),
+                                  ("guillemet", 'aB3"xY9QwErTyUiOpAsDfGhJkL'),
+                                  ("non-ASCII", "aB3\u00e9xY9QwErTyUiOpAsDfGhJkL"),
+                                  ("saut de ligne", "aB3\nxY9QwErTyUiOpAsDfGhJkL")):
+            with self.subTest(secret=etiquette):
+                ligne = self._journalise(
+                    {"outcome": "error", "error": "boom " + secret},
+                    secret=secret)
+                relu = json.loads(ligne)
+                self.assertNotIn(secret, relu["error"],
+                                 "un secret contenant un %s est RÉCUPÉRABLE "
+                                 "dans le fichier public : %s"
+                                 % (etiquette, ligne[:160]))
+                self.assertIn("CAVIARDE", ligne)
+
+    def test_la_ligne_reste_du_JSON_relisible_apres_caviardage(self):
+        """TÉMOIN : on protégerait aussi le secret en détruisant la ligne.
+        Le fichier est la PREUVE publiée du projet — il doit rester
+        relisible."""
+        secret = 'aB3"xY9QwErTyUiOpAsDfGhJkL'
+        ligne = self._journalise(
+            {"outcome": "error", "error": "boom " + secret,
+             "trades": [{"symbol": "SPY"}]}, secret=secret)
+        rec = json.loads(ligne)          # lève si le caviardage a cassé le JSON
+        self.assertEqual(rec["outcome"], "error")
+        self.assertEqual(rec["trades"][0]["symbol"], "SPY",
+                         "le caviardage a mangé autre chose que le secret")
+
     def test_une_valeur_trop_courte_ne_fait_pas_tout_disparaitre(self):
         """Contrôle : une variable vide ou d'un caractère caviarderait le
         journal entier si le seuil de longueur n'existait pas."""
