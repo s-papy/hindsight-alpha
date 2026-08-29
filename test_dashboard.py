@@ -813,9 +813,66 @@ class TestCompteurDeFuites(BaseRendu):
             _resultats.affiche = el.style.display;
         """)
         self.assertEqual(r["affiche"], "block")
-        self.assertIn(": 1", r["texte"],
+        # Les trois enregistrements de cette fixture n'ont pas d'horodatage,
+        # donc aucun n'est posterieur au kickoff : le total se lit dans
+        # « 1 across the last 3 logged runs ».
+        self.assertIn("1 across the last 3 logged runs", r["texte"],
                       "le compteur de fuites ne compte pas exactement les "
                       "prises de hindsight_guard : %r" % r["texte"])
+
+    def test_le_compteur_separe_le_kickoff_du_developpement(self):
+        """MESURE le 29/08 sur la fenetre publiee : 11 fuites attrapees, dont
+        UNE depuis le kickoff. La banniere affichait « 11 » en tete de page
+        sans cette distinction, et le separateur qui l'explique est deux
+        sections plus bas, dans le tableau. « last 30 logged runs » etait
+        exact et ne suffisait pas : un juge lit le chiffre comme le resultat
+        de la semaine live."""
+        r = self.executer("""
+            const el = document.getElementById('leak-stat');
+            const fuite = [{symbol:"XLK", reason:"hindsight_guard: winners disagree"}];
+            renderLeakStat([
+              {timestamp:"2026-08-28T19:37:00+00:00", verdicts:fuite},
+              {timestamp:"2026-08-24T19:05:00+00:00", verdicts:fuite},
+              {timestamp:"2026-08-24T18:05:00+00:00", verdicts:fuite}
+            ]);
+            _resultats.texte = el.textContent;
+        """)
+        self.assertIn("1 since the 28 Aug kickoff", r["texte"], r["texte"])
+        self.assertIn("3 across the last 3 logged runs", r["texte"], r["texte"])
+        self.assertIn("2 of them from development", r["texte"], r["texte"])
+
+    def test_tout_depuis_le_kickoff_ne_parle_pas_de_developpement(self):
+        """TEMOIN : la phrase ne doit pas inventer des runs de developpement
+        quand il n'y en a aucun -- « 3, 0 of them from development » se lit
+        comme une precaution, pas comme une mesure."""
+        r = self.executer("""
+            const el = document.getElementById('leak-stat');
+            const fuite = [{symbol:"XLK", reason:"hindsight_guard: winners disagree"}];
+            renderLeakStat([
+              {timestamp:"2026-08-28T19:37:00+00:00", verdicts:fuite},
+              {timestamp:"2026-08-29T19:37:00+00:00", verdicts:fuite}
+            ]);
+            _resultats.texte = el.textContent;
+        """)
+        self.assertIn("2 — all since the 28 Aug kickoff", r["texte"], r["texte"])
+        self.assertNotIn("development", r["texte"])
+
+    def test_un_horodatage_illisible_compte_comme_du_developpement(self):
+        """SECOND TEMOIN, et c'est le sens PRUDENT : ne pas savoir quand un
+        run a eu lieu ne le fait pas entrer dans la semaine live. `NaN >=
+        kickoff` est faux, exactement comme dans le separateur du tableau --
+        la meme comparaison, sur la meme constante partagee."""
+        r = self.executer("""
+            const el = document.getElementById('leak-stat');
+            const fuite = [{symbol:"XLK", reason:"hindsight_guard: winners disagree"}];
+            renderLeakStat([
+              {timestamp:"2026-08-28T19:37:00+00:00", verdicts:fuite},
+              {timestamp:"pas-une-date", verdicts:fuite}
+            ]);
+            _resultats.texte = el.textContent;
+        """)
+        self.assertIn("1 since the 28 Aug kickoff", r["texte"], r["texte"])
+        self.assertIn("1 of them from development", r["texte"], r["texte"])
 
     def test_aucune_fuite_cache_le_bandeau_au_lieu_d_afficher_zero(self):
         r = self.executer("""

@@ -1162,6 +1162,16 @@ function renderTrade(d) {
   return lines.length ? lines.join('<br>') : '—';
 }
 
+// LA FRONTIERE DU KICKOFF, ECRITE UNE FOIS. Sortie de renderDecisions le
+// 29/08/2026, quand le compteur de fuites en a eu besoin a son tour : deux
+// copies de la meme date auraient diverge, comme les trois normalisations du
+// numero de compte l'avaient fait dans config.py le 28.
+const KICKOFF_MS = Date.UTC(2026, 7, 28, 15, 0);   // 28 aout 2026, 15:00 UTC
+// `d &&` ajoute le 27/08 : cette fonction tourne dans des `some()` AVANT la
+// boucle isolee par enregistrement, donc un enregistrement null y levait hors
+// de toute protection et vidait le tableau malgre elle.
+const horodatage = (d) => (d && d.timestamp) ? new Date(d.timestamp).getTime() : NaN;
+
 function renderDecisions(decisions) {
   const el = document.getElementById('decisions-container');
   if (!decisions.length) {
@@ -1189,11 +1199,6 @@ function renderDecisions(decisions) {
   //
   // Le separateur n'apparait QUE s'il separe vraiment quelque chose : rien
   // au-dessus ou rien en dessous, et il ne serait que du bruit.
-  const KICKOFF_MS = Date.UTC(2026, 7, 28, 15, 0);   // 28 aout 2026, 15:00 UTC
-  // `d &&` ajoute le 27/08 : cette fonction tourne dans les deux `some()`
-  // ci-dessous, AVANT la boucle isolee, donc un enregistrement null y
-  // levait hors de toute protection et vidait le tableau malgre elle.
-  const horodatage = (d) => (d && d.timestamp) ? new Date(d.timestamp).getTime() : NaN;
   const aPendant = decisions.some(d => horodatage(d) >= KICKOFF_MS);
   const aAvant   = decisions.some(d => horodatage(d) <  KICKOFF_MS);
   let separateurPose = !(aPendant && aAvant);
@@ -1313,8 +1318,36 @@ function renderLeakStat(decisions) {
     el.style.display = 'none';
     return;
   }
+  // COMBIEN DEPUIS LE KICKOFF. Corrige le 29/08/2026.
+  //
+  // Mesure sur la fenetre publiee du 28/08 au soir : 11 fuites attrapees,
+  // dont UNE seule depuis le kickoff -- les dix autres viennent de runs de
+  // developpement d'avant l'evenement juge. La banniere disait « 11 » en
+  // tete de page, en gros, sans cette distinction ; le separateur qui
+  // l'explique est deux sections plus bas, dans le tableau.
+  //
+  // « last 30 logged runs » etait exact et ne suffisait pas : un juge lit le
+  // chiffre comme le resultat de la semaine live. Un message ne doit pas
+  // laisser lire un nombre comme mesurant ce qu'il n'a pas mesure -- et dans
+  // le sens qui FLATTE, c'est le pire des deux.
+  //
+  // Meme frontiere que le separateur du tableau : la constante est partagee,
+  // pas recopiee.
+  let depuisKickoff = 0;
+  for (const d of decisions) {
+    if (!d || !(horodatage(d) >= KICKOFF_MS)) continue;
+    for (const v of (d.verdicts || [])) {
+      if (typeof v.reason === 'string' && v.reason.startsWith('hindsight_guard:')) depuisKickoff++;
+    }
+  }
+  const avant = count - depuisKickoff;
+  const detail = avant === 0
+    ? `${count} — all since the 28 Aug kickoff`
+    : `${depuisKickoff} since the 28 Aug kickoff, ${count} across the last `
+      + `${decisions.length} logged runs (${avant} of them from development `
+      + `runs before it)`;
   el.style.display = 'block';
-  el.textContent = `🛡️ Hindsight leaks caught so far (last ${decisions.length} logged runs): ${count} — a parameter that looked like a winner on the full history but didn't hold up in-sample, refused automatically.`;
+  el.textContent = `🛡️ Hindsight leaks caught: ${detail} — a parameter that looked like a winner on the full history but didn't hold up in-sample, refused automatically.`;
 }
 
 loadDashboard();
