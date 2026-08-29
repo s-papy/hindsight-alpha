@@ -5889,6 +5889,64 @@ class TestLaVerificationDeKickoff(unittest.TestCase):
                       sortie)
 
 
+class TestCeQueLAgentDePOUSSEELitVraiment(unittest.TestCase):
+    """J'ai écrit, dans le README, dans le plist et dans un commentaire, que
+    le chemin `--pousser-seulement` ne fait « aucun appel API, AUCUNE LECTURE
+    D'IDENTIFIANT, aucun commit ». Les deux premiers points sont vrais. Le
+    troisième était FAUX.
+
+    Mesure du 29/08 : importer `publish_dashboard` importe `config`, qui lit
+    le fichier de configuration et remplit API_KEY, SECRET_KEY et ACCOUNT_ID
+    — avant même qu'argparse ait vu l'option. Les identifiants sont donc bien
+    en mémoire sur ce chemin ; ils n'y servent simplement à rien.
+
+    Rendre les imports paresseux rendrait la phrase vraie, mais la suite de
+    tests remplace `publish_dashboard.config` et `publish_dashboard.alpaca_cli`
+    comme ATTRIBUTS DE MODULE : changer ça en pleine semaine jugée pour rendre
+    une phrase exacte serait le mauvais échange. On corrige la phrase.
+
+    Ce test lie les deux : tant que la mesure dit « chargé », la
+    documentation n'a pas le droit de dire le contraire."""
+
+    RACINE = Path(__file__).resolve().parent
+
+    def test_config_est_bien_charge_sur_ce_chemin(self):
+        import subprocess, textwrap
+        code = textwrap.dedent("""
+            import sys
+            sys.argv = ["publish_dashboard.py", "--pousser-seulement"]
+            import publish_dashboard
+            print("config" in sys.modules)
+        """)
+        r = subprocess.run([sys.executable, "-c", code], cwd=str(self.RACINE),
+                           capture_output=True, text=True, timeout=60)
+        self.assertEqual(r.returncode, 0, r.stderr[-800:])
+        self.assertIn("True", r.stdout,
+                      "config n'est plus chargé à l'import : la documentation "
+                      "peut enfin dire « aucune lecture d'identifiant » — "
+                      "mettre à jour README et plist, puis ce test")
+
+    def test_la_documentation_ne_pretend_pas_le_contraire(self):
+        """TÉMOIN de la cohérence : si la mesure dit « chargé », aucun des
+        trois textes ne doit affirmer l'inverse."""
+        textes = {
+            "README.md": (self.RACINE / "README.md").read_text(encoding="utf-8"),
+            "plist": (self.RACINE / "launchagents"
+                      / "com.hindsightalpha.push-pending.plist").read_text(encoding="utf-8"),
+            "publish_dashboard.py": (self.RACINE / "publish_dashboard.py").read_text(encoding="utf-8"),
+        }
+        interdits = ("no credential read", "ne lit aucun identifiant",
+                     "aucun identifiant lu")
+        for nom, texte in textes.items():
+            for phrase in interdits:
+                # La phrase peut apparaître pour être DÉMENTIE : on n'accepte
+                # que si elle est citée entre guillemets dans le démenti.
+                brut = texte.replace('« %s »' % phrase, "").replace('"%s"' % phrase, "")
+                self.assertNotIn(phrase, brut,
+                                 "%s affirme « %s » alors que config est "
+                                 "chargé sur ce chemin" % (nom, phrase))
+
+
 class TestLeRetardLocalEstPUBLIEMemeSansNouvelInstantane(unittest.TestCase):
     """`git_publish()` sautait le `git push` quand l'instantané n'avait pas
     changé — et `git push` pousse la BRANCHE, pas seulement le commit qu'on

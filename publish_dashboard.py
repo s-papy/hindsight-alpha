@@ -583,8 +583,14 @@ def main() -> None:
 
     if args.pousser_seulement:
         # LE CHEMIN LE PLUS PETIT POSSIBLE, ajoute le 29/08/2026. Aucun appel
-        # a Alpaca, aucun identifiant lu, aucun commit cree : uniquement la
+        # a Alpaca, aucun ordre, aucun commit cree : uniquement la
         # publication de ce qui est deja commite.
+        #
+        # CE QU'IL FAUT NE PAS DIRE : « aucun identifiant lu ». Mesure du
+        # 29/08, l'import de ce module charge config, donc API_KEY,
+        # SECRET_KEY et ACCOUNT_ID sont bien en memoire sur ce chemin -- ils
+        # n'y servent a rien, c'est tout. Ma premiere redaction l'affirmait,
+        # et c'etait faux.
         #
         # POURQUOI IL EXISTE SEPAREMENT : la publication du tableau de bord
         # est un job d'HEURES DE MARCHE -- jours ouvres, 15:30 a 22:05. Le

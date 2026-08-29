@@ -400,8 +400,17 @@ python agent.py                # if vetted, places a real (paper) options order
 
 - **`launchagents/com.hindsightalpha.push-pending.plist`**, added 29/08/2026.
   Every 30 minutes it runs `publish_dashboard.py --pousser-seulement`, the
-  smallest possible path: no API call, no credential read, no commit created. It publishes commits that are already
+  smallest possible path this repository has: no API call, no order, no commit created. It publishes commits that are already
   made, or does nothing at all.
+
+  *Measured rather than assumed, 29/08: importing `publish_dashboard` loads
+  `config`, so the credentials ARE read into memory on this path like on every
+  other entry point of this repo — they are simply never used. An earlier
+  version of this paragraph claimed "no credential read", which was false. The
+  imports are not made lazy because the test suite patches
+  `publish_dashboard.config` and `publish_dashboard.alpaca_cli` as module
+  attributes; changing that mid-week to make a sentence true would be the wrong
+  trade.*
 
   It exists because publishing the dashboard is a *market-hours* job — weekdays,
   15:30 to 22:05 — while work accumulates in the evenings and at weekends, and

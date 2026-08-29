@@ -14,9 +14,13 @@
 
 	     Le faire porter par le job de marche aurait force a le sortir de sa
 	     fenetre de veille, ou a republier des instantanes identiques hors
-	     seance. Ce job n'appelle pas Alpaca, ne lit aucun identifiant et ne
-	     cree aucun commit : il pousse ce qui est deja commite, ou ne fait
-	     rien.
+	     seance. Ce job n'appelle pas Alpaca, ne passe aucun ordre et ne cree
+	     aucun commit : il pousse ce qui est deja commite, ou ne fait rien.
+	     (Mesure le 29/08 : l'import charge quand meme config, donc les
+	     identifiants sont LUS en memoire comme dans tout point d'entree de ce
+	     depot ; ils ne servent simplement a rien ici. La premiere version de
+	     ce commentaire disait « ne lit aucun identifiant », ce qui etait
+	     faux.)
 
 	     StartInterval PLUTOT QU'UN CALENDRIER, et c'est le point : launchd
 	     rattrape un intervalle manque au REVEIL de la machine. Un calendrier
