@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- POUSSE LE TRAVAIL LOCAL TOUTES LES 30 MINUTES, ajoute le 29/08/2026
+	     sur demande explicite de l'operateur.
+
+	     POURQUOI IL EXISTE A PART. La publication du tableau de bord est un
+	     job d'HEURES DE MARCHE : jours ouvres, 15:30 a 22:05. Le travail
+	     local, lui, s'accumule le soir et le week-end : 29 commits un samedi,
+	     avec un badge de CI rouge en attendant lundi 15:30. Or `git push`
+	     publie la BRANCHE, donc n'importe quelle poussee reussie emporte tout
+	     le retard.
+
+	     Le faire porter par le job de marche aurait force a le sortir de sa
+	     fenetre de veille, ou a republier des instantanes identiques hors
+	     seance. Ce job n'appelle pas Alpaca, ne lit aucun identifiant et ne
+	     cree aucun commit : il pousse ce qui est deja commite, ou ne fait
+	     rien.
+
+	     StartInterval PLUTOT QU'UN CALENDRIER, et c'est le point : launchd
+	     rattrape un intervalle manque au REVEIL de la machine. Un calendrier
+	     de week-end ne se declencherait pas sur un Mac endormi ; celui-ci
+	     part des que la machine revient. C'est ce qui rend « toutes les 30
+	     minutes » vrai en dehors des heures ou caffeinate tient la machine
+	     eveillee.
+
+	     Il ne figure pas dans controle_jobs_dans_la_fenetre_de_veille : ce
+	     controle ne regarde que les jobs a StartCalendarInterval, et celui-ci
+	     n'en a pas. Verifie, pas suppose.
+
+	     NOTE SUR CE COMMENTAIRE : sa premiere version utilisait des doubles
+	     tirets comme ponctuation, ce que la specification XML interdit dans
+	     un commentaire. `plutil` l'acceptait ; le garde-fou du depot, non, et
+	     il avait raison sur un fichier qui est LIVRE. -->
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>PATH</key>
+		<string>/Users/s-pap/.local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+	</dict>
+	<key>Label</key>
+	<string>com.hindsightalpha.push-pending</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/usr/bin/python3</string>
+		<string>/Users/s-pap/hindsight-alpha/publish_dashboard.py</string>
+		<string>--pousser-seulement</string>
+	</array>
+	<key>StandardErrorPath</key>
+	<string>/Users/s-pap/hindsight-alpha/push_pending.log</string>
+	<key>StandardOutPath</key>
+	<string>/Users/s-pap/hindsight-alpha/push_pending.log</string>
+	<key>StartInterval</key>
+	<integer>1800</integer>
+	<key>WorkingDirectory</key>
+	<string>/Users/s-pap/hindsight-alpha</string>
+</dict>
+</plist>

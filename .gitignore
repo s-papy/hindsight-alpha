@@ -52,3 +52,4 @@ market_hours_awake.log
 # ajoute demain ne puisse plus passer entre les mailles.
 publish_dashboard.log
 agent.log
+push_pending.log

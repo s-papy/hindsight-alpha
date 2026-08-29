@@ -5889,6 +5889,77 @@ class TestLaVerificationDeKickoff(unittest.TestCase):
                       sortie)
 
 
+class TestLeRetardLocalEstPUBLIEMemeSansNouvelInstantane(unittest.TestCase):
+    """`git_publish()` sautait le `git push` quand l'instantané n'avait pas
+    changé — et `git push` pousse la BRANCHE, pas seulement le commit qu'on
+    vient de faire.
+
+    Conséquence : tant que `docs/data.json` restait identique, AUCUN commit
+    local n'était publié, quel qu'en soit le nombre. En pratique data.json
+    bouge presque toujours (`generated_at` change à chaque exécution), donc
+    le cas est rare — mais « rare » n'est pas « impossible », et quand il
+    arrive c'est tout le travail local qui reste à quai sans que rien ne le
+    dise. C'est le seul chemin de publication automatique du dépôt."""
+
+    def _publier_sans_changement(self, retard, push):
+        """Joue git_publish() avec un instantané inchangé et `retard` commits
+        locaux en attente."""
+        import importlib, io, contextlib, subprocess as sp
+        import publish_dashboard as pd
+        importlib.reload(pd)
+        vrai = pd.subprocess.run
+        appels = []
+
+        def faux(cmd, *a, **kw):
+            appels.append(cmd)
+            if cmd[:2] == ["git", "push"]:
+                return push(cmd)
+            if cmd[:3] == ["git", "diff", "--cached"]:
+                return sp.CompletedProcess(cmd, 0)      # rien n'a changé
+            if cmd[:3] == ["git", "rev-list", "--count"]:
+                return sp.CompletedProcess(cmd, 0 if retard is not None else 1,
+                                           stdout=("%s\n" % retard))
+            return sp.CompletedProcess(cmd, 0)
+
+        pd.subprocess.run = faux
+        tampon = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(tampon):
+                pd.git_publish()
+        finally:
+            pd.subprocess.run = vrai
+        pousses = [c for c in appels if c[:2] == ["git", "push"]]
+        return pousses, tampon.getvalue()
+
+    def test_des_commits_en_attente_sont_pousses(self):
+        import subprocess as sp
+        pousses, sortie = self._publier_sans_changement(
+            29, lambda cmd: sp.CompletedProcess(cmd, 0))
+        self.assertEqual(len(pousses), 1,
+                         "l'instantané n'a pas changé, donc rien n'est "
+                         "publié — 29 commits restent à quai :\n%s" % sortie)
+        self.assertIn("29 commit(s)", sortie, sortie)
+
+    def test_rien_en_attente_ne_pousse_PAS(self):
+        """TÉMOIN : pousser à vide toutes les 30 minutes serait un appel
+        réseau pour rien, et masquerait le cas qui compte."""
+        import subprocess as sp
+        pousses, sortie = self._publier_sans_changement(
+            0, lambda cmd: sp.CompletedProcess(cmd, 0))
+        self.assertEqual(pousses, [], sortie)
+
+    def test_un_comptage_IMPOSSIBLE_le_dit(self):
+        """SECOND TÉMOIN, et c'est la leçon du jour appliquée ici aussi :
+        sans amont lisible, « je n'ai pas pu compter » n'est pas « il n'y a
+        rien à pousser »."""
+        import subprocess as sp
+        pousses, sortie = self._publier_sans_changement(
+            None, lambda cmd: sp.CompletedProcess(cmd, 0))
+        self.assertIn("ce n'est PAS", sortie, sortie)
+        self.assertEqual(pousses, [], "on ne pousse pas à l'aveugle : %s"
+                         % sortie)
+
+
 class TestUnPushREJETESeRaconte(unittest.TestCase):
     """`git_publish()` traitait deux pannes sur trois.
 
@@ -6100,20 +6171,48 @@ class TestLesPlistsCHARGESSontVerifies(unittest.TestCase):
 
     SCRIPT = Path(__file__).resolve().parent / "verifier_le_kickoff.py"
 
+    PLIST = ('<?xml version="1.0" encoding="UTF-8"?>\n'
+             '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" '
+             '"http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n'
+             '<plist version="1.0"><dict>'
+             '<key>Label</key><string>com.essai.job</string>'
+             '<key>StartCalendarInterval</key><array><dict>'
+             '<key>Hour</key><integer>16</integer>'
+             '<key>Minute</key><integer>0</integer>'
+             '</dict></array></dict></plist>\n')
+
     def _lancer(self, charges_par_label):
-        """Joue plists_a_jour() avec un état launchd simulé.
-        `charges_par_label` : label -> liste d'intervalles, ou None."""
-        import importlib.util, io, contextlib
-        spec = importlib.util.spec_from_file_location(
-            "kickoff_plists", str(self.SCRIPT))
-        mod = importlib.util.module_from_spec(spec)
-        sys.modules["kickoff_plists"] = mod
-        spec.loader.exec_module(mod)
-        mod._intervalles_charges = lambda label: charges_par_label(label, mod)
-        tampon = io.StringIO()
-        with contextlib.redirect_stdout(tampon):
-            resultat = mod.plists_a_jour()
-        return resultat, tampon.getvalue()
+        """Joue plists_a_jour() sur un dépôt JETABLE, avec un état launchd
+        simulé. `charges_par_label` : label -> liste d'intervalles, ou None.
+
+        RÉÉCRIT le 29/08/2026 : la première version appelait la fonction sur
+        le VRAI dépôt et le vrai ~/Library/LaunchAgents. Elle est donc tombée
+        en rouge à la minute où un plist du dépôt n'était pas encore installé
+        sur la machine — pour une raison sans rapport avec ce qu'elle teste.
+        Même fragilité que la suite qui dépendait du `.env` de l'opérateur,
+        corrigée le 28/08 : un test doit mesurer le code, pas l'état du poste."""
+        import importlib.util, io, contextlib, shutil, tempfile
+        d = Path(tempfile.mkdtemp(prefix="hindsight-plists-"))
+        try:
+            (d / "launchagents").mkdir()
+            (d / "actifs").mkdir()
+            for cible in (d / "launchagents", d / "actifs"):
+                (cible / "com.essai.job.plist").write_text(self.PLIST,
+                                                           encoding="utf-8")
+            spec = importlib.util.spec_from_file_location(
+                "kickoff_plists", str(self.SCRIPT))
+            mod = importlib.util.module_from_spec(spec)
+            sys.modules["kickoff_plists"] = mod
+            spec.loader.exec_module(mod)
+            mod.RACINE = d
+            mod.AGENTS = d / "actifs"
+            mod._intervalles_charges = lambda label: charges_par_label(label, mod)
+            tampon = io.StringIO()
+            with contextlib.redirect_stdout(tampon):
+                resultat = mod.plists_a_jour()
+            return resultat, tampon.getvalue()
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
 
     @staticmethod
     def _du_depot(label, mod):

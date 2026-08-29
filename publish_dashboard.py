@@ -408,7 +408,22 @@ def git_publish() -> None:
     result = subprocess.run(["git", "diff", "--cached", "--quiet", "--", *paths],
                             timeout=_DELAI_LOCAL, env=_ENV_GIT)
     if result.returncode == 0:
+        # LE COMMIT EST SAUTE, PAS LA PUBLICATION. Corrige le 29/08/2026.
+        #
+        # Ce `return` sautait aussi le `git push` plus bas -- et `git push`
+        # pousse la BRANCHE, pas seulement le commit qu'on vient de faire.
+        # Consequence mesuree : tant que l'instantane ne bougeait pas, aucun
+        # commit local n'etait publie, quel qu'en soit le nombre.
+        #
+        # En pratique data.json change presque toujours (generated_at bouge a
+        # chaque execution), donc le cas est rare -- mais « rare » n'est pas
+        # « impossible », et quand il arrive c'est TOUT le travail local qui
+        # reste a quai sans que rien ne le dise.
+        #
+        # On pousse donc quand meme, s'il y a quelque chose a pousser. C'est
+        # le seul chemin automatique de publication de ce depot.
         print("Nothing changed since last publish — skipping commit.")
+        _publier_le_retard_local()
         return
     # AJOUTE le 27/08/2026 au soir, apres avoir lu publish_dashboard.log en
     # vrai : le hook de pre-commit lance garde_fou.py a CHAQUE publication,
@@ -495,6 +510,42 @@ def git_publish() -> None:
         raise
 
 
+def _commits_en_attente() -> "int | None":
+    """Combien de commits locaux ne sont pas encore chez l'amont, ou None si
+    la question n'a pas pu etre posee.
+
+    None, jamais 0 : sans amont configure, « je n'ai pas pu compter » n'est
+    pas « il n'y a rien a pousser » -- meme lecon que verifier_le_kickoff.py
+    a apprise le meme jour sur exactement ce comptage."""
+    try:
+        r = subprocess.run(["git", "rev-list", "--count", "@{upstream}..HEAD"],
+                           capture_output=True, text=True,
+                           timeout=_DELAI_LOCAL, env=_ENV_GIT)
+    except Exception:
+        return None
+    sortie = r.stdout.strip()
+    if r.returncode != 0 or not sortie.isdigit():
+        return None
+    return int(sortie)
+
+
+def _publier_le_retard_local() -> None:
+    """Pousse le travail local deja commite quand l'instantane, lui, n'a rien
+    de neuf a dire. Best-effort : ne doit jamais faire echouer la
+    publication, qui a deja reussi a ce stade."""
+    retard = _commits_en_attente()
+    if retard is None:
+        print("  (impossible de savoir s'il reste des commits a pousser — "
+              "pas d'amont lisible ; ce n'est PAS « rien en attente »)",
+              flush=True)
+        return
+    if retard == 0:
+        return
+    print("  %d commit(s) local(aux) en attente : publication." % retard,
+          flush=True)
+    pousser_les_commits_en_attente()
+
+
 def pousser_les_commits_en_attente() -> None:
     """Pousse ce qui est deja COMMITE, sans rien publier de neuf.
 
@@ -525,7 +576,25 @@ def pousser_les_commits_en_attente() -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--git-push", action="store_true", help="also commit and push docs/data.json")
+    parser.add_argument("--pousser-seulement", action="store_true",
+                        help="ne publie AUCUN instantane : pousse seulement "
+                             "les commits locaux deja faits")
     args = parser.parse_args()
+
+    if args.pousser_seulement:
+        # LE CHEMIN LE PLUS PETIT POSSIBLE, ajoute le 29/08/2026. Aucun appel
+        # a Alpaca, aucun identifiant lu, aucun commit cree : uniquement la
+        # publication de ce qui est deja commite.
+        #
+        # POURQUOI IL EXISTE SEPAREMENT : la publication du tableau de bord
+        # est un job d'HEURES DE MARCHE -- jours ouvres, 15:30 a 22:05. Le
+        # travail local, lui, s'accumule aussi le soir et le week-end, et
+        # `git push` publie la BRANCHE. Le faire porter par le job de marche
+        # forcerait a le sortir de sa fenetre de veille, ou a republier des
+        # instantanes identiques hors seance -- deux effets de bord pour une
+        # operation qui n'a besoin ni de reseau Alpaca ni de commit.
+        _publier_le_retard_local()
+        return
 
     try:
         path = write_snapshot()

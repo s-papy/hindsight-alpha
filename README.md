@@ -386,15 +386,29 @@ python agent.py                # if vetted, places a real (paper) options order
 - `monitor_exits.py` — standalone exit-only monitor, schedulable
   independently of `agent.py`'s once-a-day cycle. See its module docstring
   for the "why".
-- `launchagents/` — the four macOS scheduling definitions, versioned rather
+- `launchagents/` — the five macOS scheduling definitions, versioned rather
   than living only on one machine: `launchagents/com.hindsightalpha.monitor-exits.plist`
   (every 15 minutes through the session, including the close),
   `launchagents/com.hindsightalpha.market-hours-awake.plist` (a `caffeinate` job that keeps
   the machine awake through market hours),
   `launchagents/com.hindsightalpha.publish-dashboard.plist` (see "Hosted dashboard" for why
-  that one pushes automatically), and
+  that one pushes automatically),
   `launchagents/com.hindsightalpha.agent-daily.plist` (the entry-decision cycle,
-  once per trading day).
+  once per trading day), and
+  `launchagents/com.hindsightalpha.push-pending.plist` (publishes local
+  commits every 30 minutes, seven days a week — see just below).
+
+- **`launchagents/com.hindsightalpha.push-pending.plist`**, added 29/08/2026.
+  Every 30 minutes it runs `publish_dashboard.py --pousser-seulement`, the
+  smallest possible path: no API call, no credential read, no commit created. It publishes commits that are already
+  made, or does nothing at all.
+
+  It exists because publishing the dashboard is a *market-hours* job — weekdays,
+  15:30 to 22:05 — while work accumulates in the evenings and at weekends, and
+  because `git push` publishes the **branch**: one successful push carries the
+  whole backlog. It uses `StartInterval` rather than a calendar precisely so
+  launchd replays a missed interval when the machine wakes, which a weekend
+  calendar entry on a sleeping Mac would not.
 
   **This paragraph used to end with "`agent.py` itself is deliberately NOT
   scheduled — the entry decision is launched by hand, so a human sees it
