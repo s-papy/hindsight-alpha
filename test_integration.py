@@ -6121,22 +6121,42 @@ class TestLeVerdictEstPublieAvecSonECART(unittest.TestCase):
         spec.loader.exec_module(mod)
         return mod
 
+    @staticmethod
+    def _rapport(scores_in_sample, scores_pleins=None):
+        import hindsight_guard
+        pleins = scores_pleins or scores_in_sample
+        return hindsight_guard.check_selection_leakage(
+            list(scores_in_sample),
+            lambda c, w: (scores_in_sample if w == "in_sample" else pleins)[c],
+            threshold=0.0)
+
     def test_l_ecart_est_celui_du_gagnant_sur_le_suivant(self):
-        bt = self._module()
-        # Les scores in-sample reels de XLK le 29/08.
-        self.assertAlmostEqual(
-            bt._marge({10: 0.8120, 20: -0.6350, 30: -1.0912,
-                       60: -1.9285, 90: 0.7880}), 0.024, places=3)
+        """Les scores in-sample réels de XLK le 29/08."""
+        r = self._rapport({10: 0.8120, 20: -0.6350, 30: -1.0912,
+                           60: -1.9285, 90: 0.7880})
+        self.assertAlmostEqual(r.marge("in_sample"), 0.024, places=3)
 
     def test_moins_de_deux_scores_finis_rend_NONE_et_pas_zero(self):
         """TÉMOIN : rendre 0.0 laisserait croire à une égalité parfaite —
         c'est-à-dire au verdict le plus fragile possible — alors qu'il n'y a
         simplement rien à comparer. Même règle que partout ailleurs ici :
         « je n'ai pas pu mesurer » n'est pas une mesure."""
-        bt = self._module()
-        self.assertIsNone(bt._marge({10: 1.0}))
-        self.assertIsNone(bt._marge({10: float("nan"), 90: 2.0}))
-        self.assertIsNone(bt._marge({}))
+        self.assertIsNone(self._rapport({10: 1.0, 20: float("nan")})
+                          .marge("in_sample"))
+        self.assertIsNone(self._rapport({10: float("nan"), 90: float("nan")})
+                          .marge("in_sample"))
+
+    def test_la_regle_est_ECRITE_UNE_FOIS(self):
+        """Les deux rapports générés en ont besoin. Une règle écrite deux
+        fois n'est vraie qu'à un seul endroit — ce dépôt l'a déjà payé avec
+        deux copies de `is_option_position` qui avaient divergé. La méthode
+        vit donc dans `hindsight_guard`, et les deux générateurs l'appellent."""
+        for nom in ("backtest.py", "compare_strategies.py"):
+            source = (self.RACINE / nom).read_text(encoding="utf-8")
+            self.assertIn(".marge(", source,
+                          "%s ne se sert pas de la méthode partagée" % nom)
+            self.assertNotIn("def _marge", source,
+                             "%s a sa propre copie du calcul d'écart" % nom)
 
     def test_le_rapport_genere_porte_les_deux_ecarts(self):
         """On teste le GÉNÉRATEUR, pas l'artefact : régénérer

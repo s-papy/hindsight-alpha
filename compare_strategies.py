@@ -143,6 +143,11 @@ def compare_symbol(symbol: str, bars) -> dict:
         "vetted_window_days": vol_window,
         "hindsight_guard_agrees": vol_report.agrees,
         "hindsight_guard_verdict": cellule_de_verdict(vol_report),
+        # DE COMBIEN le gagnant devance le suivant. Le verdict etait
+        # publie sans son ecart, ici comme dans BACKTEST_RESULTS.md --
+        # la meme regle, appliquee a un rapport et pas a son jumeau.
+        # La methode vit dans hindsight_guard, pas recopiee ici.
+        "marge_in_sample": vol_report.marge("in_sample"),
         "in_sample_sharpe_of_winner": round(score_hv_window(vol_window, "in_sample", bars), 3),
         "trade_days": len(vol_trade_rets),
         "total_days_scored": len(vol_rets),
@@ -168,6 +173,11 @@ def compare_symbol(symbol: str, bars) -> dict:
         "vetted_lookback_days": mom_lookback,
         "hindsight_guard_agrees": mom_report.agrees,
         "hindsight_guard_verdict": cellule_de_verdict(mom_report),
+        # DE COMBIEN le gagnant devance le suivant. Le verdict etait
+        # publie sans son ecart, ici comme dans BACKTEST_RESULTS.md --
+        # la meme regle, appliquee a un rapport et pas a son jumeau.
+        # La methode vit dans hindsight_guard, pas recopiee ici.
+        "marge_in_sample": mom_report.marge("in_sample"),
         "in_sample_sharpe_of_winner": round(score_lookback(mom_lookback, "in_sample", bars), 3),
         "trade_days": len(mom_rets),  # always "in the market" -- every day is a trade day
         # Investi TOUS les jours (cf. trade_days juste au-dessus) : un
@@ -180,6 +190,16 @@ def compare_symbol(symbol: str, bars) -> dict:
     }
 
     return result
+
+
+def _phrase_de_marge(marge) -> str:
+    """La phrase qui accompagne un verdict, ou rien s'il n'y a pas d'ecart
+    mesurable. Ecrite une fois : les deux familles s'en servent."""
+    if marge is None:
+        return ""
+    return (" Winner's lead over the runner-up in-sample: %.3f of a Sharpe "
+            "unit — the two series overlap by 97%%, so the gap that decides "
+            "the verdict is small by construction." % marge)
 
 
 def format_report(results: List[dict]) -> str:
@@ -261,6 +281,7 @@ def format_report(results: List[dict]) -> str:
             f"(mean/day {v['mean_daily']:+}, sd/day {v['stdev_daily']}), "
             f"{v['trade_days']}/{v['total_days_scored']} days traded ({v['win_rate_pct']}% win rate on those days), "
             f"cumulative proxy payoff {v['cumulative_proxy_payoff']}."
+            + _phrase_de_marge(v.get("marge_in_sample"))
         )
         lines.append(
             f"- **momentum_strategy** — vetted lookback {m['vetted_lookback_days']}d, "

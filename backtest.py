@@ -127,17 +127,6 @@ def etiquette_de_verdict(report) -> str:
     return detail.get(cle, cle)
 
 
-def _marge(scores: dict) -> "float | None":
-    """De combien le meilleur candidat devance le deuxieme, en points de
-    Sharpe. None si moins de deux scores finis -- il n'y a alors pas d'ecart
-    a mesurer, et rendre 0.0 laisserait croire a une egalite parfaite."""
-    finis = sorted(v for v in scores.values()
-                   if isinstance(v, (int, float)) and math.isfinite(v))
-    if len(finis) < 2:
-        return None
-    return round(finis[-1] - finis[-2], 4)
-
-
 def backtest_symbol(symbol: str, bars: List[Bar]) -> dict:
     result: dict = {"symbol": symbol, "bars_used": len(bars), "windows": {}}
 
@@ -200,8 +189,8 @@ def backtest_symbol(symbol: str, bars: List[Bar]) -> dict:
         # GENERE, et une note ajoutee a la main y disparait a la regeneration
         # suivante -- c'est exactement ce qui serait arrive aux deux notes que
         # j'y avais ecrites le matin meme.
-        "marge_plein": _marge(report.full_scores),
-        "marge_in_sample": _marge(report.in_sample_scores),
+        "marge_plein": report.marge("full"),
+        "marge_in_sample": report.marge("in_sample"),
     }
 
     result["buy_and_hold_return_pct"] = round(100 * buy_and_hold_return(bars), 2)

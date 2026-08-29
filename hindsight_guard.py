@@ -144,6 +144,42 @@ class LeakageReport:
         except (KeyError, TypeError):
             return False
 
+    def marge(self, split: str = "in_sample") -> "float | None":
+        """De combien le gagnant devance le SUIVANT, sur ce decoupage.
+
+        AJOUTE le 29/08/2026. Un verdict etait publie sans son ecart, dans
+        les deux rapports generes -- « full-window winner: 90 days, in-sample
+        winner: 10 days », sans dire de combien. Or c'est l'ecart qui dit si
+        le verdict vaut quelque chose.
+
+        Mesure du meme jour : sur XLK le gagnant in-sample devance le suivant
+        de 0,024, et le desaccord DISPARAIT si les barres viennent du flux IEX
+        au lieu du flux SIP. Sur GLD, 0,028 a suffi pour que la fenetre
+        gagnante passe de 20 a 90 jours en cinq jours de bourse.
+
+        Ce n'est pas une faiblesse du mecanisme : ce que score_fn compare, ce
+        sont deux series qui se recouvrent largement par construction -- ici
+        97 % (voir HINDSIGHT_HOLDOUT.md). L'ecart qui tranche est donc petit,
+        et c'est une propriete, pas un accident. Ce qui serait un defaut,
+        c'est de publier le verdict sans lui.
+
+        ECRITE ICI, PAS DANS LES DEUX RAPPORTS. backtest.py et
+        compare_strategies.py en ont besoin tous les deux ; une regle ecrite
+        deux fois n'est vraie qu'a un seul endroit, et ce depot l'a deja paye
+        (deux copies de is_option_position avaient diverge).
+
+        Rend None quand il y a moins de DEUX scores finis : il n'y a alors
+        pas d'ecart a mesurer, et rendre 0.0 laisserait croire a une egalite
+        parfaite -- c'est-a-dire au verdict le plus fragile possible -- alors
+        qu'on n'a simplement rien pu comparer."""
+        scores = self.in_sample_scores if split == "in_sample" else self.full_scores
+        finis = sorted(v for v in scores.values()
+                       if isinstance(v, (int, float))
+                       and not isinstance(v, bool) and math.isfinite(v))
+        if len(finis) < 2:
+            return None
+        return round(finis[-1] - finis[-2], 4)
+
     def verdict_label(self) -> str:
         """Le verdict en UN mot-cle, pour les rapports ecrits.
 
