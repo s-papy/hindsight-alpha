@@ -56,6 +56,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import re
 from collections import Counter
@@ -275,22 +276,57 @@ def main() -> None:
     # ── 4. LE P&L, EN DERNIER ET ASSUME ──────────────────────────────────
     print()
     print("  4. P&L  (last, deliberately)")
-    depart = None
+    # LE MESSAGE NE NOMME PLUS UNE CAUSE QU'IL N'A PAS MESUREE.
+    #
+    # C'etait `except (OSError, JSONDecodeError): pass` puis `if depart:`,
+    # avec un seul texte : « starting equity UNKNOWN (state.json unreadable) ».
+    # Mesure le 29/08/2026, trois situations differentes, message identique :
+    #
+    #   state.json LISIBLE sans le champ   -> « unreadable »  (faux)
+    #   starting_equity = 0.0              -> « unreadable »  (doublement
+    #                                          faux : lisible, present, et
+    #                                          une valeur)
+    #   fichier vraiment absent            -> « unreadable »  (enfin vrai)
+    #
+    # Et le cas 0.0 est precisement la ligne de base corrompue que
+    # risk_gates._record_starting_equity a appris a REFUSER le 28/08. Si elle
+    # arrivait quand meme ici, le rapport accusait le fichier au lieu de
+    # montrer la valeur aberrante.
+    depart, cause = None, None
     try:
         with open(ETAT, encoding="utf-8") as fh:
-            depart = json.load(fh).get("starting_equity")
-    except (OSError, json.JSONDecodeError):
-        pass
-    if depart:
+            brut = json.load(fh).get("starting_equity")
+    except OSError as err:
+        cause = "state.json could not be opened (%s)" % type(err).__name__
+    except (ValueError, json.JSONDecodeError):
+        cause = "state.json is not readable JSON"
+    else:
+        if brut is None:
+            cause = "state.json carries no starting_equity yet"
+        elif isinstance(brut, bool) or not isinstance(brut, (int, float)):
+            cause = ("state.json records a starting equity that is not a "
+                     "number (%r)" % (brut,))
+        elif not math.isfinite(brut):
+            cause = ("state.json records a starting equity that is not "
+                     "finite (%r)" % (brut,))
+        elif brut <= 0:
+            # PAS « inconnu » : c'est une valeur, et elle est aberrante. La
+            # montrer est le seul moyen de la faire corriger.
+            cause = ("state.json records a starting equity of %r — risk_gates "
+                     "refuses to record such a baseline, so this one predates "
+                     "that guard or was written by something else" % (brut,))
+        else:
+            depart = float(brut)
+    if depart is not None:
         print("     starting equity : %.2f" % depart)
     else:
-        print("     ⬜ starting equity UNKNOWN (state.json unreadable).")
+        print("     ⬜ starting equity UNKNOWN — %s." % cause)
     if args.reseau:
         try:
             import alpaca_cli
             eq = float(alpaca_cli.get_account().get("equity"))
             print("     current equity  : %.2f" % eq)
-            if depart:
+            if depart is not None:
                 print("     change          : %+.2f (%+.2f %%)"
                       % (eq - depart, 100.0 * (eq - depart) / depart))
         except Exception as err:

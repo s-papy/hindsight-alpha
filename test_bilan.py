@@ -305,5 +305,75 @@ class TestUnJournalILLISIBLENAccusePersonne(BaseBilan):
             __import__("shutil").rmtree(d, ignore_errors=True)
 
 
+
+class TestLeMessageNeNommePasUneCauseNonMESUREE(BaseBilan):
+    """La section P&L avait UN seul texte pour toutes les facons de ne pas
+    connaitre l'equite de depart : « starting equity UNKNOWN (state.json
+    unreadable) ».
+
+    Mesure le 29/08/2026, trois situations differentes, message identique :
+
+        state.json LISIBLE sans le champ  -> « unreadable »  (faux)
+        starting_equity = 0.0             -> « unreadable »  (doublement
+                                             faux : lisible, present, et
+                                             une valeur)
+        fichier vraiment absent           -> « unreadable »  (enfin vrai)
+
+    Et 0.0 est precisement la ligne de base corrompue que
+    `risk_gates._record_starting_equity` a appris a REFUSER le 28/08 -- le
+    verrou de perte hebdomadaire se calcule dessus. Si elle arrivait quand
+    meme ici, le rapport accusait le fichier au lieu de montrer la valeur."""
+
+    def _pnl(self, etat):
+        d = self._dossier([self._passage("2026-08-28T19:37:00+00:00")],
+                          etat=etat)
+        try:
+            if etat is False:                       # cas « fichier absent »
+                (d / "state.json").unlink()
+            code, sortie = self._lancer(d)
+            self.assertEqual(code, 0, sortie)
+            return next(l.strip() for l in sortie.splitlines()
+                        if "starting equity" in l)
+        finally:
+            __import__("shutil").rmtree(d, ignore_errors=True)
+
+    def test_un_fichier_lisible_sans_le_champ_ne_dit_pas_illisible(self):
+        ligne = self._pnl({"consecutive_losses": 0})
+        self.assertIn("carries no starting_equity", ligne, ligne)
+        self.assertNotIn("could not be opened", ligne,
+                         "le rapport accuse le fichier d'etre illisible "
+                         "alors qu'il vient de le lire : %s" % ligne)
+
+    def test_une_equite_de_depart_a_zero_est_MONTREE_pas_qualifiee_d_inconnue(self):
+        """C'est la valeur que risk_gates refuse d'enregistrer depuis le
+        28/08, parce qu'elle desactive le verrou de perte hebdomadaire :
+        une base a 0 rend tout drawdown nul. La montrer est le seul moyen de
+        la faire corriger."""
+        ligne = self._pnl({"starting_equity": 0.0})
+        self.assertIn("0.0", ligne, ligne)
+        self.assertIn("risk_gates refuses", ligne, ligne)
+        self.assertNotIn("could not be opened", ligne, ligne)
+
+    def test_une_valeur_non_numerique_est_nommee_telle_quelle(self):
+        ligne = self._pnl({"starting_equity": "cent mille"})
+        self.assertIn("not a number", ligne, ligne)
+        self.assertIn("cent mille", ligne,
+                      "la valeur fautive n'est pas montree : %s" % ligne)
+
+    def test_un_fichier_vraiment_absent_le_dit(self):
+        """TEMOIN : a force de distinguer, il ne faut pas perdre le seul cas
+        ou « je n'ai pas pu ouvrir » etait vrai."""
+        ligne = self._pnl(False)
+        self.assertIn("could not be opened", ligne, ligne)
+        self.assertIn("FileNotFoundError", ligne, ligne)
+
+    def test_une_equite_valide_reste_affichee(self):
+        """SECOND TEMOIN : a force de refuser, ne plus rien afficher
+        passerait tous les tests ci-dessus."""
+        ligne = self._pnl({"starting_equity": 100000.0})
+        self.assertIn("100000.00", ligne, ligne)
+        self.assertNotIn("UNKNOWN", ligne, ligne)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
