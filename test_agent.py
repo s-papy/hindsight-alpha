@@ -1489,7 +1489,7 @@ class TestLaRevendicationDeREFUSEstVerifieeContreLeJOURNAL(unittest.TestCase):
     def test_un_seul_verdict_RETENU_fait_tomber_la_phrase(self):
         sortie = self._lancer([self._passage(False), self._passage(True,
                                "2026-09-02T19:37:00+00:00")])
-        self.assertIn("n'est plus vraie", sortie,
+        self.assertIn("n'est plus vrai", sortie,
                       "un XLK retenu ne contredit pas la phrase de tête :\n%s"
                       % sortie[-800:])
         self.assertIn("2026-09-02", sortie,
@@ -1500,7 +1500,7 @@ class TestLaRevendicationDeREFUSEstVerifieeContreLeJOURNAL(unittest.TestCase):
         """TÉMOIN : un contrôle qui crierait toujours rendrait la phrase
         indéfendable même quand elle est vraie."""
         sortie = self._lancer([self._passage(False), self._passage(False)])
-        self.assertNotIn("n'est plus vraie", sortie, sortie[-800:])
+        self.assertNotIn("n'est plus vrai", sortie, sortie[-800:])
 
     def test_AUCUN_verdict_n_est_pas_une_confirmation(self):
         """SECOND TÉMOIN, et c'est la leçon de la semaine : un journal sans
@@ -1513,13 +1513,93 @@ class TestLaRevendicationDeREFUSEstVerifieeContreLeJOURNAL(unittest.TestCase):
                       "l'absence de preuve passe pour une preuve :\n%s"
                       % sortie[-800:])
 
+    def test_le_TABLEAU_DE_BORD_est_verifie_lui_aussi(self):
+        """LE MOTIF DES JUMELLES, dans le contrôle écrit pour d'autres
+        jumelles, vingt minutes après.
+
+        La première version ne lisait que `README.md`. Or `docs/index.html`
+        porte la MÊME phrase, dans « How to read this page » : « Look for 🛡️
+        in the verdicts below — XLK earns it on every run. » C'est la surface
+        qu'un juge regarde EN PREMIER, et elle n'était pas couverte."""
+        d = Path(tempfile.mkdtemp(prefix="hindsight-refus2-"))
+        try:
+            for nom in ("garde_fou.py", "config.py"):
+                shutil.copy(self.RACINE / nom, d / nom)
+            (d / "agent.py").write_text('DEFAULT_UNIVERSE = ["XLK"]\n',
+                                        encoding="utf-8")
+            # Le README ne dit RIEN : seule la page porte la revendication.
+            (d / "README.md").write_text("# Projet\n", encoding="utf-8")
+            (d / "docs").mkdir()
+            (d / "docs" / "index.html").write_text(
+                "<li>it <span>refuses that symbol</span>. Look for the shield "
+                "below — XLK earns it on every run.</li>\n", encoding="utf-8")
+            with open(d / "decision_log.jsonl", "w", encoding="utf-8") as fh:
+                fh.write(json.dumps(self._passage(True)) + "\n")
+            r = subprocess.run([sys.executable, str(d / "garde_fou.py")],
+                               cwd=str(d), capture_output=True, text=True,
+                               timeout=120)
+            sortie = r.stdout + r.stderr
+            self.assertIn("n'est plus vrai", sortie,
+                          "la revendication de la PAGE n'est pas vérifiée :"
+                          "\n%s" % sortie[-800:])
+            self.assertIn("index.html", sortie,
+                          "le fichier fautif n'est pas nommé :\n%s"
+                          % sortie[-800:])
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
+    def test_le_separateur_du_kickoff_n_est_PAS_une_revendication(self):
+        """TÉMOIN de précision : la page contient aussi « Nothing is hidden —
+        every run this project ever logged is still here ». Sans exiger un
+        mot de refus ET le symbole dans la même fenêtre, cette phrase-là
+        serait prise pour une promesse de refus permanent."""
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "gf_revendic", str(self.RACINE / "garde_fou.py"))
+        gf = importlib.util.module_from_spec(spec)
+        sys.modules["gf_revendic"] = gf
+        try:
+            spec.loader.exec_module(gf)
+        except SystemExit:
+            pass
+        separateur = ("Nothing is hidden — every run this project ever logged "
+                      "is still here, in order.")
+        self.assertFalse(gf._revendique_un_refus_permanent(separateur, "XLK"))
+        self.assertTrue(gf._revendique_un_refus_permanent(
+            "it refuses that symbol — XLK earns it on every run", "XLK"))
+        # LA FENÊTRE DE 90 CARACTÈRES EST PORTANTE, et ce cas le prouve :
+        # une page RÉELLE contient les deux — une phrase de refus sur XLK
+        # quelque part, et bien plus loin le séparateur du kickoff. Sans la
+        # borne, le « every run » du séparateur serait rattaché au « refus »
+        # d'un autre paragraphe, et le contrôle croirait à une revendication
+        # là où il n'y en a pas.
+        page = ("XLK was refused here for a reason unrelated to what follows."
+                + " filler." * 40
+                + " Nothing is hidden — every run this project ever logged is "
+                  "still here, in order.")
+        self.assertFalse(
+            gf._revendique_un_refus_permanent(page, "XLK"),
+            "un « every run » éloigné de la phrase de refus est pris pour "
+            "une revendication : la borne de 90 caractères ne joue plus")
+        # LE MOT DE REFUS EST PORTANT LUI AUSSI. Sans lui, une phrase qui
+        # nomme simplement le symbole — « SPY, GLD, XLK and XLV are scored on
+        # every run » — deviendrait une promesse de refus permanent, et le
+        # contrôle exigerait du journal qu'il ne retienne JAMAIS ce symbole.
+        # Trouvé parce que la mutation qui retire cette condition passait
+        # tous les autres témoins.
+        self.assertFalse(
+            gf._revendique_un_refus_permanent(
+                "SPY, GLD, XLK and XLV are scored on every run", "XLK"),
+            "nommer un symbole près de « every run » suffit à en faire une "
+            "revendication de refus")
+
     def test_sans_revendication_dans_le_README_le_controle_se_tait(self):
         """TROISIÈME TÉMOIN : le contrôle ne connaît pas « XLK » par
         lui-même. Il lit l'univers dans agent.py et la revendication dans le
         README. Sans la phrase, il n'a rien à vérifier."""
         sortie = self._lancer([self._passage(True)],
                               readme="# Projet\n\nRien de particulier.\n")
-        self.assertNotIn("n'est plus vraie", sortie, sortie[-800:])
+        self.assertNotIn("n'est plus vrai", sortie, sortie[-800:])
 
 
 if __name__ == "__main__":

@@ -2869,40 +2869,58 @@ def controle_le_refus_annonce_tient_dans_le_journal() -> None:
       . un seul retenu          -> alerte nommant la date ;
       . AUCUN verdict trouve    -> alerte aussi. « Je n'ai pas pu verifier »
         n'est pas « c'est verifie » -- surtout pour la phrase de tete."""
-    chemin_readme = os.path.join(RACINE, "README.md")
     chemin_journal = os.path.join(RACINE, "decision_log.jsonl")
-    if not os.path.exists(chemin_readme) or not os.path.exists(chemin_journal):
+    if not os.path.exists(chemin_journal):
         return
     univers = _univers_de_l_agent()
     if not univers:
         alerte("agent.py", "DEFAULT_UNIVERSE n'a pas pu etre lu : la "
-                           "revendication « refuse a chaque passage » du "
-                           "README n'a PAS ete verifiee.")
+                           "revendication « refuse a chaque passage » n'a PAS "
+                           "ete verifiee.")
         return
-    texte = open(chemin_readme, encoding="utf-8", errors="replace").read()
-    revendiques = []
-    for sym in univers:
-        for m in re.finditer(r"every run", texte, re.I):
-            avant = texte[max(0, m.start() - 90):m.start()]
-            if (re.search(r"\b%s\b" % re.escape(sym), avant)
-                    and re.search(r"refus", avant, re.I)):
-                revendiques.append(sym)
-                break
-    if not revendiques:
-        return
-    for sym in revendiques:
-        total, retenus = _verdicts_du_journal(chemin_journal, sym)
-        if total == 0:
-            alerte("README.md",
-                   "annonce que %s est refuse a CHAQUE passage, et le journal "
-                   "ne contient AUCUN verdict pour ce symbole : la phrase "
-                   "n'est pas verifiee, elle est invérifiable ici." % sym)
-        elif retenus:
-            alerte("README.md",
-                   "annonce que %s est refuse a CHAQUE passage, mais le "
-                   "journal contient %d verdict(s) OU IL EST RETENU (%s) sur "
-                   "%d. La premiere ligne que lit un juge n'est plus vraie."
-                   % (sym, len(retenus), ", ".join(retenus[:3]), total))
+    # LES DEUX SURFACES QUE LIT UN JUGE, pas seulement le README. Ajoute dans
+    # la demi-heure qui a suivi la premiere version de ce controle : elle ne
+    # lisait que README.md, alors que docs/index.html porte la MEME phrase
+    # (« XLK earns it on every run », dans « How to read this page »). Une
+    # regle appliquee a un fichier et pas a son jumeau -- le motif meme que
+    # le controle 20 detecte a cote, retrouve dans le controle 21 vingt
+    # minutes apres l'avoir ecrit.
+    for rel in ("README.md", os.path.join("docs", "index.html")):
+        chemin = os.path.join(RACINE, rel)
+        if not os.path.exists(chemin):
+            continue
+        texte = open(chemin, encoding="utf-8", errors="replace").read()
+        for sym in univers:
+            if not _revendique_un_refus_permanent(texte, sym):
+                continue
+            total, retenus = _verdicts_du_journal(chemin_journal, sym)
+            if total == 0:
+                alerte(rel,
+                       "annonce que %s est refuse a CHAQUE passage, et le "
+                       "journal ne contient AUCUN verdict pour ce symbole : "
+                       "la phrase n'est pas verifiee, elle est invérifiable "
+                       "ici." % sym)
+            elif retenus:
+                alerte(rel,
+                       "annonce que %s est refuse a CHAQUE passage, mais le "
+                       "journal contient %d verdict(s) OU IL EST RETENU (%s) "
+                       "sur %d. Ce que lit un juge n'est plus vrai."
+                       % (sym, len(retenus), ", ".join(retenus[:3]), total))
+
+
+def _revendique_un_refus_permanent(texte: str, symbole: str) -> bool:
+    """Ce texte affirme-t-il que `symbole` est refuse a CHAQUE passage ?
+
+    On exige les deux dans la meme fenetre de 90 caracteres : le symbole et
+    un mot de refus. Sans cela, le separateur du kickoff -- « Nothing is
+    hidden — every run this project ever logged is still here » -- serait
+    pris pour une revendication."""
+    for m in re.finditer(r"every run", texte, re.I):
+        avant = texte[max(0, m.start() - 90):m.start()]
+        if (re.search(r"\b%s\b" % re.escape(symbole), avant)
+                and re.search(r"refus", avant, re.I)):
+            return True
+    return False
 
 
 def _univers_de_l_agent() -> list:
