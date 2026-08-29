@@ -5750,6 +5750,96 @@ class TestLaVerificationDeKickoff(unittest.TestCase):
                          % sortie)
         self.assertIn("NOMBRE", sortie, sortie)
 
+    def _resume(self, etats):
+        """Joue `main()` avec des contrôles qui affichent les états donnés,
+        et rend la sortie complète."""
+        import importlib.util, io, contextlib
+        spec = importlib.util.spec_from_file_location(
+            "kickoff_resume", str(self.SCRIPT))
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules["kickoff_resume"] = mod
+        spec.loader.exec_module(mod)
+        couleurs = {"vert": mod.VERT, "jaune": mod.JAUNE, "rouge": mod.ROUGE}
+        noms = ["compte_declare", "plists_a_jour", "travail_pousse",
+                "tag_signe", "garde_fou"]
+        for nom, etat in zip(noms, etats):
+            def fabrique(nom=nom, etat=etat):
+                def f():
+                    mod._dire(couleurs[etat], nom, "(simulé)")
+                    # garde_fou() rend True même quand il affiche 🟡 : c'est
+                    # exactement ce qui permettait à l'écart d'exister.
+                    return etat != "rouge" or nom == "garde_fou"
+                return f
+            setattr(mod, nom, fabrique())
+        argv = sys.argv
+        sys.argv = ["verifier_le_kickoff.py"]
+        tampon = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(tampon):
+                mod.main()
+        except SystemExit:
+            pass
+        finally:
+            sys.argv = argv
+        return tampon.getvalue()
+
+    def test_des_lignes_JAUNES_interdisent_TOUT_EST_EN_PLACE(self):
+        """REPRODUIT le 29/08/2026 : avec tous les contrôles au vert sauf le
+        garde-fou en 🟡, le script imprimait DEUX lignes jaunes puis « Tout
+        est en place. »
+
+        `garde_fou()` rend True même quand il affiche 🟡, et la branche sans
+        --reseau AFFICHE « compte Alpaca : non vérifié » sans rien ajouter à
+        la liste des résultats. Le verdict se calculait sur cette liste
+        parallèle, pas sur ce qui était à l'écran.
+
+        Et l'une des deux lignes avalées disait « je n'ai pas vérifié sur
+        quel compte tu es » — la panne exacte du 28/08, une heure avant le
+        premier passage de l'agent."""
+        sortie = self._resume(["vert", "vert", "vert", "vert", "jaune"])
+        self.assertIn("🟡", sortie, "prérequis : une ligne jaune est affichée")
+        self.assertNotIn("Tout est en place", sortie,
+                         "le script conclut que tout va bien en affichant "
+                         "des points non résolus :\n%s" % sortie)
+        self.assertIn("2 point(s) a regarder", sortie, sortie)
+
+    def test_tout_au_vert_dit_bien_que_tout_est_en_place(self):
+        """TÉMOIN : sans lui, un script qui ne dirait JAMAIS « tout est en
+        place » passerait le test ci-dessus. La ligne « compte Alpaca non
+        vérifié » est jaune, donc on demande --reseau pour ce cas."""
+        import importlib.util, io, contextlib
+        spec = importlib.util.spec_from_file_location(
+            "kickoff_vert", str(self.SCRIPT))
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules["kickoff_vert"] = mod
+        spec.loader.exec_module(mod)
+        for nom in ("compte_declare", "plists_a_jour", "travail_pousse",
+                    "tag_signe", "garde_fou", "compte_reel"):
+            setattr(mod, nom, (lambda nom=nom: (
+                mod._dire(mod.VERT, nom, "(simulé)"), True)[1]))
+        argv = sys.argv
+        sys.argv = ["verifier_le_kickoff.py", "--reseau"]
+        tampon = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(tampon):
+                mod.main()
+        except SystemExit:
+            pass
+        finally:
+            sys.argv = argv
+        self.assertIn("Tout est en place", tampon.getvalue(),
+                      tampon.getvalue())
+
+    def test_le_resume_compte_CE_QUI_EST_AFFICHE(self):
+        """L'autre moitié du même écart : avec un 🔴 et trois 🟡 à l'écran,
+        le résumé annonçait « 2 point(s) a traiter ». Un lecteur qui compte
+        les couleurs trouvait autre chose que le résumé."""
+        sortie = self._resume(["rouge", "vert", "jaune", "jaune", "jaune"])
+        # 1 rouge affiché, 3 jaunes affichés + celui du compte Alpaca non
+        # demandé = 4 jaunes.
+        self.assertIn("1 bloquant(s) et 4 point(s) a regarder", sortie,
+                      sortie)
+
 
 class TestAucunTestNeTouchePasLEtatDeProduction(unittest.TestCase):
     """`state.json` porte l'état de risque RÉEL : équité de départ, verrou

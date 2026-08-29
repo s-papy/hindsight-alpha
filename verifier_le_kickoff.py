@@ -41,7 +41,14 @@ AGENTS = Path.home() / "Library" / "LaunchAgents"
 VERT, JAUNE, ROUGE = "🟢", "🟡", "🔴"
 
 
+# CE QUI A ETE AFFICHE. Le verdict final se calcule sur CETTE liste, et non
+# sur un decompte parallele -- deux comptes du meme etat finissent toujours
+# par diverger, et celui-ci avait deja diverge (voir main()).
+_AFFICHES: list = []
+
+
 def _dire(etat: str, titre: str, detail: str = "") -> None:
+    _AFFICHES.append(etat)
     print("  %s %-38s %s" % (etat, titre, detail))
 
 
@@ -261,19 +268,47 @@ def main() -> None:
     args = parser.parse_args()
 
     print("\n  PRET POUR LA SEANCE ?\n")
-    resultats = [compte_declare(), plists_a_jour(), travail_pousse(),
-                 tag_signe(), garde_fou()]
+    # Les valeurs de retour ne sont plus collectees : le verdict se lit sur
+    # _AFFICHES, rempli par _dire. Garder une seconde liste en parallele
+    # etait justement ce qui permettait aux deux de diverger.
+    compte_declare()
+    plists_a_jour()
+    travail_pousse()
+    tag_signe()
+    garde_fou()
     if args.reseau:
-        resultats.append(compte_reel())
+        compte_reel()
     else:
         _dire(JAUNE, "compte Alpaca", "non verifie (relance avec --reseau)")
 
     print()
-    if all(resultats):
+    # LE VERDICT SE LIT SUR CE QUI EST AFFICHE. Corrige le 29/08/2026.
+    #
+    # C'etait `all(resultats)` puis un compte des False. Deux ecarts mesures
+    # sur la sortie reelle :
+    #
+    #   . `garde_fou()` rend True meme quand il affiche 🟡, et la branche
+    #     sans --reseau AFFICHE « compte Alpaca : non verifie » sans rien
+    #     ajouter a `resultats`. Avec tout le reste au vert, le script
+    #     imprimait donc DEUX lignes jaunes puis « Tout est en place. » --
+    #     dont « je n'ai pas verifie sur quel compte tu es », la panne exacte
+    #     du 28/08 ;
+    #   . et quand il y avait bien des False, « 2 point(s) a traiter »
+    #     s'affichait sous QUATRE lignes non vertes. Un lecteur qui compte
+    #     les couleurs trouvait autre chose que le resume.
+    #
+    # Le verdict vient de _AFFICHES, la meme source que les lignes ci-dessus.
+    # Un resume ne peut plus contredire le detail qu'il resume.
+    rouges = _AFFICHES.count(ROUGE)
+    jaunes = _AFFICHES.count(JAUNE)
+    if not rouges and not jaunes:
         print("  Tout est en place.\n")
+    elif rouges:
+        print("  %d bloquant(s) et %d point(s) a regarder ci-dessus.\n"
+              % (rouges, jaunes))
     else:
-        print("  %d point(s) a traiter ci-dessus.\n"
-              % sum(1 for r in resultats if not r))
+        print("  %d point(s) a regarder ci-dessus — rien de bloquant.\n"
+              % jaunes)
     sys.exit(0)
 
 
