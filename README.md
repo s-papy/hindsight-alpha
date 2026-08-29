@@ -64,6 +64,21 @@ decision instead of once at design time.
 
 Paper trading only. Zero real funds at risk.
 
+### If you have five minutes
+
+The picture above, then these three, in this order:
+
+1. **[The refusal, live](https://s-papy.github.io/hindsight-alpha)** — the public
+   dashboard. XLK refused on every run, on real bars, and the leak count split
+   between the live week and the development runs that came before it.
+2. **[What will be reported on 04/09](LIVE_WEEK.md)** — written *before* the
+   results were known, including what would count as a failure. A losing week
+   explicitly would not.
+3. **[What the numbers do *not* prove](#backtest-at-a-glance)** — the section
+   where this project argues against its own backtest.
+
+Everything below that is depth for whoever wants it, not a prerequisite.
+
 ### Contents
 
 | | |
