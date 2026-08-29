@@ -41,7 +41,12 @@ class BaseBilan(unittest.TestCase):
 
     def _dossier(self, entrees, kickoff=KICKOFF, etat=None):
         d = Path(tempfile.mkdtemp(prefix="hindsight-bilan-"))
-        for nom in ("bilan_semaine.py",):
+        # `decision_log.py` DEPUIS le 30/08/2026 : `bilan_semaine` y prend
+        # desormais la normalisation de fuseau, qui vivait en double ici et
+        # dans `alpaca_cli`. La fixture doit porter ce dont le script a
+        # reellement besoin -- vingt tests sont tombes d'un coup en oubliant
+        # cette ligne, ce qui est la bonne facon de l'apprendre.
+        for nom in ("bilan_semaine.py", "decision_log.py"):
             (d / nom).write_bytes((RACINE / nom).read_bytes())
         with open(d / "decision_log.jsonl", "w", encoding="utf-8") as fh:
             for e in entrees:

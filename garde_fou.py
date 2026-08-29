@@ -2264,11 +2264,18 @@ def controle_ancres_resolvent() -> None:
 
     Portee volontairement etroite : seuls les .md suivis par git, et seules
     les ancres REELLEMENT citees. Enumerer toutes les ancres possibles pour
-    verifier qu'elles sont atteignables produirait du bruit sans lecteur."""
+    verifier qu'elles sont atteignables produirait du bruit sans lecteur.
+
+    ELARGI le 30/08/2026 aux DEUX moities d'un lien. La premiere version ne
+    lisait que l'ancre et abandonnait des qu'il y avait une partie fichier,
+    en renvoyant a `controle_renvois_resolvent` -- lequel ne lit que deux
+    fichiers en dur et que les chemins entre accents graves. Les deux
+    controles se partageaient donc le travail selon un axe qui laissait un
+    trou : `[Voir](FICHIER_ABSENT.md#section)` traversait les deux."""
     try:
         suivis = subprocess.run(["git", "ls-files"], cwd=RACINE,
                                 capture_output=True, text=True, timeout=20)
-        connus = suivis.stdout.split() if suivis.returncode == 0 else []
+        connus = set(suivis.stdout.split()) if suivis.returncode == 0 else set()
     except Exception as exc:
         alerte("git", "impossible de lister les fichiers suivis (%s) -- les "
                       "ancres n'ont PAS ete verifiees." % exc)
@@ -2278,6 +2285,7 @@ def controle_ancres_resolvent() -> None:
                       "ete verifiees. Une liste vide est indistinguable d'un "
                       "depot sans ancre morte.")
         return
+    ancres_par_fichier = {}
     for rel in [f for f in connus if f.endswith(".md")]:
         chemin = os.path.join(RACINE, rel)
         if not os.path.isfile(chemin):
@@ -2288,19 +2296,50 @@ def controle_ancres_resolvent() -> None:
             alerte(rel, "illisible (%s) -- ses ancres n'ont PAS ete "
                         "verifiees." % exc)
             continue
-        ancres = _ancres_du_markdown(texte)
+        ancres_par_fichier[rel] = _ancres_du_markdown(texte)
         for lien in re.findall(r"\[[^\]]+\]\(([^)\s]+)\)", texte):
-            if lien.startswith(("http", "mailto")) or "#" not in lien:
+            if lien.startswith(("http", "mailto", "./")):
                 continue
             fichier, _, ancre = lien.partition("#")
+
+            # LA MOITIE « FICHIER ». Elle etait sautee net (`if fichier:
+            # continue`, plus un `if "#" not in lien: continue` un cran plus
+            # haut), au motif qu'elle relevait de `controle_renvois_resolvent`.
+            # Or celui-ci ne lit QUE deux fichiers en dur et QUE les chemins
+            # entre accents graves : mesure du 30/08/2026, sept liens
+            # markdown des .md suivis ne passaient devant aucun des deux, et
+            # `[Voir](FICHIER_ABSENT.md#section)` traversait les deux. Aucun
+            # n'est mort aujourd'hui -- c'etait un trou, pas un defaut. Meme
+            # convention de resolution que son jumeau : suivi par git OU
+            # present sur le disque.
+            vise = rel
             if fichier:
-                continue          # ancre d'un AUTRE document : hors portee
-            if ancre and ancre not in ancres:
+                vise = os.path.normpath(
+                    os.path.join(os.path.dirname(rel), fichier))
+                if (vise not in connus
+                        and not os.path.exists(os.path.join(RACINE, vise))):
+                    alerte(rel, "le lien « %s » vise un fichier qui n'existe "
+                                "pas : %s." % (lien, vise))
+                    continue
+                if not vise.endswith(".md"):
+                    continue      # une ancre hors markdown : pas de titre a lire
+                if vise not in ancres_par_fichier:
+                    try:
+                        ancres_par_fichier[vise] = _ancres_du_markdown(
+                            open(os.path.join(RACINE, vise), encoding="utf-8",
+                                 errors="replace").read())
+                    except OSError as exc:
+                        alerte(rel, "le lien « %s » vise un fichier illisible "
+                                    "(%s) -- son ancre n'a PAS ete "
+                                    "verifiee." % (lien, exc))
+                        continue
+            if ancre and ancre not in ancres_par_fichier[vise]:
+                ou = "de ce fichier" if vise == rel else "de %s" % vise
                 alerte(rel,
-                       "le lien « #%s » ne mene a aucun titre de ce fichier. "
+                       "le lien « #%s » ne mene a aucun titre %s. "
                        "Un fichier absent donne une 404 visible ; une ancre "
                        "morte ne fait RIEN, et le lecteur croit avoir mal "
-                       "clique." % ancre)
+                       "clique." % (ancre, ou))
 
 
 def controle_renvois_resolvent() -> None:

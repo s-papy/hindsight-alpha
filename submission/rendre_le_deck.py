@@ -292,6 +292,22 @@ def _noms_de_slides(z) -> "list[str]":
         key=lambda n: int(re.search(r"\d+", n.split("/")[-1]).group()))
 
 
+def ouvrir_deck(chemin_deck: Path) -> "tuple[object, list, dict]":
+    """Le paquet ouvert et ses diapos ANALYSEES UNE SEULE FOIS.
+
+    `construire()` et `mesurer()` ouvraient chacune le .pptx et rejouaient
+    `minidom.parseString` sur les dix memes `slideN.xml` : 21 analyses par
+    execution la ou 11 suffisent, soit 55 ms des 111 ms du script -- la
+    moitie du temps total, mesuree le 30/08/2026.
+
+    Les deux fonctions gardent leur signature d'origine et ouvrent le deck
+    elles-memes si on ne leur passe rien : chacune reste utilisable seule,
+    ce que les tests font. `main()`, lui, ouvre une fois et passe."""
+    z = zipfile.ZipFile(chemin_deck)
+    noms = _noms_de_slides(z)
+    return z, noms, {nom: minidom.parseString(z.read(nom)) for nom in noms}
+
+
 SONDE = """
 // Mesure des debordements. Le navigateur vient de faire le retour a la ligne
 // avec les vraies polices : c'est le seul moment ou « ce texte deborde-t-il »
@@ -340,19 +356,18 @@ e.className = (window.__DEBORDEMENTS.length + window.__HORS_CADRE.length)
 """
 
 
-def construire(chemin_deck: Path, seulement: "int | None") -> "tuple[str, list]":
-    z = zipfile.ZipFile(chemin_deck)
+def construire(chemin_deck: Path, seulement: "int | None",
+               deck=None) -> "tuple[str, list]":
+    z, noms, docs = deck if deck is not None else ouvrir_deck(chemin_deck)
     pres = minidom.parseString(z.read("ppt/presentation.xml"))
     taille = _premier(pres, "p:sldSz")
     largeur, hauteur = px(taille.getAttribute("cx")), px(taille.getAttribute("cy"))
-
-    noms = _noms_de_slides(z)
 
     problemes, slides = [], []
     for numero, nom in enumerate(noms, 1):
         if seulement is not None and numero != seulement:
             continue
-        doc = minidom.parseString(z.read(nom))
+        doc = docs[nom]
         # LE FOND DE LA DIAPO. Absent de la premiere version : toutes les
         # diapos etaient peintes en blanc, y compris les trois qui sont en
         # bleu nuit (1, 7, 11). Leur texte blanc y devenait invisible, et le
@@ -554,17 +569,32 @@ def _largeur(m: dict, texte: str, pt: float, interlettrage: float = 0.0) -> floa
 
 
 def _lignes(m, mots, pt, spc, largeur_dispo) -> int:
-    """Retour a la ligne gourmand, comme le fait une zone de texte."""
+    """Retour a la ligne gourmand, comme le fait une zone de texte.
+
+    La largeur de la ligne en cours est ACCUMULEE, pas remesuree. La
+    premiere version rappelait `_largeur` sur la chaine entiere a chaque mot
+    ajoute : 102 950 caracteres balayes pour 13 010 caracteres de texte
+    reel, soit x7,9 (mesure le 30/08/2026). `_largeur` est une somme sur les
+    caracteres plus `interlettrage * len`, donc strictement additive --
+    accumuler donne le meme nombre, verifie mot pour mot sur les 140
+    paragraphes du deck.
+
+    `ligne_vide` plutot qu'un test sur la largeur : un mot dont tous les
+    glyphes manqueraient pourrait mesurer zero, et « la ligne est vide » et
+    « la ligne mesure zero » ne sont pas la meme chose. C'est le `not
+    courante` de la version d'origine, qui portait sur une chaine."""
     if not mots:
         return 1
-    n, courante = 1, ""
+    espace = _largeur(m, " ", pt, spc)
+    n, courante, ligne_vide = 1, 0.0, True
     for mot in mots:
-        essai = (courante + " " + mot).strip()
-        if _largeur(m, essai, pt, spc) <= largeur_dispo or not courante:
-            courante = essai
+        large = _largeur(m, mot, pt, spc)
+        essai = large if ligne_vide else courante + espace + large
+        if essai <= largeur_dispo or ligne_vide:
+            courante, ligne_vide = essai, False
         else:
             n += 1
-            courante = mot
+            courante, ligne_vide = large, False
     return n
 
 
@@ -593,8 +623,8 @@ def _reglages(paras, caches):
             yield para, (famille, graisse), pt, spc
 
 
-def mesurer(chemin_deck: Path,
-            seulement: "int | None") -> "tuple[list, list, list, set]":
+def mesurer(chemin_deck: Path, seulement: "int | None",
+            deck=None) -> "tuple[list, list, list, set]":
     """(alertes, notes, non_mesurables, sans_police). Une alerte = une zone dont le texte remplit plus que
     du seuil de remplissage, ou dont un mot depasse en largeur."""
     caches, notes, exact_par_cle, sans_police = {}, [], {}, set()
@@ -642,14 +672,13 @@ def mesurer(chemin_deck: Path,
                 notes.append("« %s »%s : aucune police trouvee — les zones "
                              "qui l'emploient ne sont PAS mesurees"
                              % (demandee, " gras" if graisse else ""))
-    z = zipfile.ZipFile(chemin_deck)
-    noms = _noms_de_slides(z)
+    _z, noms, docs = deck if deck is not None else ouvrir_deck(chemin_deck)
 
     alertes, non_mesurables = [], []
     for numero, nom in enumerate(noms, 1):
         if seulement is not None and numero != seulement:
             continue
-        doc = minidom.parseString(z.read(nom))
+        doc = docs[nom]
         for i, sp in enumerate(doc.getElementsByTagName("p:sp"), 1):
             geo = _geometrie(sp)
             paras = _paragraphes(sp)
@@ -797,14 +826,16 @@ def main() -> None:
         print("deck introuvable : %s" % chemin, file=sys.stderr)
         raise SystemExit(2)
 
-    page, problemes = construire(chemin, args.slide)
+    deck = ouvrir_deck(chemin)
+    page, problemes = construire(chemin, args.slide, deck)
     Path(args.sortie).write_text(page, encoding="utf-8")
     print("ecrit : %s" % args.sortie)
     if problemes:
         print("\nCE QUI N'A PAS ETE RENDU FIDELEMENT (%d) :" % len(problemes))
         for p in problemes:
             print("  . %s" % p)
-    alertes, notes, non_mesurables, sans_police = mesurer(chemin, args.slide)
+    alertes, notes, non_mesurables, sans_police = mesurer(
+        chemin, args.slide, deck)
     print("\nMESURE DES DEBORDEMENTS (metriques de police lues dans le "
           "fichier TTF, sans navigateur)")
     for n in notes:

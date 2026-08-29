@@ -1637,12 +1637,14 @@ class TestUneANCREMorteEstSignalee(unittest.TestCase):
 
     RACINE = Path(__file__).resolve().parent
 
-    def _lancer(self, contenu_readme):
+    def _lancer(self, contenu_readme, autres=None):
         d = Path(tempfile.mkdtemp(prefix="hindsight-ancres-"))
         try:
             for nom in ("garde_fou.py", "config.py"):
                 shutil.copy(self.RACINE / nom, d / nom)
             (d / "README.md").write_text(contenu_readme, encoding="utf-8")
+            for nom, contenu in (autres or {}).items():
+                (d / nom).write_text(contenu, encoding="utf-8")
             subprocess.run([*GIT_NEUTRE, "init", "-q", "."], cwd=str(d), check=True)
             subprocess.run(["git", "add", "-A"], cwd=str(d), check=True)
             r = subprocess.run([sys.executable, str(d / "garde_fou.py")],
@@ -1686,6 +1688,43 @@ class TestUneANCREMorteEstSignalee(unittest.TestCase):
                               "\n## Le _mot_ compte\n\nTexte.\n")
         self.assertNotIn("ne mene a aucun titre", sortie, sortie[-700:])
 
+    def test_un_lien_vers_un_fichier_ABSENT_est_signale(self):
+        """LA MOITIÉ QUI MANQUAIT. `[Voir](FICHIER_ABSENT.md#section)`
+        traversait les DEUX contrôles : celui-ci abandonnait dès qu'il y
+        avait une partie fichier, et `controle_renvois_resolvent` ne lit que
+        deux fichiers en dur et que les chemins entre accents graves.
+
+        Deux contrôles qui se partagent une même question — « cette référence
+        mène-t-elle quelque part ? » — selon un axe qui laisse un trou au
+        milieu, c'est le motif que ce dépôt traque, dans le fichier qui le
+        traque."""
+        sortie = self._lancer(
+            "# Projet\n\nVoir [le détail](ABSENT.md#section).\n")
+        self.assertIn("vise un fichier qui n'existe pas", sortie,
+                      "un lien vers un fichier absent passe :\n%s"
+                      % sortie[-700:])
+
+    def test_une_ancre_morte_dans_un_AUTRE_fichier_est_signalee(self):
+        """Le fichier existe, l'ancre non — le cas que la version précédente
+        sautait explicitement en le déclarant « hors portée »."""
+        sortie = self._lancer(
+            "# Projet\n\nVoir [le détail](AUTRE.md#section-absente).\n",
+            {"AUTRE.md": "# Autre\n\n## Une section\n\nTexte.\n"})
+        self.assertIn("ne mene a aucun titre de AUTRE.md", sortie,
+                      "une ancre morte dans un autre document passe :\n%s"
+                      % sortie[-700:])
+
+    def test_un_lien_vers_un_autre_fichier_VALIDE_ne_declenche_rien(self):
+        """TÉMOIN DOUBLE : l'ancre distante valide, et le lien SANS ancre.
+        Un contrôle qui crierait sur l'un des deux rendrait tout renvoi entre
+        documents impossible."""
+        sortie = self._lancer(
+            "# Projet\n\n[Un](AUTRE.md#une-section) et [deux](AUTRE.md).\n",
+            {"AUTRE.md": "# Autre\n\n## Une section\n\nTexte.\n"})
+        self.assertNotIn("ne mene a aucun titre", sortie, sortie[-700:])
+        self.assertNotIn("vise un fichier qui n'existe pas", sortie,
+                         sortie[-700:])
+
     def test_les_ancres_du_README_reel_resolvent_toutes(self):
         """Le contrôle tourne sur le vrai dépôt et doit y être vert : c'est
         ce qui distingue une alerte résoluble d'une alerte qu'on apprend à
@@ -1713,6 +1752,30 @@ class TestUnHorodatageNaifEstSignaleParLeGardeFou(unittest.TestCase):
     RACINE = Path(__file__).resolve().parent
     MOTIF = "sans garantir son fuseau"
     MOTIF_NOW = "lit le fuseau SUR la valeur analysee"
+
+    def _regle(self, corps_python):
+        """La regle seule, sans relancer tout le garde-fou.
+
+        `_fuseau_garanti` est une fonction PURE sur un noeud d'arbre — sa
+        docstring le dit. Sept temoins passaient pourtant chacun par un
+        depot jetable, une copie de `garde_fou.py` et un `git init`, pour
+        relancer les 23 controles et lire UNE phrase : 3,37 s pour huit
+        tests, mesure le 30/08/2026.
+
+        Six d'entre eux interrogent la REGLE. Un seul a besoin de prouver
+        qu'elle est branchee dans le garde-fou, et celui-la garde son
+        lancement bout-en-bout — sans lui, la regle pourrait etre parfaite
+        et n'etre appelee nulle part. C'est le meme partage que
+        `_collisions_causees` dans le moteur de rendu.
+        """
+        import ast
+        import garde_fou
+        arbre = ast.parse("from datetime import datetime, timezone\n\n"
+                          + corps_python)
+        return " | ".join(
+            garde_fou._fuseau_garanti(n) or ""
+            for n in ast.walk(arbre)
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)))
 
     def _lancer(self, corps_python):
         d = Path(tempfile.mkdtemp(prefix="hindsight-fuseau-"))
@@ -1747,7 +1810,7 @@ class TestUnHorodatageNaifEstSignaleParLeGardeFou(unittest.TestCase):
         Supprimer l'un des deux dans le contrôle ne faisait donc échouer
         aucun test — l'autre couvrait. Deux mutations survivaient sur un
         témoin qui avait l'air de les couvrir."""
-        sortie = self._lancer(
+        sortie = self._regle(
             "def age(brut, debut):\n"
             "    t = datetime.fromisoformat(brut).replace(tzinfo=timezone.utc)\n"
             "    return t >= debut\n")
@@ -1755,7 +1818,7 @@ class TestUnHorodatageNaifEstSignaleParLeGardeFou(unittest.TestCase):
 
     def test_tester_tzinfo_is_None_suffit(self):
         """TÉMOIN 1b : l'autre moitié, seule."""
-        sortie = self._lancer(
+        sortie = self._regle(
             "def age(brut, debut):\n"
             "    t = datetime.fromisoformat(brut)\n"
             "    if t.tzinfo is None:\n"
@@ -1766,7 +1829,7 @@ class TestUnHorodatageNaifEstSignaleParLeGardeFou(unittest.TestCase):
     def test_rattraper_le_TypeError_suffit(self):
         """TÉMOIN 2 sur 4 : la parade de `monitor_exits.py`, qui traite la
         comparaison impossible comme « dû », pas comme « silencieux »."""
-        sortie = self._lancer(
+        sortie = self._regle(
             "def age(brut, debut):\n"
             "    t = datetime.fromisoformat(brut)\n"
             "    try:\n"
@@ -1778,7 +1841,7 @@ class TestUnHorodatageNaifEstSignaleParLeGardeFou(unittest.TestCase):
     def test_analyser_une_CONSTANTE_en_majuscules_suffit(self):
         """TÉMOIN 3 sur 4 : la parade du garde-fou lui-même — `KICKOFF_UTC`
         est un littéral qui porte son fuseau et ne peut pas dériver."""
-        sortie = self._lancer(
+        sortie = self._regle(
             'KICKOFF = "2026-08-28T15:00:00+00:00"\n\n'
             "def age(debut):\n"
             "    return datetime.fromisoformat(KICKOFF) >= debut\n")
@@ -1792,7 +1855,7 @@ class TestUnHorodatageNaifEstSignaleParLeGardeFou(unittest.TestCase):
         silencieux — et du côté qui AUTORISE. Mesuré le 29/08 sur la porte de
         fraîcheur : une barre vieille de 5 j 3 h, limite à 5 jours, REFUSÉE à
         Paris et à UTC, ACCEPTÉE à Los Angeles et à Honolulu."""
-        sortie = self._lancer(
+        sortie = self._regle(
             "def age(brut):\n"
             "    t = datetime.fromisoformat(brut)\n"
             "    return (datetime.now(t.tzinfo) - t).days\n")
@@ -1803,7 +1866,7 @@ class TestUnHorodatageNaifEstSignaleParLeGardeFou(unittest.TestCase):
         cherchait des sous-chaînes et exemptait `_horodatage_utc`
         d'`alpaca_cli.py` — parce que sa docstring CITE le défaut qu'elle
         corrige. Le contrôle lit l'arbre, pas le texte."""
-        sortie = self._lancer(
+        sortie = self._regle(
             "def age(brut, debut):\n"
             '    """On pourrait ecrire t.replace(tzinfo=timezone.utc) ici,\n'
             '    ou attraper TypeError. On ne le fait pas."""\n'
@@ -2044,6 +2107,33 @@ class TestLeMoteurDeRenduDuDeckDitCeQuIlNeSaitPasFaire(unittest.TestCase):
                             "pas mesurées : %s" % notes)
         finally:
             R.POLICES = vraies
+
+    def test_les_MARGES_INTERNES_du_pptx_sont_rendues_et_pas_supposees(self):
+        """Trou de couverture trouvé le 30/08/2026 EN MUTANT `_insets` : le
+        remplacer par les marges par défaut ne faisait tomber AUCUN test.
+
+        Ces marges ne sont pas décoratives — elles décident de la largeur
+        disponible, donc du verdict de débordement. Et le deck s'appuie
+        dessus : les badges centrés de la slide 6 ont `lIns=rIns=0`, posés
+        précisément pour que « 1,5 % » cesse de tenir sur deux lignes.
+
+        Le rendu et la mesure lisent désormais les mêmes sept lignes
+        (`_insets`), ce qui les empêche de diverger — mais rien ne prouvait
+        qu'elles lisaient le FICHIER plutôt que la valeur par défaut. Un
+        outil qui suppose ce qu'il prétend mesurer est le défaut que ce
+        moteur existe pour éviter."""
+        defaut = "inset:4.8px 9.6px 4.8px 9.6px"
+        self.assertIn(defaut, self.page,
+                      "aucune zone aux marges OOXML par défaut : le rendu "
+                      "n'emploie plus les valeurs du standard")
+        for surcharge, ou in (("inset:4.8px 0.0px 4.8px 0.0px",
+                               "les badges à lIns=rIns=0 de la slide 6"),
+                              ("inset:0.0px 9.6px 0.0px 9.6px",
+                               "les bandeaux à tIns=bIns=0")):
+            self.assertIn(surcharge, self.page,
+                          "%s sont rendus avec les marges par défaut : le "
+                          "rendu ne lit pas les marges du fichier, il les "
+                          "suppose" % ou)
 
     def test_le_rendu_produit_bien_les_dix_diapos(self):
         """TÉMOIN : un script qui n'écrirait rien passerait les deux tests

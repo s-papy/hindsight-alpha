@@ -139,6 +139,67 @@ def caviarder(texte: str) -> str:
     return texte
 
 
+def en_utc(valeur: Any) -> "datetime | None":
+    """Analyse un horodatage ISO et le rend TOUJOURS conscient du fuseau.
+
+    ECRIT ICI le 30/08/2026, apres avoir existe en DEUX COPIES au corps
+    strictement identique -- `bilan_semaine._en_utc` et
+    `alpaca_cli._horodatage_utc` -- plus une troisieme normalisation en ligne
+    dans `agent._minutes_avant`. Ce fichier est le foyer : c'est
+    `log_run` qui horodate en UTC conscient, donc c'est la convention de ce
+    module que les trois autres appliquaient chacun de leur cote. Il n'importe
+    que la bibliotheque standard, donc personne ne se couple a rien en
+    l'appelant.
+
+    Une regle ecrite deux fois n'est vraie qu'a un seul endroit, et ce depot
+    l'a deja paye : deux copies de `is_option_position` avaient diverge. Les
+    trois copies d'ici avaient DEJA commence -- celle d'`agent.py` n'attrapait
+    pas `AttributeError`.
+
+    LE PIEGE. Un horodatage sans fuseau ne leve rien a l'analyse : il explose
+    une ligne plus loin, a la comparaison, avec
+    `TypeError: can't compare offset-naive and offset-aware datetimes`.
+    `monitor_exits.py` le nomme explicitement (« un build plus ancien, ou une
+    edition a la main -- reproduit le 24/08, et ca tuait tout le run »).
+
+    CE QUE CA COUTAIT DANS LE BILAN HEBDOMADAIRE, reproduit le 29/08/2026
+    dans les DEUX sens :
+      . une ligne de journal sans fuseau -> le rapport entier meurt sur cette
+        ligne ;
+      . un `kickoff` sans fuseau dans le fichier de gel -> le rapport meurt sur
+        la PREMIERE ligne bien formee, donc sur toutes.
+    Le `except (ValueError, AttributeError): continue` du site d'appel
+    existait deja pour rendre un horodatage douteux ignorable. Il etait
+    simplement vise une ligne trop tot : la panne ne se produit pas a
+    l'analyse, elle se produit a la comparaison.
+
+    CE QUE CA COUTAIT DANS LA PORTE DE FRAICHEUR, mesure le 29/08/2026. Le
+    controle calculait l'age avec `datetime.now(last_ts.tzinfo) - last_ts`.
+    C'est astucieux -- ca ne leve jamais de TypeError -- mais quand `last_ts`
+    est NAIF, `tzinfo` vaut None et `datetime.now(None)` rend l'heure LOCALE
+    de la machine, comparee a un horodatage qui, lui, est en UTC. Le verdict
+    de la porte se met alors a dependre de l'endroit ou tourne l'agent.
+    Mesure sur une barre vieille de 5 j 3 h, limite a 5 jours :
+
+        Europe/Paris          age 5.21 j  -> REFUSE
+        UTC                   age 5.13 j  -> REFUSE
+        America/Los_Angeles   age 4.83 j  -> ACCEPTE
+        Pacific/Honolulu      age 4.71 j  -> ACCEPTE
+
+    Le sens compte : a l'ouest de UTC la porte SOUS-ESTIME l'age, donc elle
+    AUTORISE un flux gele qu'elle devrait refuser. Une porte qui laisse passer
+    est toujours plus grave qu'une porte qui refuse a tort.
+
+    Naif est interprete comme UTC : c'est le fuseau des barres Alpaca, et
+    c'est ce que ce projet ecrit partout.
+    """
+    try:
+        t = datetime.fromisoformat(str(valeur).replace("Z", "+00:00"))
+    except (ValueError, AttributeError, TypeError):
+        return None
+    return t if t.tzinfo is not None else t.replace(tzinfo=timezone.utc)
+
+
 def log_run(record: Dict[str, Any]) -> None:
     """Appends one record. Always stamps a UTC timestamp; caller supplies
     the rest (market_open, exits, symbol verdicts, trade decision, error)."""

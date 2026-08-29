@@ -53,6 +53,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, List, Optional
 
 import config
+import decision_log
 from vol_strategy import MIN_TRADING_DAYS_FOR_SWEEP, Bar
 
 
@@ -458,34 +459,13 @@ MAX_STALE_DAYS = 5           # refuse to trade if the most recent bar is older t
 
 
 def _horodatage_utc(brut: object) -> "datetime | None":
-    """Analyse un horodatage de barre et le rend TOUJOURS conscient du fuseau.
+    """Alias vers `decision_log.en_utc`, ou vit desormais la regle et tout
+    son raisonnement -- y compris la mesure par fuseau de la porte de
+    fraicheur. Ce fichier en avait une copie au corps identique a celle de
+    `bilan_semaine` -- fusionnees le 30/08/2026."""
+    return decision_log.en_utc(brut)
 
-    AJOUTE le 29/08/2026. Le controle de fraicheur calculait l'age avec
-    `datetime.now(last_ts.tzinfo) - last_ts`. C'est astucieux -- ca ne leve
-    jamais de TypeError -- mais quand `last_ts` est NAIF, `tzinfo` vaut None et
-    `datetime.now(None)` rend l'heure LOCALE de la machine, comparee a un
-    horodatage qui, lui, est en UTC. Le verdict de la porte se met alors a
-    dependre de l'endroit ou tourne l'agent.
 
-    Mesure sur une barre vieille de 5 j 3 h, limite a 5 jours :
-
-        Europe/Paris          age 5.21 j  -> REFUSE
-        UTC                   age 5.13 j  -> REFUSE
-        America/Los_Angeles   age 4.83 j  -> ACCEPTE
-        Pacific/Honolulu      age 4.71 j  -> ACCEPTE
-
-    Le sens compte : a l'ouest de UTC la porte SOUS-ESTIME l'age, donc elle
-    AUTORISE un flux gele qu'elle devrait refuser. Une porte qui laisse passer
-    est toujours plus grave qu'une porte qui refuse a tort.
-
-    Naif est interprete comme UTC : c'est le fuseau des barres Alpaca, et c'est
-    deja ce que font `agent.py` et `bilan_semaine.py` au meme endroit logique.
-    """
-    try:
-        t = datetime.fromisoformat(str(brut).replace("Z", "+00:00"))
-    except (ValueError, AttributeError, TypeError):
-        return None
-    return t if t.tzinfo is not None else t.replace(tzinfo=timezone.utc)
 MAX_IDENTICAL_CLOSES = 5     # a liquid ETF does not print the same close a full trading week running
 MAX_DAILY_JUMP_PCT = 0.50    # refuse to trade if any adjacent-day close moves more than this -- likely bad data, not a real move, for a liquid sector ETF
 

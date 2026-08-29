@@ -351,14 +351,16 @@ def _minutes_avant(horodatage) -> "int | None":
     """
     if not horodatage:
         return None
-    try:
-        from datetime import datetime, timezone
-        t = datetime.fromisoformat(str(horodatage).replace("Z", "+00:00"))
-        if t.tzinfo is None:
-            t = t.replace(tzinfo=timezone.utc)
-        return int((t - datetime.now(timezone.utc)).total_seconds() // 60)
-    except (ValueError, TypeError):
+    # La normalisation du fuseau vit dans `decision_log.en_utc`, avec son
+    # raisonnement. C'etait ici la TROISIEME copie de la meme regle, et la
+    # seule qui avait deja diverge : son `except` n'attrapait pas
+    # `AttributeError`, contrairement aux deux autres. Fusionnees le
+    # 30/08/2026.
+    from datetime import datetime, timezone
+    t = decision_log.en_utc(horodatage)
+    if t is None:
         return None
+    return int((t - datetime.now(timezone.utc)).total_seconds() // 60)
 
 
 def _run(args, symbols, record: dict) -> None:

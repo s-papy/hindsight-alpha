@@ -62,6 +62,8 @@ import re
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 
+import decision_log
+
 RACINE = os.path.dirname(os.path.abspath(__file__))
 JOURNAL = os.path.join(RACINE, "decision_log.jsonl")
 ETAT = os.path.join(RACINE, "state.json")
@@ -115,38 +117,10 @@ def _lire_journal() -> "tuple[list | None, int]":
 
 
 def _en_utc(valeur: object) -> "datetime | None":
-    """Analyse un horodatage ISO et le rend TOUJOURS conscient du fuseau.
-
-    Un horodatage sans fuseau ne leve rien a l'analyse : il explose une ligne
-    plus loin, a la comparaison, avec
-    `TypeError: can't compare offset-naive and offset-aware datetimes`.
-
-    Ce piege est deja documente ET rattrape deux fois dans ce depot :
-    `monitor_exits.py` le nomme explicitement (« un build plus ancien, ou une
-    edition a la main -- reproduit le 24/08, et ca tuait tout le run ») et
-    `agent.py` normalise le fuseau exactement comme ici. Le bilan hebdomadaire
-    etait le troisieme site, et le seul des trois sans parade.
-
-    Reproduit le 29/08/2026, dans les DEUX sens :
-      . une ligne de journal sans fuseau -> le rapport entier meurt sur cette
-        ligne ;
-      . un `kickoff` sans fuseau dans le fichier de gel -> le rapport meurt sur
-        la PREMIERE ligne bien formee, donc sur toutes.
-
-    Le `except (ValueError, AttributeError): continue` du site d'appel existait
-    deja pour rendre un horodatage douteux ignorable. Il etait simplement vise
-    une ligne trop tot : la panne ne se produit pas a l'analyse, elle se produit
-    a la comparaison.
-
-    Naif est interprete comme UTC parce que c'est ce que ce projet ecrit
-    partout (`decision_log.log_run` horodate en UTC conscient) et ce que
-    `agent.py` suppose deja au meme endroit.
-    """
-    try:
-        t = datetime.fromisoformat(str(valeur).replace("Z", "+00:00"))
-    except (ValueError, AttributeError, TypeError):
-        return None
-    return t if t.tzinfo is not None else t.replace(tzinfo=timezone.utc)
+    """Alias vers `decision_log.en_utc`, ou vit desormais la regle et tout
+    son raisonnement. Ce fichier en avait une copie au corps identique a
+    celle d'`alpaca_cli` -- fusionnees le 30/08/2026."""
+    return decision_log.en_utc(valeur)
 
 
 def _fenetre() -> "tuple[datetime, datetime] | None":
