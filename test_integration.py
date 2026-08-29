@@ -5677,6 +5677,79 @@ class TestLaVerificationDeKickoff(unittest.TestCase):
                       "la règle du compte doit venir de config, pas d'une "
                       "copie locale")
 
+    def _verdict_du_garde_fou(self, sortie_du_faux_garde_fou):
+        """Remplace garde_fou.py par un script jetable, dans une copie."""
+        import importlib.util, shutil, tempfile, io, contextlib, json as _json
+        with tempfile.TemporaryDirectory() as d:
+            shutil.copy(self.SCRIPT, Path(d) / self.SCRIPT.name)
+            Path(d, "garde_fou.py").write_text(
+                "import sys\nsys.stdout.write(%s)\n"
+                % repr(sortie_du_faux_garde_fou), encoding="utf-8")
+            spec = importlib.util.spec_from_file_location(
+                "kickoff_garde_fou", str(Path(d) / self.SCRIPT.name))
+            mod = importlib.util.module_from_spec(spec)
+            sys.modules["kickoff_garde_fou"] = mod
+            spec.loader.exec_module(mod)
+            mod.RACINE = Path(d)
+            tampon = io.StringIO()
+            with contextlib.redirect_stdout(tampon):
+                mod.garde_fou()
+            return tampon.getvalue()
+
+    # La forme EXACTE de la sortie du garde-fou : un point à regarder, suivi
+    # de son avertissement permanent sur deux lignes — la seconde indentée de
+    # cinq espaces, qui en contiennent trois.
+    SORTIE_GARDE_FOU = (
+        "==========\n"
+        "🟡 À REGARDER : 1\n"
+        "   submission/Hindsight_Alpha_Deck.pptx    cite un nombre d'équipes\n"
+        "\n"
+        "VERDICT : 🟡 À VÉRIFIER\n"
+        "\n"
+        "  ⚠️  Même au vert : ce script attrape 19 formes d'erreur précises,\n"
+        "     pas le fond. Un dossier qu'il approuve peut encore être faux.\n")
+
+    def test_le_nombre_de_points_est_celui_que_le_garde_fou_ANNONCE(self):
+        """Il comptait « toute ligne commençant par trois espaces ».
+
+        Mesuré le 29/08/2026, avec UN seul point à regarder :
+
+            count("\\n   ") = 2
+              "   submission/Hindsight_Alpha_Deck.pptx  cite un nombre..."
+              "     pas le fond. Un dossier qu'il approuve peut encore..."
+
+        La seconde est la deuxième ligne de l'avertissement PERMANENT du
+        garde-fou — cinq espaces contiennent trois espaces. Le compte était
+        donc toujours +1 dès qu'il y avait au moins un point. Deux contrôles
+        du même dossier annonçaient des chiffres différents pour la même
+        chose, et c'est celui-ci qu'on lit avant une séance."""
+        sortie = self._verdict_du_garde_fou(self.SORTIE_GARDE_FOU)
+        self.assertIn("1 point(s)", sortie,
+                      "le compte ne suit pas le nombre annoncé : %r" % sortie)
+        self.assertNotIn("2 point(s)", sortie)
+
+    def test_aucun_point_reste_vert(self):
+        """TÉMOIN : lire un nombre ne doit pas inventer un point quand il n'y
+        en a pas."""
+        sortie = self._verdict_du_garde_fou(
+            "==========\nVERDICT : 🟢 RIEN À SIGNALER\n"
+            "  ⚠️  Même au vert : ce script attrape 19 formes d'erreur,\n"
+            "     pas le fond.\n")
+        self.assertIn("aucun point", sortie, sortie)
+
+    def test_un_verdict_jaune_SANS_nombre_lisible_ne_devient_pas_zero(self):
+        """SECOND TÉMOIN, et le plus important : si la ligne d'en-tête change
+        de forme, `re.search` ne trouve rien. Rendre 0 afficherait « aucun
+        point » EN VERT sur un dossier qui en a. « Je n'ai pas compris » n'est
+        pas « il n'y a rien »."""
+        sortie = self._verdict_du_garde_fou(
+            "==========\n🟡 POINTS À REGARDER (voir ci-dessous)\n"
+            "   submission/Hindsight_Alpha_Deck.pptx    un nombre d'équipes\n")
+        self.assertNotIn("aucun point", sortie,
+                         "un verdict jaune illisible est passé pour vert : %r"
+                         % sortie)
+        self.assertIn("NOMBRE", sortie, sortie)
+
 
 class TestAucunTestNeTouchePasLEtatDeProduction(unittest.TestCase):
     """`state.json` porte l'état de risque RÉEL : équité de départ, verrou

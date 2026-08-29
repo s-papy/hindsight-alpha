@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import argparse
 import filecmp
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -179,7 +180,37 @@ def garde_fou() -> bool:
     if r.returncode != 0:
         _dire(ROUGE, "garde-fou", "verdict BLOQUANT — lance-le pour le detail")
         return False
-    jaunes = r.stdout.count("\n   ") if "REGARDER" in r.stdout else 0
+    # ON LIT LE NOMBRE QUE LE GARDE-FOU ANNONCE, on ne recompte pas sa prose.
+    #
+    # C'etait `r.stdout.count("\\n   ")`, soit « toute ligne commencant par
+    # trois espaces ». Mesure le 29/08/2026, garde-fou a UN seul point :
+    #
+    #     count("\\n   ") = 2
+    #       "   submission/Hindsight_Alpha_Deck.pptx  cite un nombre..."
+    #       "     pas le fond. Un dossier qu'il approuve peut encore..."
+    #
+    # La seconde est la deuxieme ligne de l'avertissement PERMANENT du
+    # garde-fou, present a chaque execution -- et cinq espaces contiennent
+    # trois espaces. Le compte etait donc toujours +1 des qu'il y avait au
+    # moins un point, et une entree qui passe a la ligne en aurait ajoute
+    # d'autres. Deux controles du meme dossier annoncaient des chiffres
+    # differents pour la meme chose.
+    #
+    # Le garde-fou imprime deja le nombre : « 🟡 A REGARDER : 1 ». C'est lui
+    # qui fait autorite. Le relire est plus juste que le recompter.
+    annonce = re.search(r"REGARDER\s*:\s*(\d+)", r.stdout)
+    if annonce is None:
+        if "REGARDER" in r.stdout:
+            # FERMETURE : verdict jaune dont on n'a pas su lire le compte.
+            # Rendre 0 dirait « aucun point » -- « je n'ai pas compris »
+            # n'est pas « il n'y a rien ».
+            _dire(JAUNE, "garde-fou",
+                  "des points a regarder, mais leur NOMBRE n'a pas pu etre lu "
+                  "— lance `python3 garde_fou.py`")
+            return True
+        jaunes = 0
+    else:
+        jaunes = int(annonce.group(1))
     _dire(VERT if jaunes == 0 else JAUNE, "garde-fou",
           "aucun point" if jaunes == 0 else "%d point(s) a regarder" % jaunes)
     return True
