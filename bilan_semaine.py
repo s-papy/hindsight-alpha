@@ -70,11 +70,34 @@ GEL = os.path.join(RACINE, "kickoff_freeze.json")
 HEURE_AGENT = (19, 37)
 
 
-def _lire_journal() -> list:
+def _lire_journal() -> "tuple[list | None, int]":
     """Une ligne illisible est SAUTEE, pas fatale -- meme choix que partout
     ailleurs dans ce depot. Mais on COMPTE les sautees et on le dit : un
     bilan qui ignore silencieusement une partie de ses donnees n'est pas un
-    bilan."""
+    bilan.
+
+    Rend `(None, 0)` si le journal ne s'ouvre pas DU TOUT -- ce n'est pas
+    « zero ligne », c'est « je n'ai pas pu lire ». L'appelant s'arrete.
+
+    CE QUE RENDAIT CETTE FONCTION AVANT le 29/08/2026 : `([], -1)`. Le -1
+    partait tel quel dans le rapport public (« unreadable log lines skipped:
+    -1 ») et, pire, la liste vide faisait conclure a la section 2 :
+
+        0 actual run(s) for 1 expected
+        🔴 1 run(s) MISSING — an agent that did not run proved nothing
+
+    ...avec un code de sortie 0. Une ACCUSATION contre l'agent, produite par
+    l'incapacite a lire un fichier. Dans le meme rapport, la section 1 disait
+    correctement « ⬜ no verdict — UNKNOWN, not zero » : la meme absence,
+    lue de deux facons opposees, a quatre lignes d'intervalle.
+
+    Le fichier de gel, l'autre entree de ce script, avait DEJA ce traitement
+    -- illisible, on s'arrete. La regle etait ecrite pour un jumeau et pas
+    pour l'autre.
+
+    Un journal VIDE (le fichier existe, zero ligne) reste `([], 0)` : la
+    lecture a reussi, et « 0 passage » est alors une mesure, pas une
+    ignorance."""
     entrees, illisibles = [], 0
     try:
         with open(JOURNAL, encoding="utf-8") as fh:
@@ -86,7 +109,7 @@ def _lire_journal() -> list:
                 except json.JSONDecodeError:
                     illisibles += 1
     except OSError:
-        return [], -1
+        return None, 0
     return entrees, illisibles
 
 
@@ -166,6 +189,15 @@ def main() -> None:
     debut, fin = fenetre
     print("  window: %s  ->  %s" % (debut.strftime("%d/%m %H:%M"),
                                     fin.strftime("%d/%m %H:%M")))
+    if entrees is None:
+        print("  🔴 LOG UNREADABLE: decision_log.jsonl could not be opened.")
+        print("     Every figure below would be built on no data — and the")
+        print("     execution-regularity section would report the agent as")
+        print("     MISSING every run it cannot see. That is an accusation")
+        print("     produced by a failure to read a file, not a measurement.")
+        print("     Stopping here, for the same reason as an unreadable window.")
+        raise SystemExit(2)
+
     # TOUJOURS imprime, meme a zero. LIVE_WEEK.md promet publiquement que les
     # lignes illisibles sont « skipped AND COUNTED IN THE OUTPUT » ; se taire a
     # zero rendait cette phrase vraie seulement quand il y en avait. Un lecteur

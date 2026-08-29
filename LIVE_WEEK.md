@@ -58,8 +58,16 @@ If that window cannot be read, the script stops instead of counting
 everything: *"I don't know which entries count"* must never become *"I count
 them all."*
 
-Unreadable log lines are skipped **and counted in the output**. A report that
-silently drops part of its data is not a report.
+Unreadable log lines are skipped **and counted in the output** — the count is
+printed on every run, including when it is zero. A report that silently drops
+part of its data is not a report.
+
+*Added 29/08/2026, and it makes the rule stricter rather than looser: if
+`decision_log.jsonl` cannot be opened **at all**, the script stops too. It used
+to carry on and print "0 actual runs for 1 expected — 1 run MISSING", which
+accuses the agent of something a failure to read a file caused. Nothing about
+what will be reported has changed; this only says what happens when it cannot
+be.*
 
 ## What this week cannot prove
 

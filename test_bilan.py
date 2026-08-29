@@ -241,5 +241,69 @@ class TestLeRapportEstLISIBLE(BaseBilan):
             __import__("shutil").rmtree(d, ignore_errors=True)
 
 
+
+class TestUnJournalILLISIBLENAccusePersonne(BaseBilan):
+    """REPRODUIT le 29/08/2026, avec decision_log.jsonl simplement ABSENT :
+
+        unreadable log lines skipped: -1
+
+        2. EXECUTION REGULARITY
+           0 actual run(s) for 1 expected
+           🔴 1 run(s) MISSING — an agent that did not run proved nothing
+
+    ...et un code de sortie 0. Une ACCUSATION contre l'agent, produite par
+    l'incapacite a lire un fichier. Le -1 etait un sentinelle interne parti
+    tel quel dans le rapport public.
+
+    Et dans le MEME rapport, quatre lignes plus haut, la section 1 disait
+    correctement « ⬜ no verdict — UNKNOWN, not zero ». La meme absence, lue
+    de deux facons opposees.
+
+    Le fichier de gel, l'autre entree de ce script, avait DEJA le bon
+    traitement : illisible, on s'arrete. La regle etait ecrite pour un
+    jumeau et pas pour l'autre."""
+
+    def test_un_journal_absent_arrete_le_bilan(self):
+        d = self._dossier([self._passage("2026-08-28T19:37:00+00:00")])
+        try:
+            (d / "decision_log.jsonl").unlink()
+            code, sortie = self._lancer(d)
+            self.assertEqual(code, 2,
+                             "un bilan sans donnees sort en 0 :\n%s" % sortie)
+            self.assertIn("LOG UNREADABLE", sortie, sortie)
+            # ASSERTIONS RESSERREES : ma premiere version cherchait
+            # « MISSING » n'importe ou et le trouvait dans le message
+            # d'arret lui-meme, qui explique justement ce qu'il evite. On
+            # vise la LIGNE d'accusation, pas le mot.
+            self.assertNotIn("run(s) MISSING", sortie,
+                             "l'agent est accuse d'avoir manque des passages "
+                             "alors que le journal n'a pas pu etre lu :\n%s"
+                             % sortie)
+            self.assertNotIn("EXECUTION REGULARITY", sortie,
+                             "la section qui accuse est quand meme rendue :"
+                             "\n%s" % sortie)
+            self.assertNotIn("skipped: -1", sortie,
+                             "la sentinelle interne part dans le rapport "
+                             "public :\n%s" % sortie)
+        finally:
+            __import__("shutil").rmtree(d, ignore_errors=True)
+
+    def test_un_journal_VIDE_reste_une_mesure(self):
+        """TEMOIN, et c'est la distinction entiere : un fichier qui EXISTE et
+        ne contient rien a bien ete lu. « 0 passage » est alors une mesure,
+        et l'agent doit etre signale comme manquant -- s'arreter la serait
+        aussi faux que d'accuser tout a l'heure."""
+        d = self._dossier([])
+        try:
+            code, sortie = self._lancer(d)
+            self.assertEqual(code, 0, sortie)
+            self.assertIn("MISSING", sortie,
+                          "un journal vide ne signale plus les passages "
+                          "manquants :\n%s" % sortie)
+            self.assertIn("unreadable log lines skipped: 0", sortie, sortie)
+        finally:
+            __import__("shutil").rmtree(d, ignore_errors=True)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
