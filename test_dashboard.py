@@ -727,13 +727,42 @@ class TestSeparateurDuKickoff(BaseRendu):
         html = self._tableau(["2026-08-31T19:37:00+00:00",
                               "2026-08-24T19:05:00+00:00"])
         bas = html.lower()
-        self.assertIn("predates the hackathon", bas,
+        self.assertIn("predate the hackathon", bas,
                       "le séparateur n'explique pas ce qui suit")
         self.assertIn("28 aug 15:00 utc", bas,
                       "la frontière exacte n'est pas nommée")
         self.assertIn("nothing is hidden", bas,
                       "le séparateur ne dit pas que rien n'a été retiré — "
                       "c'est justement ce qu'un juge doit pouvoir vérifier")
+
+    def test_le_separateur_dit_COMBIEN_de_lignes_sont_en_dessous(self):
+        """AJOUTÉ le 29/08. La ligne disait « tout ce qui suit date d'avant »
+        sans dire ce que « tout » pesait. Sur la fenêtre publiée du 28/08 au
+        soir : 28 enregistrements sur 30 — la table qu'un juge parcourt est à
+        93 % antérieure à l'événement jugé, et rien ne le lui disait.
+
+        Compter est le contraire de filtrer : on ne retire rien, on nomme la
+        proportion."""
+        html = self._tableau(["2026-08-31T19:37:00+00:00",
+                              "2026-08-25T13:13:00+00:00",
+                              "2026-08-24T19:05:00+00:00"])
+        bas = html.lower()
+        self.assertIn("2 of the 3 records", bas,
+                      "le séparateur ne dit pas combien de lignes le suivent")
+
+    def test_un_horodatage_illisible_n_est_pas_compte_comme_anterieur(self):
+        """TÉMOIN : le compte doit utiliser EXACTEMENT la comparaison qui pose
+        le séparateur. Un horodatage illisible rend NaN ; `NaN < kickoff` est
+        faux, donc l'enregistrement reste au-dessus de la ligne — et il ne
+        doit pas non plus être compté en dessous, sinon le chiffre et la
+        position se contrediraient dans la même phrase."""
+        html = self._tableau(["2026-08-31T19:37:00+00:00",
+                              "pas-une-date",
+                              "2026-08-24T19:05:00+00:00"])
+        bas = html.lower()
+        self.assertIn("1 of the 3 records", bas,
+                      "l'illisible a été compté comme antérieur alors qu'il "
+                      "reste affiché au-dessus de la ligne")
 
     def test_rien_n_est_masque(self):
         """Le témoin qui compte le plus. Étiqueter n'est pas filtrer."""

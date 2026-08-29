@@ -1129,6 +1129,18 @@ function renderDecisions(decisions) {
   const aPendant = decisions.some(d => horodatage(d) >= KICKOFF_MS);
   const aAvant   = decisions.some(d => horodatage(d) <  KICKOFF_MS);
   let separateurPose = !(aPendant && aAvant);
+  // COMBIEN. Ajoute le 29/08 : la ligne disait « tout ce qui est en dessous
+  // date d'avant », sans dire ce que « tout » pesait. Sur la fenetre du 28/08
+  // au soir, c'est 28 enregistrements sur 30 -- la table que le juge parcourt
+  // est a 93 % anterieure a l'evenement juge, et rien ne le lui disait.
+  // Compter est le contraire de filtrer : on ne retire rien, on nomme la
+  // proportion.
+  //
+  // MEME REGLE QUE `aAvant` : un horodatage illisible rend NaN, et
+  // `NaN < KICKOFF_MS` est faux, donc il n'est PAS compte comme anterieur.
+  // C'est deliberement la meme comparaison que celle qui pose le separateur
+  // -- sinon le compte et la ligne pourraient se contredire.
+  const nbAvant = decisions.filter(d => horodatage(d) < KICKOFF_MS).length;
 
   // AJOUTE 27/08 au soir. Cette boucle n'avait AUCUNE isolation par
   // enregistrement, alors que ce depot l'applique partout ailleurs --
@@ -1191,9 +1203,10 @@ function renderDecisions(decisions) {
     if (!separateurPose && horodatage(d) < KICKOFF_MS) {
       separateurPose = true;
       separateur = `<tr class="kickoff-divider"><td colspan="4">`
-        + `Everything below this line predates the hackathon: it is development `
-        + `and testing from before the 28 Aug 15:00 UTC kickoff. Nothing is `
-        + `hidden — every run this project ever logged is still here, in order.`
+        + `${nbAvant} of the ${decisions.length} records shown are below this `
+        + `line: they predate the hackathon — development and testing from `
+        + `before the 28 Aug 15:00 UTC kickoff. Nothing is hidden — every run `
+        + `this project ever logged is still here, in order.`
         + `</td></tr>`;
     }
     // `separateurPose` est vrai des la PREMIERE ligne anterieure au
