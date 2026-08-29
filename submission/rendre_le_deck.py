@@ -417,12 +417,42 @@ orange = la forme sort de la diapo.</p>
 # seuil d'alerte est pose a 90 % de remplissage et pas a 100 : les 10 %
 # restants sont la marge d'incertitude de la substitution, pas du confort.
 
+# Calibri et Cambria sont proprietaires et absentes de ce Mac. Carlito et
+# Caladea sont leurs clones LIBRES et METRIQUEMENT COMPATIBLES : memes chasses,
+# donc une mesure faite avec eux vaut pour la police reelle.
+#
+# Et ca se VERIFIE plutot que de se croire. Carlito declare upem=2048,
+# ascendante 1950, descendante -550 -- les valeurs exactes de Calibri. Le
+# script le controle au demarrage et le dit ; si un jour il tombe sur une
+# Carlito qui ne les porte plus, il annonce une mesure APPROCHEE au lieu de
+# continuer a promettre l'exactitude.
+#
+# Avant leur installation, la mesure se faisait avec Arial, environ 8 % plus
+# large : le seuil devait alors absorber cette incertitude. Il ne le doit plus
+# quand les metriques sont exactes -- voir SEUIL_EXACT.
+_MAISON = str(Path.home() / "Library" / "Fonts")
 POLICES = {
-    "Calibri": ["/System/Library/Fonts/Supplemental/Arial.ttf"],
-    "Cambria": ["/System/Library/Fonts/Supplemental/Times New Roman.ttf",
-                "/System/Library/Fonts/Supplemental/Georgia.ttf"],
+    "Calibri": {
+        "": [_MAISON + "/Carlito-Regular.ttf",
+             "/System/Library/Fonts/Supplemental/Arial.ttf"],
+        "b": [_MAISON + "/Carlito-Bold.ttf",
+              "/System/Library/Fonts/Supplemental/Arial Bold.ttf"],
+    },
+    "Cambria": {
+        "": [_MAISON + "/Caladea-Regular.ttf",
+             "/System/Library/Fonts/Supplemental/Times New Roman.ttf"],
+        "b": [_MAISON + "/Caladea-Bold.ttf",
+              "/System/Library/Fonts/Supplemental/Times New Roman Bold.ttf"],
+    },
 }
-SEUIL_REMPLISSAGE = 0.90
+# Metriques attendues d'une police metriquement compatible, par famille visee.
+METRIQUES_ATTENDUES = {"Calibri": (2048, 1950, -550)}
+# 0.98 quand les metriques sont EXACTES (clone metriquement compatible), 0.90
+# sinon. Les 10 % de l'ancien seuil n'etaient pas du confort : c'etait la marge
+# d'incertitude de la substitution par Arial. Une fois cette incertitude
+# supprimee, la garder reviendrait a signaler des zones qui vont bien.
+SEUIL_EXACT = 0.98
+SEUIL_APPROCHE = 0.90
 
 
 def _lire_metriques(chemin: str) -> dict:
@@ -507,8 +537,10 @@ def _reglages(paras, caches):
     for para in paras:
         if not para["runs"]:
             continue
-        pt, spc, famille = 18.0, 0.0, "Calibri"
+        pt, spc, famille, graisse = 18.0, 0.0, "Calibri", ""
         for _t, style in para["runs"]:
+            if "font-weight:700" in style:
+                graisse = "b"
             m = re.search(r"font-size:([\d.]+)pt", style)
             if m:
                 pt = float(m.group(1))
@@ -518,27 +550,66 @@ def _reglages(paras, caches):
             m = re.search(r'font-family:"([^"]+)"', style)
             if m:
                 famille = m.group(1)
-        if famille in caches:
-            yield para, famille, pt, spc
+        if (famille, graisse) in caches:
+            yield para, (famille, graisse), pt, spc
 
 
 def mesurer(chemin_deck: Path,
-            seulement: "int | None") -> "tuple[list, list, list]":
+            seulement: "int | None") -> "tuple[list, list, list, float]":
     """(alertes, notes). Une alerte = une zone dont le texte remplit plus que
-    SEUIL_REMPLISSAGE de sa hauteur, ou dont un mot depasse en largeur."""
-    caches, notes = {}, []
-    for demandee, chemins in POLICES.items():
-        for c in chemins:
-            if Path(c).exists():
-                caches[demandee] = _lire_metriques(c)
-                notes.append("« %s » n'est pas installee ici — mesure faite "
-                             "avec %s, dont les largeurs different"
-                             % (demandee, Path(c).name))
-                break
-        else:
-            notes.append("« %s » : aucune police de remplacement trouvee — "
-                         "les zones qui l'emploient ne sont PAS mesurees"
-                         % demandee)
+    du seuil de remplissage, ou dont un mot depasse en largeur."""
+    caches, notes, exact_par_cle = {}, [], {}
+    for demandee, variantes in POLICES.items():
+        for graisse, chemins in variantes.items():
+            for c in chemins:
+                if Path(c).exists():
+                    m = _lire_metriques(c)
+                    caches[(demandee, graisse)] = m
+                    attendu = METRIQUES_ATTENDUES.get(demandee)
+                    compatible = attendu is None or (
+                        m["upem"], m["asc"], m["desc"]) == attendu
+                    exact_par_cle[(demandee, graisse)] = bool(
+                        attendu is not None and compatible)
+                    if attendu is not None and compatible:
+                        notes.append(
+                            "« %s »%s : mesure avec %s — metriquement "
+                            "compatible, VERIFIE (upem %d, asc %d, desc %d, "
+                            "les valeurs exactes de %s)"
+                            % (demandee, " gras" if graisse else "",
+                               Path(c).name, m["upem"], m["asc"], m["desc"],
+                               demandee))
+                    else:
+                        # Distinguer « les metriques CONTREDISENT la
+                        # reference » de « je n'ai aucune reference ». Caladea
+                        # tombait dans le second cas et etait annoncee comme si
+                        # elle avait echoue a un controle qui n'existait pas
+                        # pour elle. Nommer la mauvaise cause est le defaut que
+                        # ce depot traque le plus souvent.
+                        if attendu is None:
+                            raison = ("aucune valeur de reference pour %s ici "
+                                      "— largeurs traitees comme approchees"
+                                      % demandee)
+                        else:
+                            raison = ("metriques DIFFERENTES de %s "
+                                      "(upem %d/%d, asc %d/%d) — largeurs "
+                                      "approchees"
+                                      % (demandee, m["upem"], attendu[0],
+                                         m["asc"], attendu[1]))
+                        notes.append("« %s »%s : mesure avec %s — %s"
+                                     % (demandee, " gras" if graisse else "",
+                                        Path(c).name, raison))
+                    break
+            else:
+                notes.append("« %s »%s : aucune police trouvee — les zones "
+                             "qui l'emploient ne sont PAS mesurees"
+                             % (demandee, " gras" if graisse else ""))
+    # Le seuil est propre a CHAQUE forme, pas global. Ma premiere version
+    # gardait un seul drapeau « exactes » : une seule famille non verifiee
+    # (Cambria, 35 emplois) faisait annoncer « mesure approchee » sur les 128
+    # zones en Calibri, qui sont mesurees exactement. Un fait par element,
+    # resume en un drapeau unique, redevient faux pour presque tous.
+    seuil_global = (SEUIL_EXACT if exact_par_cle and all(exact_par_cle.values())
+                    else SEUIL_APPROCHE)
 
     z = zipfile.ZipFile(chemin_deck)
     noms = sorted(
@@ -570,28 +641,11 @@ def mesurer(chemin_deck: Path,
 
             hauteur = 0.0
             plus_large = 0.0
-            mesure_partielle = False
-            for para in paras:
-                if not para["runs"]:
-                    hauteur += 6.0
-                    continue
-                pt = 18.0
-                spc = 0.0
-                famille = "Calibri"
-                for _t, style in para["runs"]:
-                    m = re.search(r"font-size:([\d.]+)pt", style)
-                    if m:
-                        pt = float(m.group(1))
-                    m = re.search(r"letter-spacing:([\d.]+)pt", style)
-                    if m:
-                        spc = float(m.group(1))
-                    m = re.search(r'font-family:"([^"]+)"', style)
-                    if m:
-                        famille = m.group(1)
-                met = caches.get(famille)
-                if met is None:
-                    mesure_partielle = True
-                    continue
+            reglages = list(_reglages(paras, caches))
+            mesure_partielle = (
+                len(reglages) != len([p for p in paras if p["runs"]]))
+            for para, cle, pt, spc in reglages:
+                met = caches[cle]
                 texte = "".join(t for t, _s in para["runs"])
                 n = _lignes(met, texte.split(), pt, spc, dispo_l)
                 interligne = para["interligne"] or 1.2
@@ -623,11 +677,14 @@ def mesurer(chemin_deck: Path,
             # sur plusieurs lignes. Seule une zone d'une SEULE ligne peut
             # deborder en largeur.
             une_seule_ligne = all(
-                _lignes(caches[fam], "".join(t for t, _s in p["runs"]).split(),
+                _lignes(caches[cle], "".join(t for t, _s in p["runs"]).split(),
                         pt_, spc_, dispo_l) == 1
-                for p, fam, pt_, spc_ in _reglages(paras, caches))
+                for p, cle, pt_, spc_ in reglages)
             trop_large = (plus_large - dispo_l) if une_seule_ligne else 0.0
-            if taux > SEUIL_REMPLISSAGE or trop_large > 1:
+            exact_ici = bool(reglages) and all(
+                exact_par_cle.get(cle) for _p, cle, _pt, _spc in reglages)
+            seuil = SEUIL_EXACT if exact_ici else SEUIL_APPROCHE
+            if taux > seuil or trop_large > 1:
                 extrait = "".join(t for p in paras for t, _s in p["runs"])[:58]
                 # De combien une police devrait-elle etre PLUS ETROITE pour
                 # que ce texte tienne sur une ligne ? C'est ce qui repond a
@@ -642,7 +699,7 @@ def mesurer(chemin_deck: Path,
                     "remplissage": round(taux * 100, 1),
                     "debord_largeur": round(trop_large, 1),
                     "police_plus_etroite": besoin,
-                    "boite": (_x, _y, w, h),
+                    "boite": (_x, _y, w, h), "exact": exact_ici,
                     "hauteur_texte_px": hauteur / 0.75,
                     "texte": extrait})
 
@@ -681,7 +738,7 @@ def mesurer(chemin_deck: Path,
                 if apres and not deja:
                     touches.append(j)
             al["touche"] = touches
-    return alertes, notes, non_mesurables
+    return alertes, notes, non_mesurables, seuil_global
 
 
 def main() -> None:
@@ -706,14 +763,15 @@ def main() -> None:
         print("\nCE QUI N'A PAS ETE RENDU FIDELEMENT (%d) :" % len(problemes))
         for p in problemes:
             print("  . %s" % p)
-    alertes, notes, non_mesurables = mesurer(chemin, args.slide)
+    alertes, notes, non_mesurables, seuil_utilise = mesurer(
+        chemin, args.slide)
     print("\nMESURE DES DEBORDEMENTS (metriques de police lues dans le "
           "fichier TTF, sans navigateur)")
     for n in notes:
         print("  . %s" % n)
-    print("  . seuil d'alerte : %d %% de remplissage. Les 10 %% restants sont "
-          "la marge d'incertitude de la substitution de police, pas du "
-          "confort." % (SEUIL_REMPLISSAGE * 100))
+    print("  . seuil d'alerte : %d %% quand les metriques sont exactes, "
+          "%d %% sinon — et c'est decide PAR ZONE, selon les polices qu'elle "
+          "emploie." % (SEUIL_EXACT * 100, SEUIL_APPROCHE * 100))
     if not alertes:
         print("\n  aucune zone au-dela du seuil.")
     else:
@@ -723,10 +781,16 @@ def main() -> None:
                   % (al["slide"], al["forme"], al["remplissage"]))
             print("        « %s »" % al["texte"])
             if al.get("police_plus_etroite"):
-                verdict = ("tient quelle que soit la police"
-                           if al["police_plus_etroite"] > 10
-                           else "pourrait tenir en Calibri (~8 % plus "
-                                "etroite qu'Arial)")
+                # Cette phrase disait « pourrait tenir en Calibri (~8 % plus
+                # etroite qu'Arial) » — vraie tant que la mesure se faisait
+                # avec Arial, FAUSSE des l'installation de Carlito, qui donne
+                # les chasses exactes de Calibri. Une phrase qui survit au
+                # changement de sa propre premisse est le defaut le plus
+                # courant de ce depot ; elle lit desormais la premisse.
+                verdict = ("le texte passe a la ligne, mesure exacte"
+                           if al.get("exact")
+                           else "mesure approchee : sous ~10 %, la vraie "
+                                "police pourrait le faire tenir")
                 print("        il faudrait une police %d %% plus etroite "
                       "pour une seule ligne — %s"
                       % (al["police_plus_etroite"], verdict))

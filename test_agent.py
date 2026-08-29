@@ -1893,6 +1893,28 @@ class TestLeMoteurDeRenduDuDeckDitCeQuIlNeSaitPasFaire(unittest.TestCase):
                 self.fail("une collision est imputée au débordement alors "
                           "qu'aucune ne l'est aujourd'hui : %s" % ligne.strip())
 
+    def test_l_exactitude_est_annoncee_PAR_ZONE_et_pas_globalement(self):
+        """Carlito et Caladea sont les clones libres métriquement compatibles
+        de Calibri et Cambria. Carlito déclare upem=2048, asc=1950,
+        desc=-550 — les valeurs exactes de Calibri, et le script le VÉRIFIE
+        au lieu de le croire.
+
+        Ma première version gardait un seul drapeau « exactes » pour tout le
+        deck. Une seule famille sans référence locale (Cambria, 35 emplois)
+        faisait annoncer « mesure approchée » sur les 128 zones en Calibri,
+        qui sont mesurées exactement. Un fait par élément, résumé en un
+        drapeau unique, redevient faux pour presque tous — c'est le motif que
+        ce dépôt attrape le plus souvent."""
+        _code, sortie = self._lancer()
+        self.assertIn("VERIFIE", sortie,
+                      "la compatibilité métrique n'est plus vérifiée :\n%s"
+                      % sortie[-900:])
+        self.assertIn("mesure exacte", sortie,
+                      "aucune zone n'est annoncée comme mesurée exactement, "
+                      "alors que Calibri est vérifiée :\n%s" % sortie[-900:])
+        self.assertIn("PAR ZONE", sortie,
+                      "le seuil ne se dit plus par zone")
+
     def test_le_rendu_produit_bien_les_onze_diapos(self):
         """TÉMOIN : un script qui n'écrirait rien passerait les deux tests
         précédents."""
