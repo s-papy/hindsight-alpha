@@ -5889,6 +5889,81 @@ class TestLaVerificationDeKickoff(unittest.TestCase):
                       sortie)
 
 
+class TestUnePanneDeCONNEXIONNEstPasUnVerdictDeCOMPTE(unittest.TestCase):
+    """`test_connection.py` est le premier script que le README dit de
+    lancer, et le seul que `verifier_le_kickoff.py` interroge pour le compte.
+
+    Sur une panne de réseau ou de certificat, il finissait sur une TRACE
+    PYTHON brute — douze lignes de pile avant le message utile, dans le seul
+    outil qu'on lance justement parce que quelque chose ne va pas.
+
+    LE POINT QUI COMPTE, et ces tests le verrouillent : une panne de
+    connexion n'est pas un verdict sur l'identité du compte. Écrire
+    « MAUVAIS COMPTE » ici transformerait une coupure réseau en accusation —
+    `verifier_le_kickoff.py` cherche exactement cette chaîne."""
+
+    RACINE = Path(__file__).resolve().parent
+
+    def _lancer(self, corps_get_account):
+        """Lance test_connection.py dans un dossier jetable, avec des faux
+        `alpaca_cli` et `config` — donc sans réseau ni identifiants."""
+        import shutil, subprocess, tempfile
+        d = Path(tempfile.mkdtemp(prefix="hindsight-conn-"))
+        try:
+            shutil.copy(self.RACINE / "test_connection.py", d / "test_connection.py")
+            (d / "alpaca_cli.py").write_text(
+                "class AlpacaCLIError(Exception):\n    pass\n\n"
+                "def get_account():\n" + corps_get_account, encoding="utf-8")
+            (d / "config.py").write_text(
+                "PAPER = True\nACCOUNT_ID = 'PA0EXEMPLE00'\n"
+                "def require_credentials():\n    pass\n"
+                "def compte_est_declare():\n    return True\n"
+                "def raison_de_refus_du_compte(a):\n    return None\n",
+                encoding="utf-8")
+            r = subprocess.run([sys.executable, str(d / "test_connection.py")],
+                               cwd=str(d), capture_output=True, text=True,
+                               timeout=60)
+            return r.returncode, r.stdout + r.stderr
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
+    ECHEC = ("    raise AlpacaCLIError('alpaca account get failed (exit 1): "
+             "tls: failed to verify certificate')\n")
+
+    def test_une_panne_de_connexion_ne_produit_plus_de_trace(self):
+        code, sortie = self._lancer(self.ECHEC)
+        self.assertEqual(code, 1,
+                         "le code de sortie 1 est le contrat dont dépend "
+                         "verifier_le_kickoff.py :\n%s" % sortie)
+        self.assertNotIn("Traceback", sortie,
+                         "le script finit encore sur une trace Python :\n%s"
+                         % sortie)
+        self.assertIn("COULD NOT REACH ALPACA", sortie, sortie)
+        self.assertIn("tls: failed to verify certificate", sortie,
+                      "la cause réelle a disparu du message :\n%s" % sortie)
+
+    def test_elle_n_est_PAS_annoncee_comme_un_mauvais_compte(self):
+        """LE TÉMOIN. `verifier_le_kickoff.py` cherche « MAUVAIS COMPTE »
+        dans cette sortie : l'écrire sur une coupure réseau ferait accuser un
+        compte parfaitement valide."""
+        code, sortie = self._lancer(self.ECHEC)
+        self.assertNotIn("MAUVAIS COMPTE", sortie,
+                         "une panne de connexion est présentée comme un "
+                         "verdict sur le compte :\n%s" % sortie)
+        self.assertNotIn("All good", sortie,
+                         "une panne de connexion est présentée comme un "
+                         "succès :\n%s" % sortie)
+
+    def test_un_compte_conforme_passe_toujours(self):
+        """SECOND TÉMOIN : à force de rattraper les pannes, ne plus jamais
+        confirmer un bon compte passerait les deux tests ci-dessus."""
+        code, sortie = self._lancer(
+            "    return {'account_number': 'PA0EXEMPLE00', 'status': 'ACTIVE'}\n")
+        self.assertEqual(code, 0, sortie)
+        self.assertIn("All good", sortie, sortie)
+        self.assertNotIn("COULD NOT REACH", sortie, sortie)
+
+
 class TestAucunTestNeTouchePasLEtatDeProduction(unittest.TestCase):
     """`state.json` porte l'état de risque RÉEL : équité de départ, verrou
     hebdomadaire, compteur de pertes consécutives. L'agent le lit en

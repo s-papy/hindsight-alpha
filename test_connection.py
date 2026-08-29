@@ -115,4 +115,28 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except alpaca_cli.AlpacaCLIError as echec:
+        # AJOUTE le 29/08/2026. Ce script est le premier que le README dit de
+        # lancer, et le seul que `verifier_le_kickoff.py` interroge pour le
+        # compte. Une panne de reseau ou de certificat le faisait finir sur
+        # une TRACE PYTHON brute -- 12 lignes de pile avant le message utile,
+        # dans le seul outil que quelqu'un lance justement parce que quelque
+        # chose ne va pas.
+        #
+        # LE POINT QUI COMPTE : ce message ne dit PAS « mauvais compte ». Une
+        # panne de connexion n'est pas un verdict sur l'identite du compte, et
+        # `verifier_le_kickoff.py` cherche la chaine « MAUVAIS COMPTE » dans
+        # cette sortie -- l'ecrire ici transformerait une coupure reseau en
+        # accusation. Il ne dit pas non plus que tout va bien : il dit qu'il
+        # n'a pas pu regarder.
+        #
+        # Le code de sortie reste 1, le contrat dont depend l'appelant : il le
+        # traite comme une anomalie BLOQUANTE, sans essayer de la nommer.
+        print("\nCOULD NOT REACH ALPACA: %s" % echec, file=sys.stderr)
+        print("\nThis says nothing about which account you are on -- the "
+              "check never got that far. It is a connection, credential or "
+              "CLI problem, not an account verdict. Try `alpaca doctor`, then "
+              "run this script again.", file=sys.stderr)
+        sys.exit(1)
