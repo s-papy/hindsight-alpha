@@ -5937,6 +5937,26 @@ class TestLeScriptVIDEOTientDansLesCinqMinutes(unittest.TestCase):
                         % (n, self.DEBIT_LENT, self.SECONDES_ECRAN,
                            total // 60, total % 60))
 
+    def test_les_notes_ne_comptent_pas_dans_le_budget_parle(self):
+        """La convention déclarée par le script : seules les lignes
+        commençant par « > » se disent. Les notes de tournage peuvent donc
+        grandir sans coûter une seconde — c'est ce qui a permis d'y écrire la
+        contrainte de 300 Mo sans toucher au budget de 601 mots."""
+        avant = self._mots_prononces()
+        texte = self.SCRIPT.read_text(encoding="utf-8")
+        self.assertIn("300", texte,
+                      "la contrainte de taille de la vidéo (300 Mo, page "
+                      "lablab « Hackathon Guidelines ») n'est notée nulle "
+                      "part : elle se découvrirait au téléversement")
+        # TÉMOIN : cette ligne-là n'est pas comptée comme parlée.
+        lignes = [l for l in texte.splitlines() if "300 Mo" in l]
+        self.assertTrue(lignes, "la note sur la taille a disparu")
+        self.assertFalse(any(l.lstrip().startswith(">") for l in lignes),
+                         "la contrainte de taille est écrite dans le texte "
+                         "PARLÉ : elle consomme du budget vidéo pour une "
+                         "information qui s'adresse au monteur")
+        self.assertEqual(avant, self._mots_prononces())
+
     def test_le_compte_annonce_est_le_compte_reel(self):
         """Un chiffre publié comme MESURÉ doit se re-dériver. Celui-ci
         s'était déjà périmé une fois — le script le raconte lui-même."""
