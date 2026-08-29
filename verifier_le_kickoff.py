@@ -30,6 +30,8 @@ from __future__ import annotations
 
 import argparse
 import filecmp
+import os
+import plistlib
 import re
 import subprocess
 import sys
@@ -78,13 +80,67 @@ def compte_declare() -> bool:
     return False
 
 
+def _intervalles_charges(label: str) -> "list | None":
+    """Les horaires que launchd a REELLEMENT charges pour ce job, ou None si
+    on n'a pas pu les lire.
+
+    `launchctl print` expose les declencheurs calendaires tels qu'ils ont ete
+    charges -- ce qui n'est pas la meme chose que le contenu du fichier sur le
+    disque, puisqu'un plist recopie sans rechargement laisse launchd sur
+    l'ancienne version. C'est exactement l'ecart que ce controle existait pour
+    fermer, et qu'il ne fermait qu'a moitie.
+
+    Rend None, jamais [], quand la lecture echoue : une liste vide voudrait
+    dire « aucun horaire charge », et ce n'est pas ce qu'on a mesure."""
+    try:
+        r = subprocess.run(
+            ["launchctl", "print", "gui/%d/%s" % (os.getuid(), label)],
+            capture_output=True, text=True, timeout=20)
+    except Exception:
+        return None
+    if r.returncode != 0:
+        return None
+    out = []
+    for bloc in re.findall(r"descriptor = \{(.*?)\}", r.stdout, re.S):
+        d = {c: int(v) for c, v in re.findall(r'"(\w+)" => (\d+)', bloc)}
+        if d:
+            out.append(tuple(sorted(d.items())))
+    return sorted(out)
+
+
+def _intervalles_du_fichier(chemin: Path) -> "list | None":
+    try:
+        with open(chemin, "rb") as fh:
+            d = plistlib.load(fh)
+    except Exception:
+        return None
+    iv = d.get("StartCalendarInterval") or []
+    if isinstance(iv, dict):
+        iv = [iv]
+    try:
+        return sorted(tuple(sorted(e.items())) for e in iv)
+    except Exception:
+        return None
+
+
 def plists_a_jour() -> bool:
     """Les LaunchAgents charges sont-ils bien ceux du depot ?
 
     Personne ne verifiait ca : un plist corrige dans le depot reste sans
     effet tant qu'il n'est pas recopie ET recharge. C'est arrive le 28/08
     avec la fenetre de veille.
-    """
+
+    IL N'EN VERIFIAIT QUE LA MOITIE, corrige le 29/08/2026. Il comparait les
+    FICHIERS -- depot contre ~/Library/LaunchAgents -- et titrait la ligne
+    « LaunchAgents charges ». Or « recopie » n'est pas « recharge » : un
+    operateur qui copie sans faire `launchctl unload/load` obtenait un 🟢
+    pendant que launchd continuait sur l'ancien horaire. Le mot « charges »
+    nommait precisement ce que le controle ne mesurait pas.
+
+    `launchctl print` donne les declencheurs calendaires TELS QUE CHARGES.
+    Mesure du 29/08 : les quatre jobs concordent, 5, 5, 140 et 75
+    declencheurs, identiques au depot -- donc ce controle ne change aucun
+    verdict aujourd'hui ; il ferme la moitie qui manquait."""
     livres = sorted(RACINE.joinpath("launchagents").glob("*.plist"))
     if not livres:
         _dire(JAUNE, "LaunchAgents", "aucun plist livre")
@@ -100,7 +156,33 @@ def plists_a_jour() -> bool:
         _dire(ROUGE, "LaunchAgents charges",
               "a recopier + recharger : %s" % ", ".join(perimes))
         return False
-    _dire(VERT, "LaunchAgents charges", "%d identiques au depot" % len(livres))
+
+    # Les fichiers concordent. Reste la question que le titre posait sans y
+    # repondre : est-ce bien ca que launchd fait tourner ?
+    illisibles, divergents = [], []
+    for source in livres:
+        label = source.name[:-len(".plist")]
+        charges = _intervalles_charges(label)
+        attendus = _intervalles_du_fichier(source)
+        if charges is None or attendus is None:
+            illisibles.append(label)
+        elif charges != attendus:
+            divergents.append(label)
+    if divergents:
+        _dire(ROUGE, "LaunchAgents charges",
+              "fichiers a jour mais launchd tourne sur un AUTRE horaire "
+              "(%s) — `launchctl unload` puis `load`" % ", ".join(divergents))
+        return False
+    if illisibles:
+        # NI VERT NI ROUGE. Les fichiers sont bons ; l'etat charge n'a pas pu
+        # etre lu. Dire « charges » ici serait reprendre exactement le mot
+        # qu'on vient de cesser d'affirmer sans mesure.
+        _dire(JAUNE, "LaunchAgents",
+              "%d fichiers identiques au depot, mais l'etat CHARGE n'a pas pu "
+              "etre lu pour : %s" % (len(livres), ", ".join(illisibles)))
+        return True
+    _dire(VERT, "LaunchAgents charges",
+          "%d identiques au depot ET charges avec ces horaires" % len(livres))
     return True
 
 

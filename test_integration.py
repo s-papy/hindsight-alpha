@@ -5889,6 +5889,116 @@ class TestLaVerificationDeKickoff(unittest.TestCase):
                       sortie)
 
 
+class TestLesPlistsCHARGESSontVerifies(unittest.TestCase):
+    """`plists_a_jour()` comparait les FICHIERS — dépôt contre
+    ~/Library/LaunchAgents — et titrait sa ligne « LaunchAgents chargés ».
+
+    Or « recopié » n'est pas « rechargé » : un opérateur qui copie sans faire
+    `launchctl unload/load` obtenait un 🟢 pendant que launchd continuait sur
+    l'ancien horaire. C'est exactement l'incident du 28/08 avec la fenêtre de
+    veille, que ce contrôle a été écrit pour empêcher — et il n'en fermait
+    que la moitié. Le mot « chargés » nommait précisément ce qu'il ne
+    mesurait pas.
+
+    Mesuré le 29/08 avant d'écrire : `launchctl print` expose bien les
+    déclencheurs calendaires tels que chargés, et les quatre jobs
+    concordaient (5, 5, 140 et 75 déclencheurs). Le contrôle ne change donc
+    aucun verdict aujourd'hui ; il ferme la moitié qui manquait."""
+
+    SCRIPT = Path(__file__).resolve().parent / "verifier_le_kickoff.py"
+
+    def _lancer(self, charges_par_label):
+        """Joue plists_a_jour() avec un état launchd simulé.
+        `charges_par_label` : label -> liste d'intervalles, ou None."""
+        import importlib.util, io, contextlib
+        spec = importlib.util.spec_from_file_location(
+            "kickoff_plists", str(self.SCRIPT))
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules["kickoff_plists"] = mod
+        spec.loader.exec_module(mod)
+        mod._intervalles_charges = lambda label: charges_par_label(label, mod)
+        tampon = io.StringIO()
+        with contextlib.redirect_stdout(tampon):
+            resultat = mod.plists_a_jour()
+        return resultat, tampon.getvalue()
+
+    @staticmethod
+    def _du_depot(label, mod):
+        chemin = mod.RACINE / "launchagents" / (label + ".plist")
+        return mod._intervalles_du_fichier(chemin)
+
+    def test_un_horaire_charge_DIFFERENT_est_rouge(self):
+        """LE cas que le contrôle ratait : fichiers à jour, launchd sur autre
+        chose."""
+        def faux(label, mod):
+            v = self._du_depot(label, mod)
+            return (v or []) + [(("Hour", 3), ("Minute", 0))]
+        ok, sortie = self._lancer(faux)
+        self.assertFalse(ok, sortie)
+        self.assertIn("AUTRE horaire", sortie, sortie)
+        self.assertIn("unload", sortie,
+                      "le message ne dit pas quoi faire : %s" % sortie)
+
+    def test_un_etat_charge_ILLISIBLE_n_est_pas_vert(self):
+        """TÉMOIN, et c'est la leçon de toute la semaine : ne pas avoir pu
+        lire l'état chargé n'est pas « c'est chargé ». Ni rouge non plus —
+        les fichiers, eux, sont bons."""
+        ok, sortie = self._lancer(lambda label, mod: None)
+        self.assertTrue(ok, "un état illisible ne doit pas bloquer : %s" % sortie)
+        self.assertIn("n'a pas pu", sortie, sortie)
+        self.assertNotIn("ET charges", sortie,
+                         "la ligne affirme « chargés » sans l'avoir mesuré : "
+                         "%s" % sortie)
+
+    def test_une_lecture_impossible_rend_NONE_et_pas_une_liste_vide(self):
+        """MUTATION NON ATTRAPÉE au premier essai, et le trou était dans mon
+        test : les trois autres remplacent `_intervalles_charges`, donc son
+        `return None` n'était jamais exécuté. Or remplacer ce None par `[]`
+        ne cassait rien de visible.
+
+        La conséquence si c'était `[]` : sur une machine où `launchctl` ne
+        répond pas, une liste vide serait comparée aux 5 horaires du fichier,
+        jugée DIFFÉRENTE, et le contrôle accuserait launchd de tourner sur un
+        autre horaire — une cause qu'il n'a pas mesurée, sur un dossier
+        parfaitement sain.
+
+        Ce test appelle la vraie fonction sur un label qui n'existe pas."""
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "kickoff_none", str(self.SCRIPT))
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules["kickoff_none"] = mod
+        spec.loader.exec_module(mod)
+        self.assertIsNone(
+            mod._intervalles_charges("com.hindsightalpha.ce-job-n-existe-pas"),
+            "une lecture impossible rend une liste vide, qui sera comparée "
+            "aux horaires du fichier et les fera passer pour divergents")
+
+    def test_un_plist_illisible_rend_NONE_lui_aussi(self):
+        """Même règle de l'autre côté : un fichier qu'on ne sait pas lire
+        n'a pas « zéro horaire »."""
+        import importlib.util, tempfile
+        spec = importlib.util.spec_from_file_location(
+            "kickoff_none2", str(self.SCRIPT))
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules["kickoff_none2"] = mod
+        spec.loader.exec_module(mod)
+        with tempfile.NamedTemporaryFile(suffix=".plist", delete=False) as fh:
+            fh.write(b"ceci n'est pas un plist")
+            chemin = fh.name
+        try:
+            self.assertIsNone(mod._intervalles_du_fichier(Path(chemin)))
+        finally:
+            os.unlink(chemin)
+
+    def test_tout_concordant_le_dit_explicitement(self):
+        """SECOND TÉMOIN : à force de nuancer, ne plus jamais confirmer
+        passerait les deux tests ci-dessus."""
+        ok, sortie = self._lancer(self._du_depot)
+        self.assertTrue(ok, sortie)
+        self.assertIn("ET charges avec ces horaires", sortie, sortie)
+
+
 class TestUnePanneDeCONNEXIONNEstPasUnVerdictDeCOMPTE(unittest.TestCase):
     """`test_connection.py` est le premier script que le README dit de
     lancer, et le seul que `verifier_le_kickoff.py` interroge pour le compte.
