@@ -1233,18 +1233,18 @@ class TestRunInterrompu(unittest.TestCase):
 
 
 class TestLExemptionDesChiffresPerimes(unittest.TestCase):
-    """PREMIER USAGE du champ `exemption` de `MOTIFS_PERIMES`, en place
-    depuis le 25/08 et jamais exercé jusqu'ici — donc jamais vérifié.
-
-    Le 29/08, le nombre d'équipes inscrites au hackathon est passé de 546
-    (chiffre du deck, mesuré le 25/08) à ~975, vérifié à la main sur le
-    tableau de bord live de lablab.ai. « 546 » entre donc dans la liste
-    noire — mais le deck le cite maintenant comme repère historique :
-
-        « 975 teams registered on 29 Aug, up from 546 four days earlier »
-
+    """Le champ `exemption` de `MOTIFS_PERIMES` : un chiffre périmé peut
+    légitimement être cité comme REPÈRE HISTORIQUE, précédé de « up from ».
     Sans exemption, le contrôle bloquerait la phrase même qui corrige
-    l'erreur. Avec une exemption trop large, il ne bloquerait plus rien.
+    l'erreur ; avec une exemption trop large, il ne bloquerait plus rien.
+
+    ÉCRIT SUR UN TEXTE FABRIQUÉ, et c'est ce qui compte. Le cas qui a motivé
+    ce champ était une phrase réelle du deck ; cette phrase a disparu le
+    29/08 au soir avec la diapo qui la portait, et ces trois tests n'ont pas
+    bougé — parce qu'ils exercent la RÈGLE sur un README qu'ils écrivent
+    eux-mêmes, pas l'état d'un livrable. Trois autres tests écrits le même
+    jour, eux, encodaient l'artefact et sont tombés à la première
+    correction.
 
     Un mécanisme qui existe sans avoir jamais été branché est exactement la
     forme d'échec que ce dépôt traque ailleurs. Ces trois tests le
@@ -1873,8 +1873,18 @@ class TestLeMoteurDeRenduDuDeckDitCeQuIlNeSaitPasFaire(unittest.TestCase):
         ratée : elle se dit, elle ne se convertit pas en verdict. Un outil qui
         crie sur ce qu'il n'a pas su mesurer apprend à être ignoré."""
         _code, sortie = self._lancer()
-        self.assertIn("non mesure", sortie, sortie[-800:])
-        bloc = sortie.split("non mesure")[0]
+        self.assertIn("NON MESURE", sortie, sortie[-800:])
+        # ET la section doit sortir MEME quand tout le reste est vert : elle
+        # etait imbriquee dans la branche « il y a des alertes », donc le
+        # rapport se taisait sur ce qu'il n'avait pas su mesurer exactement
+        # quand il annoncait que tout allait bien. C'est ce test qui l'a
+        # attrape, le jour ou le deck est passe a zero alerte.
+        if "aucune zone au-dela du seuil" in sortie:
+            self.assertIn("NON MESURE", sortie,
+                          "verdict vert ET silence sur les zones non "
+                          "mesurees : « rien a signaler » se lit alors comme "
+                          "« tout est mesure »")
+        bloc = sortie.split("NON MESURE")[0]
         self.assertNotIn("forme 8 ", bloc,
                          "une flèche décorative est comptée comme un "
                          "débordement :\n%s" % bloc[-800:])

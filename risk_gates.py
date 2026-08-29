@@ -1408,7 +1408,9 @@ def check_gates(
     #
     # C'est exactement la these de ce projet retournee contre lui : « une
     # limite qui n'est pas verifiee dans le code est une politique, pas un
-    # controle » (titre de la slide 6). Une pause qui depend du fait que
+    # controle » (titre de la diapo « RISK GUARDRAILS — ENTRY » ; on la
+    # designe par son titre et non par son rang, qui a deja bouge une
+    # fois). Une pause qui depend du fait que
     # chaque appelant pense a la verifier est une politique.
     #
     # On la rend vraie plutot que d'affaiblir la phrase. agent.py garde sa

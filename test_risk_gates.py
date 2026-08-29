@@ -1100,7 +1100,8 @@ class TestPauseManuelleDansLaPorte(HarnaisPlafonds, BaseExit):
     et la pause fonctionnait bien de bout en bout. Mais la règle était
     appliquée par L'APPELANT et non par la porte censée l'appliquer : c'est la
     thèse de ce projet retournée contre lui, « une limite qui n'est pas
-    vérifiée dans le code est une politique, pas un contrôle » (slide 6). Une
+    vérifiée dans le code est une politique, pas un contrôle » (titre de la
+    diapo « RISK GUARDRAILS — ENTRY »). Une
     pause qui dépend du fait que chaque appelant pense à la vérifier est une
     politique.
 

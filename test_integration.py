@@ -3496,7 +3496,8 @@ class TestComparabiliteDesDeuxStrategies(unittest.TestCase):
 class TestAucunSeuilMort(unittest.TestCase):
     """La thèse de ce projet, appliquée à lui-même.
 
-    Le titre de la slide 6 dit : « a cap that isn't checked in code is a
+    Le titre de la diapo « RISK GUARDRAILS — ENTRY » dit : « a cap that
+    isn't checked in code is a
     policy, not a control ». Ajouté le 27/08 au soir, juste après avoir trouvé
     exactement ça sur le fichier HALT — le README promettait que
     check_gates() honorait la pause, et check_gates() ne la lisait pas.
@@ -6618,8 +6619,9 @@ class TestLeTauxDeFAUSSEALERTEEstPublie(unittest.TestCase):
 
     def test_le_DECK_porte_aussi_le_taux(self):
         """LE MOTIF DES JUMELLES, encore : j'ai d'abord mis le taux dans le
-        seul README. Le deck est l'autre livrable jugé, et sa slide 8
-        s'intitule « HONEST RESULTS — NOT A HEADLINE NUMBER ». Omettre là le
+        seul README. Le deck est l'autre livrable jugé, et l'une de ses
+        diapos s'intitule « HONEST RESULTS — NOT A HEADLINE NUMBER ».
+        Omettre là le
         seul chiffre qui joue contre le projet aurait vidé le titre.
 
         Le deck ARRONDIT à 23 % — une slide n'a pas la place d'une décimale,

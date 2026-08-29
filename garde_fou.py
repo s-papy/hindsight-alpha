@@ -437,17 +437,21 @@ MOTIFS_PERIMES = [
     ("442", "ancien nombre d'équipes inscrites (remplacé par 546 le 25/08, "
              "puis par 975 le 29/08 — voir l'alerte dédiée plus bas, aucune "
              "source mécanique possible pour ce chiffre précis)", None),
-    # AJOUTÉ le 29/08/2026, après vérification À LA MAIN sur le tableau de
-    # bord live de lablab.ai (mis à jour 08:48) : ~975 équipes et ~3 100
-    # participants, contre 546 le 25/08. Le chiffre a presque doublé en
-    # quatre jours, et montait encore de +158 équipes sur la seule journée.
+    # AJOUTÉ le 29/08/2026 après vérification à la main sur lablab.ai, quand
+    # le deck citait encore un nombre d'équipes.
     #
-    # L'EXEMPTION, ET POURQUOI ELLE EXISTE : le deck cite désormais 546
-    # comme REPÈRE HISTORIQUE — « 975 teams registered on 29 Aug, up from
-    # 546 four days earlier ». Sans l'exemption, ce contrôle bloquerait la
-    # phrase même qui corrige l'erreur. Le champ était en place depuis le
-    # 25/08 et n'avait jamais servi : c'est son premier usage, et il est
-    # testé par test_agent.py plutôt que supposé bon.
+    # CE N'EST PLUS LE CAS depuis le 29/08 au soir : la diapo qui situait le
+    # projet parmi les autres soumissions a été retirée sur décision de Spap,
+    # et PLUS AUCUN livrable ne cite de nombre d'équipes ni de concurrent.
+    # Ces deux motifs restent donc comme fil-piège : ils ne bloquent rien
+    # aujourd'hui, et bloqueront le jour où l'un de ces chiffres reviendrait
+    # sans source.
+    #
+    # L'EXEMPTION reste elle aussi, avec sa raison d'être : un chiffre périmé
+    # peut légitimement être cité comme REPÈRE HISTORIQUE, précédé de
+    # « up from ». Le champ est exercé par test_agent.py sur un texte
+    # fabriqué, pas sur une phrase du dossier — c'est ce qui lui permet de
+    # survivre à la disparition de cette phrase.
     ("546", "nombre d'équipes inscrites au 25/08 — mesuré à ~975 le 29/08 "
              "sur le tableau de bord live de lablab.ai. Il ne peut plus être "
              "cité comme chiffre COURANT ; comme repère historique il doit "
@@ -1122,7 +1126,8 @@ def controle_source_de_verite() -> None:
 
         # Univers actuel : toute liste de 4 tickers séparés par des virgules,
         # sauf si "PREVIOUS" apparaît juste avant (même exemption que le
-        # contrôle 4, née du même faux positif slide 5 le 25/08).
+        # contrôle 4, née du même faux positif le 25/08 — sur la diapo
+        # « THE STRATEGY », qui portait alors le rang 5).
         # GENERALISE le 27/08/2026. Ce bloc etait garde par
         # `len(univers_actuel) == 4` et cherchait un motif a exactement QUATRE
         # groupes. Mesure, en mutant DEFAULT_UNIVERSE dans une copie du depot :

@@ -407,7 +407,8 @@ def construire(chemin_deck: Path, seulement: "int | None") -> "tuple[str, list]"
 <h1>Hindsight Alpha — rendu du deck</h1>
 <div id="verdict">mesure en cours…</div>
 <p class="avert">Ce rendu rejoue la géométrie du fichier ; il ne le convertit
-pas. <b>Le graphique de la slide 8 n'est pas rendu</b> (cadre gris), les ombres
+pas. <b>Le graphique du deck n'est pas rendu</b> — un cadre gris marque sa
+place, et le rapport ci-dessus nomme sa diapo. Les ombres
 sont ignorées, et si ce navigateur n'a pas Calibri il substitue une police
 dont les <b>largeurs diffèrent</b> — c'est la limite qui compte pour un
 contrôle de débordement. Cadre rouge = le texte dépasse sa boîte. Cadre
@@ -838,10 +839,22 @@ def main() -> None:
                       % ", ".join(str(t) for t in al["touche"]))
             elif "touche" in al:
                 print("        le debord ne recouvre aucune autre forme")
-        if non_mesurables:
-            print("\n  non mesure (%d) :" % len(non_mesurables))
-            for nm in non_mesurables:
-                print("    . %s" % nm)
+
+    # HORS de la branche ci-dessus, corrige le 29/08 apres qu'un test l'ait
+    # attrape : cette section etait IMBRIQUEE dans « il y a des alertes ».
+    # Zero alerte, et le rapport se taisait sur ce qu'il n'avait PAS SU
+    # mesurer -- « aucune zone au-dela du seuil » se lisant alors comme
+    # « tout est mesure et tout va bien ».
+    #
+    # C'est le motif que ce depot traque le plus : ce qu'un controle fait
+    # quand il ne peut PAS conclure compte plus que ce qu'il verifie quand
+    # tout va bien. Il etait dans mon propre outil de mesure.
+    if non_mesurables:
+        print("\n  NON MESURE (%d) — ces zones ne sont pas dans le verdict "
+              "ci-dessus :" % len(non_mesurables))
+        for nm in non_mesurables:
+            print("    . %s" % nm)
+
 
 
 if __name__ == "__main__":
