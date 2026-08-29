@@ -6002,6 +6002,39 @@ class TestLeTauxDeFAUSSEALERTEEstPublie(unittest.TestCase):
                       "(%s%%) — le seul chiffre du dossier qui joue contre "
                       "lui" % fausse_alerte)
 
+    def test_le_DECK_porte_aussi_le_taux(self):
+        """LE MOTIF DES JUMELLES, encore : j'ai d'abord mis le taux dans le
+        seul README. Le deck est l'autre livrable jugé, et sa slide 8
+        s'intitule « HONEST RESULTS — NOT A HEADLINE NUMBER ». Omettre là le
+        seul chiffre qui joue contre le projet aurait vidé le titre.
+
+        Le deck ARRONDIT à 23 % — une slide n'a pas la place d'une décimale,
+        et le chiffre précis vit dans le README et dans le banc. Ce test
+        exige donc la NOTION, pas la décimale : le mot, et un nombre proche.
+        Il utilise l'extraction du garde-fou, seule à savoir lire un .pptx."""
+        import importlib.util, re
+        spec = importlib.util.spec_from_file_location(
+            "gf_deck", str(self.RACINE / "garde_fou.py"))
+        gf = importlib.util.module_from_spec(spec)
+        sys.modules["gf_deck"] = gf
+        try:
+            spec.loader.exec_module(gf)
+        except SystemExit:
+            pass
+        textes = gf._charger_textes_livrables()
+        deck = [t for nom, t in textes.items() if nom.endswith(".pptx")]
+        self.assertTrue(deck, "le deck n'a pas pu être lu — ce test ne "
+                              "vérifie alors plus rien")
+        texte = deck[0]
+        self.assertIn("false-alarm", texte,
+                      "la slide « HONEST RESULTS » ne mentionne pas le taux "
+                      "de fausse alerte du garde-fou")
+        annonces = [float(x) for x in re.findall(r"(\d\d(?:\.\d)?)\s*%", texte)]
+        vrai = 22.6
+        self.assertTrue(any(abs(x - vrai) <= 0.5 for x in annonces),
+                        "aucun pourcentage du deck n'est proche du taux "
+                        "mesuré (%.1f%%) : %s" % (vrai, annonces))
+
     def test_le_banc_est_ATTEIGNABLE_depuis_le_README(self):
         """Un fichier que personne ne peut trouver ne divulgue rien."""
         readme = (self.RACINE / "README.md").read_text(encoding="utf-8")
