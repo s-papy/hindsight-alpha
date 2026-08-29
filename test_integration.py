@@ -6291,7 +6291,6 @@ class TestLeTauxDeFAUSSEALERTEEstPublie(unittest.TestCase):
 
     def test_le_chiffre_du_banc_est_dans_le_README(self):
         banc = (self.RACINE / "HINDSIGHT_HOLDOUT.md").read_text(encoding="utf-8")
-        readme = (self.RACINE / "README.md").read_text(encoding="utf-8")
         import re
         # Le taux est LU dans le banc, pas recopié ici : si le banc est
         # relancé et que le chiffre bouge, ce test le dit au lieu de valider
@@ -6303,10 +6302,15 @@ class TestLeTauxDeFAUSSEALERTEEstPublie(unittest.TestCase):
                                 "la ligne du banc ne porte plus ses deux taux : %s"
                                 % ligne[0])
         fausse_alerte = taux[0]
-        self.assertIn(fausse_alerte, readme,
-                      "le README ne cite pas le taux de fausse alerte mesuré "
-                      "(%s%%) — le seul chiffre du dossier qui joue contre "
-                      "lui" % fausse_alerte)
+        # DANS LE PASSAGE, pas n'importe où : « 22.6 » figure AUSSI dans la
+        # table des matières, donc un `assertIn` sur le fichier entier
+        # resterait vert alors que l'explication aurait disparu. Même
+        # correction que pour les deux autres tests de cette classe — c'est
+        # la faiblesse que j'ai reproduite trois fois dans la journée.
+        self.assertIn(fausse_alerte, self._passage_honnetete(),
+                      "le passage d'honnêteté ne cite pas le taux de fausse "
+                      "alerte mesuré (%s%%) — le seul chiffre du dossier qui "
+                      "joue contre lui" % fausse_alerte)
 
     def test_le_DECK_porte_aussi_le_taux(self):
         """LE MOTIF DES JUMELLES, encore : j'ai d'abord mis le taux dans le
