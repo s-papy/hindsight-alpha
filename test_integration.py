@@ -5889,6 +5889,82 @@ class TestLaVerificationDeKickoff(unittest.TestCase):
                       sortie)
 
 
+class TestUnSeulPLANCHERDeSignificativite(unittest.TestCase):
+    """`HINDSIGHT_HOLDOUT.md` annonçait DEUX planchers pour la même chose,
+    avec les mêmes mots :
+
+        pour le verdict            sqrt(2)*50/sqrt(N) = 3.16 points
+        « ce que ça ne dit pas »   100/sqrt(N)        = 4.47 points
+
+    Deux formules écrites à deux endroits, dans un document que le README
+    met maintenant en avant. Un lecteur qui compare les deux lignes voit le
+    document se contredire sur son propre seuil de lisibilité.
+
+    ET LE VERDICT UTILISAIT LE PLUS PETIT DES DEUX, celui qui le flatte.
+    L'écart utile d'un holdout combine DEUX pourcentages ; l'avance que le
+    verdict compare combine deux écarts utiles, donc QUATRE. À 500 essais,
+    3.16 contre 4.47 : l'avance de 5.2 points passe de 1.64 à 1.16
+    écart-type. La conclusion tient — 20 j reste le meilleur de la grille —
+    mais la confiance annoncée était surévaluée, ce qui est précisément
+    l'erreur que ce banc existe pour ne pas commettre."""
+
+    RACINE = Path(__file__).resolve().parent
+
+    def _module(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "hh_plancher", str(self.RACINE / "hindsight_holdout.py"))
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules["hh_plancher"] = mod
+        spec.loader.exec_module(mod)
+        return mod
+
+    def test_le_plancher_grandit_avec_le_nombre_de_pourcentages(self):
+        hh = self._module()
+        deux, quatre = hh._plancher(2), hh._plancher(4)
+        self.assertAlmostEqual(quatre / deux, 2 ** 0.5, places=6,
+                               msg="combiner deux fois plus de pourcentages "
+                                   "doit multiplier l'erreur-type par racine "
+                                   "de deux")
+        self.assertAlmostEqual(deux, 2 ** 0.5 * 50.0 / hh.N_ESSAIS ** 0.5,
+                               places=6)
+
+    def test_le_verdict_se_compare_au_plancher_des_QUATRE(self):
+        """TÉMOIN de la correction qui compte : comparer l'avance au plancher
+        des deux pourcentages surévalue la confiance."""
+        source = (self.RACINE / "hindsight_holdout.py").read_text(encoding="utf-8")
+        self.assertIn("avance >= plancher_avance", source,
+                      "le verdict se compare de nouveau au plancher des deux "
+                      "pourcentages, qui est le plus petit et le plus flatteur")
+
+    def test_le_rapport_REDIGE_nomme_ce_que_chaque_plancher_couvre(self):
+        """On teste le GÉNÉRATEUR, pas son artefact.
+
+        `HINDSIGHT_HOLDOUT.md` est régénéré par une campagne de 500 essais
+        qui dure plus de dix minutes ; un test qui lirait le fichier
+        mesurerait donc surtout la dernière fois que quelqu'un a lancé le
+        script. Ici on injecte les taux publiés et on vérifie la RÉDACTION,
+        qui est le contrat : chaque plancher doit dire ce qu'il couvre."""
+        hh = self._module()
+        publies_propre = {5: 8.4, 10: 9.8, 20: 22.6, 40: 32.2, 80: 36.6}
+        publies_fuite = {5: 9.4, 10: 13.2, 20: 32.2, 40: 36.6, 80: 40.8}
+        hh._campagne = (lambda k, d:
+                        publies_fuite if k == hh.K_FUITE else publies_propre)
+        texte = hh.construire_rapport()
+        self.assertIn("**~%.1f points**" % hh._plancher(2), texte,
+                      "le plancher d'un écart utile a disparu")
+        self.assertIn("~%.1f points" % hh._plancher(4), texte,
+                      "le plancher d'une AVANCE a disparu : le document "
+                      "n'annonce plus qu'à quel seuil il compare son verdict")
+        self.assertIn("quatre pourcentages", texte,
+                      "le document ne dit pas POURQUOI le second plancher est "
+                      "plus grand — deux chiffres sans raison se lisent comme "
+                      "une contradiction")
+        self.assertIn("dépasse le plancher", texte,
+                      "TÉMOIN : sur les taux publiés, le verdict doit tenir — "
+                      "l'avance de 5.2 pts passe bien au-dessus de 4.5")
+
+
 class TestLeTauxDeFAUSSEALERTEEstPublie(unittest.TestCase):
     """`HINDSIGHT_HOLDOUT.md` mesure ce que le garde-fou se trompe : à la
     taille de holdout livrée (20 jours), **22.6 % de fausse alerte** sur des

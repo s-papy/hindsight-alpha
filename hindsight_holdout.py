@@ -94,6 +94,22 @@ def _score(barres: Sequence[Bar], fenetre: int) -> float:
     return _sharpe(_vol_strategy_returns(barres, fenetre))
 
 
+def _plancher(nb_pourcentages: int) -> float:
+    """Erreur-type, en POINTS, d'une combinaison de `nb_pourcentages`
+    proportions independantes estimees sur N_ESSAIS tirages chacune.
+
+    L'erreur-type d'un pourcentage vaut au plus 50/sqrt(N) points (maximum a
+    p=0.5). Combiner k proportions independantes par addition ou soustraction
+    multiplie cela par sqrt(k).
+
+        k=2   un ecart utile          detection - fausse alerte
+        k=4   une avance              (ecart d'un holdout) - (ecart d'un autre)
+
+    Ecrite ici UNE fois : ce document annoncait deux planchers differents,
+    calcules par deux formules ecrites a deux endroits."""
+    return (nb_pourcentages ** 0.5) * 50.0 / N_ESSAIS ** 0.5
+
+
 def _gagnant(scores: Dict[int, float]) -> int:
     """Meme regle que le garde-fou : le plus haut score fini."""
     finis = {c: v for c, v in scores.items() if math.isfinite(v)}
@@ -174,21 +190,39 @@ def construire_rapport() -> str:
              % (meilleur, fuite[meilleur] - propre[meilleur],
                 livre, fuite[livre] - propre[livre]))
     L.append("")
-    # Le plancher de significativite : avec N_ESSAIS tirages binomiaux par
-    # cellule, l'erreur-type sur un pourcentage est au plus 50/sqrt(N) points,
-    # et l'ecart utile est une DIFFERENCE de deux pourcentages -- donc environ
-    # sqrt(2) fois cela. Annoncer un gagnant dont l'avance est sous ce plancher
-    # serait exactement l'erreur que ce projet reproche au reste du monde, et
-    # que j'ai moi-meme trouvee dans son README ce jour-la.
-    plancher = 2 ** 0.5 * 50.0 / N_ESSAIS ** 0.5
+    # LE PLANCHER DE SIGNIFICATIVITE, ECRIT UNE FOIS. Corrige le 29/08/2026 :
+    # ce document en annoncait DEUX, pour la meme chose et avec les memes mots.
+    #
+    #     ici, pour le verdict          sqrt(2)*50/sqrt(N) = 3.16 points
+    #     plus bas, « ce que ca ne dit
+    #     pas »                         100/sqrt(N)        = 4.47 points
+    #
+    # Une regle ecrite deux fois n'est vraie qu'a un seul endroit -- et un
+    # lecteur qui compare les deux lignes voit le document se contredire sur
+    # son propre seuil de lisibilite.
+    #
+    # ET LE VERDICT UTILISAIT LE PLUS PETIT DES DEUX, celui qui le flatte.
+    # L'ecart utile d'un holdout est une difference de DEUX pourcentages
+    # (erreur-type ~ sqrt(2)*50/sqrt(N)) ; mais l'AVANCE que le verdict
+    # compare est une difference de deux ecarts utiles, donc QUATRE
+    # pourcentages -- erreur-type ~ 2*50/sqrt(N). Avec 500 essais, 3.16 contre
+    # 4.47 : l'avance de 5.2 points passe de 1.64 a 1.16 ecart-type. La
+    # conclusion ne change pas -- 20 j reste le meilleur choix de la grille --
+    # mais la confiance annoncee etait surevaluee, et c'est exactement
+    # l'erreur que ce banc existe pour ne pas commettre.
+    plancher = _plancher(2)      # un ecart utile : deux pourcentages
+    plancher_avance = _plancher(4)   # une difference d'ecarts : quatre
     ecarts = {h: fuite[h] - propre[h] for h in HOLDOUTS}
     avance = ecarts[meilleur] - max(v for h, v in ecarts.items() if h != meilleur)
 
     L.append("Plancher de significativité à %d essais : une différence de "
-             "pourcentages n'est lisible qu'au-delà de **~%.1f points**."
-             % (N_ESSAIS, plancher))
+             "deux pourcentages n'est lisible qu'au-delà de **~%.1f points** ; "
+             "comparer deux écarts utiles entre eux en met quatre en jeu, donc "
+             "**~%.1f points**."
+             % (N_ESSAIS, plancher, plancher_avance))
     L.append("")
-    if meilleur == livre and avance >= plancher:
+    # On compare l'avance au plancher des QUATRE pourcentages, pas des deux.
+    if meilleur == livre and avance >= plancher_avance:
         L.append("**Le choix livré est le meilleur de la grille, et son avance "
                  "(%.1f pts) dépasse le plancher.** Ce nombre n'avait jamais "
                  "été mesuré ; il l'est maintenant." % avance)
@@ -221,8 +255,9 @@ def construire_rapport() -> str:
              "formes." % K_FUITE)
     L.append("- Séries synthétiques à volatilité sinusoïdale. Ce n'est pas un "
              "marché.")
-    L.append("- %d essais par cellule : les écarts de moins de ~%.0f points ne "
-             "sont pas significatifs." % (N_ESSAIS, 100.0 / N_ESSAIS ** 0.5))
+    L.append("- %d essais par cellule : comparer deux écarts utiles entre eux "
+             "met quatre pourcentages en jeu, donc une avance de moins de "
+             "~%.1f points ne se lit pas." % (N_ESSAIS, plancher_avance))
     L.append("- La règle de gagnant utilisée ici reproduit celle du garde-fou "
              "mais court-circuite ses autres verdicts (`NO EDGE`, `CANNOT "
              "CONCLUDE`) : on mesure le **désaccord de gagnants**, qui est le "
