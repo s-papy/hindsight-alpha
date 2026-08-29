@@ -2234,6 +2234,75 @@ def controle_reveil_programme() -> None:
     )
 
 
+def _ancres_du_markdown(texte: str) -> set:
+    """Les ancres qu'un lecteur peut atteindre dans ce document.
+
+    Reproduit la regle de GitHub : minuscules, ponctuation retiree, espaces en
+    tirets. Le balisage `code`, **gras** et *italique* est retire d'abord,
+    sinon un titre stylise produirait une ancre qui n'existe pas."""
+    ancres = set()
+    for titre in re.findall(r"^#{1,6}\s+(.+?)\s*$", texte, re.M):
+        t = re.sub(r"[`*_]", "", titre).strip().lower()
+        t = re.sub(r"[^\w\s-]", "", t)
+        ancres.add(re.sub(r"\s+", "-", t))
+    return ancres
+
+
+def controle_ancres_resolvent() -> None:
+    """Un lien vers une ancre tombe-t-il sur un titre qui existe ?
+
+    AJOUTE le 29/08/2026, en completant `controle_renvois_resolvent` : celui-ci
+    verifie que le FICHIER cite existe, jamais que l'ANCRE citee mene quelque
+    part. Or l'effet sur un lecteur est le meme, et pire : un fichier absent
+    donne une 404 visible, une ancre morte ne fait RIEN. Le navigateur reste
+    ou il est, et le lecteur croit avoir mal cliqué.
+
+    Le README en compte 14 (liens internes) au moment de l'ajout, tous
+    valides -- ce controle ne corrige donc rien aujourd'hui. Il ferme la
+    moitie qui n'etait pas verifiee, comme le controle des plists CHARGES l'a
+    fait le meme jour pour les LaunchAgents.
+
+    Portee volontairement etroite : seuls les .md suivis par git, et seules
+    les ancres REELLEMENT citees. Enumerer toutes les ancres possibles pour
+    verifier qu'elles sont atteignables produirait du bruit sans lecteur."""
+    try:
+        suivis = subprocess.run(["git", "ls-files"], cwd=RACINE,
+                                capture_output=True, text=True, timeout=20)
+        connus = suivis.stdout.split() if suivis.returncode == 0 else []
+    except Exception as exc:
+        alerte("git", "impossible de lister les fichiers suivis (%s) -- les "
+                      "ancres n'ont PAS ete verifiees." % exc)
+        return
+    if not connus:
+        alerte("git", "aucun fichier suivi listable -- les ancres n'ont PAS "
+                      "ete verifiees. Une liste vide est indistinguable d'un "
+                      "depot sans ancre morte.")
+        return
+    for rel in [f for f in connus if f.endswith(".md")]:
+        chemin = os.path.join(RACINE, rel)
+        if not os.path.isfile(chemin):
+            continue
+        try:
+            texte = open(chemin, encoding="utf-8", errors="replace").read()
+        except OSError as exc:
+            alerte(rel, "illisible (%s) -- ses ancres n'ont PAS ete "
+                        "verifiees." % exc)
+            continue
+        ancres = _ancres_du_markdown(texte)
+        for lien in re.findall(r"\[[^\]]+\]\(([^)\s]+)\)", texte):
+            if lien.startswith(("http", "mailto")) or "#" not in lien:
+                continue
+            fichier, _, ancre = lien.partition("#")
+            if fichier:
+                continue          # ancre d'un AUTRE document : hors portee
+            if ancre and ancre not in ancres:
+                alerte(rel,
+                       "le lien « #%s » ne mene a aucun titre de ce fichier. "
+                       "Un fichier absent donne une 404 visible ; une ancre "
+                       "morte ne fait RIEN, et le lecteur croit avoir mal "
+                       "clique." % ancre)
+
+
 def controle_renvois_resolvent() -> None:
     """Chaque fichier cite dans un livrable existe-t-il vraiment ?
 
@@ -3146,6 +3215,7 @@ def main() -> int:
         controle_renvois_resolvent,
         controle_pannes_traitees_symetriquement,
         controle_le_refus_annonce_tient_dans_le_journal,
+        controle_ancres_resolvent,
     )
     for controle in CONTROLES:
         controle()

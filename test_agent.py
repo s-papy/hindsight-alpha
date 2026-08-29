@@ -1602,5 +1602,80 @@ class TestLaRevendicationDeREFUSEstVerifieeContreLeJOURNAL(unittest.TestCase):
         self.assertNotIn("n'est plus vrai", sortie, sortie[-800:])
 
 
+
+class TestUneANCREMorteEstSignalee(unittest.TestCase):
+    """`controle_renvois_resolvent` vérifie que le FICHIER cité existe —
+    jamais que l'ANCRE citée mène quelque part.
+
+    L'effet sur un lecteur est le même, et pire : un fichier absent donne une
+    404 visible, **une ancre morte ne fait rien**. Le navigateur reste où il
+    est, et le lecteur croit avoir mal cliqué.
+
+    Le README en comptait 14 au moment de l'ajout, toutes valides — ce
+    contrôle ne corrige donc rien aujourd'hui. Il ferme la moitié qui n'était
+    pas vérifiée, comme le contrôle des plists CHARGÉS l'a fait le même jour."""
+
+    RACINE = Path(__file__).resolve().parent
+
+    def _lancer(self, contenu_readme):
+        d = Path(tempfile.mkdtemp(prefix="hindsight-ancres-"))
+        try:
+            for nom in ("garde_fou.py", "config.py"):
+                shutil.copy(self.RACINE / nom, d / nom)
+            (d / "README.md").write_text(contenu_readme, encoding="utf-8")
+            subprocess.run(["git", "init", "-q", "."], cwd=str(d), check=True)
+            subprocess.run(["git", "add", "-A"], cwd=str(d), check=True)
+            r = subprocess.run([sys.executable, str(d / "garde_fou.py")],
+                               cwd=str(d), capture_output=True, text=True,
+                               timeout=120)
+            return r.stdout + r.stderr
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
+    def test_une_ancre_qui_ne_mene_nulle_part_est_signalee(self):
+        sortie = self._lancer("# Projet\n\nVoir [le détail](#section-absente).\n"
+                              "\n## Une autre section\n\nTexte.\n")
+        self.assertIn("#section-absente", sortie,
+                      "une ancre morte passe inaperçue :\n%s" % sortie[-700:])
+        self.assertIn("ne fait RIEN", sortie,
+                      "le message n'explique pas pourquoi c'est pire qu'une "
+                      "404 :\n%s" % sortie[-700:])
+
+    def test_une_ancre_VALIDE_ne_declenche_rien(self):
+        """TÉMOIN : un contrôle qui crierait sur toute ancre rendrait tout
+        sommaire impossible."""
+        sortie = self._lancer("# Projet\n\nVoir [le détail](#une-autre-section).\n"
+                              "\n## Une autre section\n\nTexte.\n")
+        self.assertNotIn("ne mene a aucun titre", sortie, sortie[-700:])
+
+    def test_le_balisage_du_titre_est_retire_avant_de_comparer(self):
+        """SECOND TÉMOIN, et il a fallu deux essais pour qu'il morde.
+
+        GitHub retire le balisage pour fabriquer l'ancre : « ## Le _mot_
+        compte » donne `#le-mot-compte`. Sans ce retrait, le contrôle crierait
+        sur une ancre parfaitement valide — le faux positif qui apprend à
+        ignorer un garde-fou.
+
+        Ma première version utilisait des accents graves (« Le `code` »). La
+        mutation qui supprime le retrait de balisage passait quand même :
+        l'expression suivante, qui enlève toute ponctuation, retire déjà les
+        accents graves ET les astérisques. Le SEUL caractère de balisage
+        qu'elle laisse est le tiret bas, parce qu'il fait partie de `\\w`.
+        C'est donc lui, et lui seul, que ce témoin doit exercer."""
+        sortie = self._lancer("# Projet\n\nVoir [ici](#le-mot-compte).\n"
+                              "\n## Le _mot_ compte\n\nTexte.\n")
+        self.assertNotIn("ne mene a aucun titre", sortie, sortie[-700:])
+
+    def test_les_ancres_du_README_reel_resolvent_toutes(self):
+        """Le contrôle tourne sur le vrai dépôt et doit y être vert : c'est
+        ce qui distingue une alerte résoluble d'une alerte qu'on apprend à
+        ignorer."""
+        r = subprocess.run([sys.executable, str(self.RACINE / "garde_fou.py")],
+                           cwd=str(self.RACINE), capture_output=True,
+                           text=True, timeout=180)
+        self.assertNotIn("ne mene a aucun titre", r.stdout + r.stderr,
+                         "le dépôt porte une ancre morte")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
