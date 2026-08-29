@@ -114,6 +114,41 @@ def _lire_journal() -> "tuple[list | None, int]":
     return entrees, illisibles
 
 
+def _en_utc(valeur: object) -> "datetime | None":
+    """Analyse un horodatage ISO et le rend TOUJOURS conscient du fuseau.
+
+    Un horodatage sans fuseau ne leve rien a l'analyse : il explose une ligne
+    plus loin, a la comparaison, avec
+    `TypeError: can't compare offset-naive and offset-aware datetimes`.
+
+    Ce piege est deja documente ET rattrape deux fois dans ce depot :
+    `monitor_exits.py` le nomme explicitement (« un build plus ancien, ou une
+    edition a la main -- reproduit le 24/08, et ca tuait tout le run ») et
+    `agent.py` normalise le fuseau exactement comme ici. Le bilan hebdomadaire
+    etait le troisieme site, et le seul des trois sans parade.
+
+    Reproduit le 29/08/2026, dans les DEUX sens :
+      . une ligne de journal sans fuseau -> le rapport entier meurt sur cette
+        ligne ;
+      . un `kickoff` sans fuseau dans le fichier de gel -> le rapport meurt sur
+        la PREMIERE ligne bien formee, donc sur toutes.
+
+    Le `except (ValueError, AttributeError): continue` du site d'appel existait
+    deja pour rendre un horodatage douteux ignorable. Il etait simplement vise
+    une ligne trop tot : la panne ne se produit pas a l'analyse, elle se produit
+    a la comparaison.
+
+    Naif est interprete comme UTC parce que c'est ce que ce projet ecrit
+    partout (`decision_log.log_run` horodate en UTC conscient) et ce que
+    `agent.py` suppose deja au meme endroit.
+    """
+    try:
+        t = datetime.fromisoformat(str(valeur).replace("Z", "+00:00"))
+    except (ValueError, AttributeError, TypeError):
+        return None
+    return t if t.tzinfo is not None else t.replace(tzinfo=timezone.utc)
+
+
 def _fenetre() -> "tuple[datetime, datetime] | None":
     """La semaine live : du kickoff a la date limite. Lue dans le fichier de
     gel, pas ecrite ici -- une date en dur serait une seconde source de
@@ -121,8 +156,10 @@ def _fenetre() -> "tuple[datetime, datetime] | None":
     try:
         with open(GEL, encoding="utf-8") as fh:
             kickoff = json.load(fh).get("kickoff")
-        debut = datetime.fromisoformat(str(kickoff).replace("Z", "+00:00"))
     except (OSError, ValueError, AttributeError, json.JSONDecodeError):
+        return None
+    debut = _en_utc(kickoff)
+    if debut is None:
         return None
     return debut, debut + timedelta(days=7)
 
@@ -209,9 +246,8 @@ def main() -> None:
     for e in entrees:
         if e.get("run_type") not in (None, "", "agent"):
             continue
-        try:
-            t = datetime.fromisoformat(str(e.get("timestamp")).replace("Z", "+00:00"))
-        except (ValueError, AttributeError):
+        t = _en_utc(e.get("timestamp"))
+        if t is None:
             continue
         if debut <= t <= fin:
             passages.append(e)
