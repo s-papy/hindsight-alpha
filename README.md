@@ -54,8 +54,24 @@ every one **twice** — once on the full price history, once on only what would
 have been knowable *yesterday*. If the two winners disagree, it **refuses to
 trade that symbol** rather than quietly trusting whichever version looks better.
 
-On real historical bars, that check finds a genuine disagreement on **XLK** and
+On real historical bars, that check finds a disagreement on **XLK** and
 refuses it live, every run, while SPY, GLD and XLV pass clean.
+
+**How solid is that disagreement? Measured, and the answer is uncomfortable.**
+The two scores the guard compares overlap by 97 % — same ~700 bars, minus the
+last 20 — so the gap that decides a verdict is small by construction. On XLK
+today it is **0.024 of a Sharpe unit** in-sample (10 beats 90), and it
+disappears entirely if the bars are fetched from the IEX feed instead of the
+consolidated SIP one. And this repository's own benchmark
+([HINDSIGHT_HOLDOUT.md](HINDSIGHT_HOLDOUT.md)) puts the mechanism's **false-alarm
+rate at 22.6 % on deliberately clean synthetic data**, against a 32.2 %
+detection rate on planted leaks.
+
+So the honest reading is not "XLK leaks, proven". It is: *this agent applies a
+falsifiable test before every trade, the test fires on XLK on real bars every
+single run, and the test's own error rate has been measured and published
+rather than assumed.* A refusal mechanism whose false-alarm rate is unknown is
+worth less than one whose false-alarm rate is 23 % and written down.
 
 The backtest edge on those three is real but thin and concentrated. **The
 result worth judging is not the P&L** — it is that the refusal mechanism catches
@@ -91,6 +107,7 @@ Everything below that is depth for whoever wants it, not a prerequisite.
 | [Hosted dashboard](#hosted-dashboard) | how the public page is built without exposing a key |
 | [Status](#status) | what is proven, what is running, what is left |
 | [LIVE_WEEK.md](LIVE_WEEK.md) | **what will be reported on 04/09 — decided before the results were known** |
+| [HINDSIGHT_HOLDOUT.md](HINDSIGHT_HOLDOUT.md) | the guard's own false-alarm and detection rates, measured — including the 22.6 % that argues against it |
 
 ## Backtest, at a glance
 

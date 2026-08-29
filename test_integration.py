@@ -5889,6 +5889,60 @@ class TestLaVerificationDeKickoff(unittest.TestCase):
                       sortie)
 
 
+class TestLeTauxDeFAUSSEALERTEEstPublie(unittest.TestCase):
+    """`HINDSIGHT_HOLDOUT.md` mesure ce que le garde-fou se trompe : à la
+    taille de holdout livrée (20 jours), **22.6 % de fausse alerte** sur des
+    séries délibérément saines, contre 32.2 % de détection sur des fuites
+    plantées.
+
+    Ce fichier n'était lié de NULLE PART, et le chiffre n'apparaissait dans
+    aucun livrable. Pendant ce temps le README qualifiait le désaccord de
+    XLK de « genuine ». Même situation que LIVE_WEEK.md ce matin : la pièce
+    la plus autocritique du dossier, introuvable.
+
+    Ça joue contre le projet, et c'est exactement pour ça que ça doit être en
+    première page : un juge qui découvre seul un taux de fausse alerte de
+    23 % non mentionné écarte tout le reste ; un juge à qui on l'annonce
+    fait confiance au reste."""
+
+    RACINE = Path(__file__).resolve().parent
+
+    def test_le_chiffre_du_banc_est_dans_le_README(self):
+        banc = (self.RACINE / "HINDSIGHT_HOLDOUT.md").read_text(encoding="utf-8")
+        readme = (self.RACINE / "README.md").read_text(encoding="utf-8")
+        import re
+        # Le taux est LU dans le banc, pas recopié ici : si le banc est
+        # relancé et que le chiffre bouge, ce test le dit au lieu de valider
+        # une valeur périmée.
+        ligne = [l for l in banc.splitlines() if "**livré**" in l]
+        self.assertTrue(ligne, "la ligne du holdout livré a disparu du banc")
+        taux = re.findall(r"([\d.]+)%", ligne[0])
+        self.assertGreaterEqual(len(taux), 2,
+                                "la ligne du banc ne porte plus ses deux taux : %s"
+                                % ligne[0])
+        fausse_alerte = taux[0]
+        self.assertIn(fausse_alerte, readme,
+                      "le README ne cite pas le taux de fausse alerte mesuré "
+                      "(%s%%) — le seul chiffre du dossier qui joue contre "
+                      "lui" % fausse_alerte)
+
+    def test_le_banc_est_ATTEIGNABLE_depuis_le_README(self):
+        """Un fichier que personne ne peut trouver ne divulgue rien."""
+        readme = (self.RACINE / "README.md").read_text(encoding="utf-8")
+        self.assertIn("HINDSIGHT_HOLDOUT.md", readme,
+                      "le banc n'est lié de nulle part : même défaut que "
+                      "LIVE_WEEK.md avant le 29/08")
+
+    def test_le_desaccord_de_XLK_n_est_plus_dit_GENUINE_sans_reserve(self):
+        """TÉMOIN : le mot « genuine » affirmait une certitude que le banc du
+        dépôt lui-même ne soutient pas."""
+        readme = (self.RACINE / "README.md").read_text(encoding="utf-8")
+        self.assertNotIn("finds a genuine disagreement", readme,
+                         "le README affirme encore un désaccord « genuine » "
+                         "alors que son propre banc mesure 22.6 % de fausse "
+                         "alerte")
+
+
 class TestAucunLivrableNAffirmeUnETATQuIlNePeutPasVoir(unittest.TestCase):
     """Le tableau de tête du README annonçait, sur la même ligne :
 
