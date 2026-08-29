@@ -118,16 +118,35 @@ def _passages_attendus(debut: datetime, fin: datetime) -> int:
 
 def _categorie(motif: str) -> str:
     if re.search(r"hindsight[_ ]guard", motif, re.I):
-        return "garde anti-retrospection"
+        return "hindsight guard"
     if re.search(r"volatility not cheap|regime", motif, re.I):
-        return "regime de volatilite"
-    return "autre"
+        return "volatility regime"
+    return "other"
 
 
 def main() -> None:
-    p = argparse.ArgumentParser(description=__doc__)
+    # `description=__doc__` DEVERSAIT LA DOCSTRING FRANCAISE dans --help,
+    # reflowee par argparse -- donc la liste numerotee de l'ordre, qui est
+    # tout l'engagement, sortait en un pave illisible. Et LIVE_WEEK.md, en
+    # anglais, envoie le lecteur ici. La docstring reste en francais comme
+    # tout le commentaire du depot ; ce qui S'IMPRIME est en anglais.
+    p = argparse.ArgumentParser(
+        description="Counts what the live week actually did. It does not "
+                    "write prose, and it changes nothing.",
+        epilog="Reported in this order, fixed before the results were known "
+               "(see LIVE_WEEK.md):\n"
+               "  1. the refusal mechanism  -- how often the hindsight guard "
+               "refused a symbol, and which\n"
+               "  2. execution regularity   -- expected runs vs actual runs\n"
+               "  3. entries                -- orders submitted\n"
+               "  4. P&L                    -- last, and owned as such\n\n"
+               "The window comes from kickoff_freeze.json. If it cannot be "
+               "read, this script stops\ninstead of counting the whole log: "
+               "\"I don't know which entries count\" must never\nbecome "
+               "\"I count them all\".",
+        formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--reseau", action="store_true",
-                   help="interroge Alpaca pour l'equite reelle")
+                   help="query Alpaca for the real current equity")
     args = p.parse_args()
 
     entrees, illisibles = _lire_journal()
@@ -135,21 +154,23 @@ def main() -> None:
 
     print()
     print("=" * 74)
-    print("BILAN DE LA SEMAINE LIVE — %s" % datetime.now().strftime("%d/%m/%Y %H:%M"))
+    print("LIVE WEEK REPORT — %s" % datetime.now().strftime("%d/%m/%Y %H:%M"))
     print("=" * 74)
 
     if fenetre is None:
-        print("  🔴 fenetre INCONNUE : kickoff_freeze.json illisible.")
-        print("     Sans elle, on ne sait pas quelles entrees comptent — et")
-        print("     compter tout le journal melangerait les essais d'avant le")
-        print("     kickoff au resultat hors echantillon. On s'arrete.")
+        print("  🔴 WINDOW UNKNOWN: kickoff_freeze.json could not be read.")
+        print("     Without it there is no way to tell which entries count — and")
+        print("     counting the whole log would mix the pre-kickoff development")
+        print("     runs into the out-of-sample result. Stopping here.")
         raise SystemExit(2)
     debut, fin = fenetre
-    print("  fenetre : %s  ->  %s" % (debut.strftime("%d/%m %H:%M"),
-                                      fin.strftime("%d/%m %H:%M")))
-    if illisibles:
-        print("  ⚠️  %d ligne(s) de journal ILLISIBLES, sautees et comptees ici."
-              % illisibles)
+    print("  window: %s  ->  %s" % (debut.strftime("%d/%m %H:%M"),
+                                    fin.strftime("%d/%m %H:%M")))
+    # TOUJOURS imprime, meme a zero. LIVE_WEEK.md promet publiquement que les
+    # lignes illisibles sont « skipped AND COUNTED IN THE OUTPUT » ; se taire a
+    # zero rendait cette phrase vraie seulement quand il y en avait. Un lecteur
+    # ne pouvait pas distinguer « aucune » de « pas verifie ».
+    print("  unreadable log lines skipped: %d" % illisibles)
 
     passages = []
     for e in entrees:
@@ -173,51 +194,55 @@ def main() -> None:
                 continue
             cat = _categorie(v.get("reason") or "")
             refus[cat] += 1
-            if cat == "garde anti-retrospection":
+            if cat == "hindsight guard":
                 refus_par_symbole[v.get("symbol")] += 1
     print()
-    print("  1. LE MECANISME DE REFUS")
+    print("  1. THE REFUSAL MECHANISM")
     total_verdicts = retenus + sum(refus.values())
     if not total_verdicts:
-        print("     ⬜ aucun verdict dans la fenetre — INCONNU, pas zero.")
+        print("     ⬜ no verdict inside the window — UNKNOWN, not zero.")
     else:
-        print("     %d verdict(s) rendus : %d retenu(s), %d refus"
+        print("     %d verdict(s): %d tradeable, %d refused"
               % (total_verdicts, retenus, sum(refus.values())))
+        # LE DENOMINATEUR EST NOMME. Il est le total des verdicts, retenus
+        # compris -- les pourcentages des refus ne font donc pas 100 %, et
+        # sous un titre « refused » un lecteur les sommait pour trouver 75 %.
+        # Un pourcentage sans sa base est une invitation a se tromper.
         for cat, n in refus.most_common():
-            print("       %-28s %3d  (%.0f %%)"
+            print("       %-28s %3d  (%.0f %% of all verdicts)"
                   % (cat, n, 100.0 * n / total_verdicts))
         if refus_par_symbole:
-            print("     refus par le garde, par symbole :")
+            print("     refused by the hindsight guard, per symbol:")
             for sym, n in refus_par_symbole.most_common():
                 print("       %-8s %d" % (sym, n))
 
     # ── 2. LA REGULARITE D'EXECUTION ─────────────────────────────────────
     attendus = _passages_attendus(debut, fin)
     print()
-    print("  2. LA REGULARITE D'EXECUTION")
-    print("     %d passage(s) reel(s) pour %d attendu(s)" % (len(passages), attendus))
+    print("  2. EXECUTION REGULARITY")
+    print("     %d actual run(s) for %d expected" % (len(passages), attendus))
     if attendus and len(passages) < attendus:
-        print("     🔴 %d passage(s) MANQUANT(S) — un agent qui n'a pas tourne"
+        print("     🔴 %d run(s) MISSING — an agent that did not run proved"
               % (attendus - len(passages)))
-        print("        n'a rien prouve, ni dans un sens ni dans l'autre.")
+        print("        nothing, in either direction.")
     elif attendus:
-        print("     🟢 aucun passage manquant.")
+        print("     🟢 no missing run.")
 
     # ── 3. LES ENTREES ───────────────────────────────────────────────────
     issues = Counter()
     for e in passages:
         for t in (e.get("trades") or []):
-            issues[t.get("outcome") or "inconnu"] += 1
+            issues[t.get("outcome") or "unknown"] += 1
     print()
-    print("  3. LES ENTREES")
+    print("  3. ENTRIES")
     if not issues:
-        print("     aucune tentative d'entree dans la fenetre.")
+        print("     no entry attempted inside the window.")
     for k, n in issues.most_common():
         print("     %-24s %d" % (k, n))
 
     # ── 4. LE P&L, EN DERNIER ET ASSUME ──────────────────────────────────
     print()
-    print("  4. LE P&L  (en dernier, deliberement)")
+    print("  4. P&L  (last, deliberately)")
     depart = None
     try:
         with open(ETAT, encoding="utf-8") as fh:
@@ -225,26 +250,26 @@ def main() -> None:
     except (OSError, json.JSONDecodeError):
         pass
     if depart:
-        print("     equite de depart : %.2f" % depart)
+        print("     starting equity : %.2f" % depart)
     else:
-        print("     ⬜ equite de depart INCONNUE (state.json illisible).")
+        print("     ⬜ starting equity UNKNOWN (state.json unreadable).")
     if args.reseau:
         try:
             import alpaca_cli
             eq = float(alpaca_cli.get_account().get("equity"))
-            print("     equite actuelle  : %.2f" % eq)
+            print("     current equity  : %.2f" % eq)
             if depart:
-                print("     variation        : %+.2f (%+.2f %%)"
+                print("     change          : %+.2f (%+.2f %%)"
                       % (eq - depart, 100.0 * (eq - depart) / depart))
         except Exception as err:
-            print("     🔴 equite actuelle NON LUE (%s) — pas zero, inconnue."
+            print("     🔴 current equity NOT READ (%s) — not zero, unknown."
                   % type(err).__name__)
     else:
-        print("     equite actuelle non demandee (--reseau pour l'interroger).")
+        print("     current equity not requested (--reseau to query it).")
     print()
-    print("     Sur cinq seances et une poignee de trades, ce chiffre ne")
-    print("     distingue pas une strategie d'un tirage. Il est rapporte")
-    print("     parce qu'il existe, pas parce qu'il prouve quoi que ce soit.")
+    print("     Over five sessions and a handful of trades, this figure does")
+    print("     not separate a strategy from a coin flip. It is reported")
+    print("     because it exists, not because it proves anything.")
     print("=" * 74)
 
 

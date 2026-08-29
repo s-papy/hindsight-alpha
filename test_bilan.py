@@ -78,7 +78,7 @@ class TestLaFenetreEstRespectee(BaseBilan):
         try:
             code, sortie = self._lancer(d)
             self.assertEqual(code, 0)
-            self.assertIn("aucun verdict dans la fenetre", sortie,
+            self.assertIn("no verdict inside the window", sortie,
                           "un passage anterieur au kickoff entre dans le "
                           "decompte :\n%s" % sortie)
         finally:
@@ -91,7 +91,7 @@ class TestLaFenetreEstRespectee(BaseBilan):
         try:
             code, sortie = self._lancer(d)
             self.assertEqual(code, 0)
-            self.assertIn("garde anti-retrospection", sortie)
+            self.assertIn("hindsight guard", sortie)
             self.assertIn("XLK", sortie)
         finally:
             __import__("shutil").rmtree(d, ignore_errors=True)
@@ -107,7 +107,7 @@ class TestUnPassageManquantEstDIT(BaseBilan):
         d = self._dossier([], kickoff=hier.isoformat())
         try:
             code, sortie = self._lancer(d)
-            self.assertIn("MANQUANT", sortie,
+            self.assertIn("MISSING", sortie,
                           "aucun passage n'a eu lieu et le bilan n'en dit "
                           "rien :\n%s" % sortie)
         finally:
@@ -128,7 +128,7 @@ class TestUneFenetreILLISIBLE_ARRETE_le_bilan(BaseBilan):
             self.assertNotEqual(code, 0,
                                 "le bilan conclut sans savoir quelle fenetre "
                                 "compter :\n%s" % sortie)
-            self.assertIn("INCONNUE", sortie)
+            self.assertIn("WINDOW UNKNOWN", sortie)
             # UN REFUS N'EST PAS UN PLANTAGE. Ajoute apres mutation : une
             # version qui supprimait le refus deliberait tombait quand meme
             # en TypeError deux lignes plus bas, donc `code != 0` restait
@@ -138,6 +138,105 @@ class TestUneFenetreILLISIBLE_ARRETE_le_bilan(BaseBilan):
             self.assertNotIn("Traceback", sortie,
                              "le bilan PLANTE au lieu de refuser proprement :"
                              "\n%s" % sortie[-800:])
+        finally:
+            __import__("shutil").rmtree(d, ignore_errors=True)
+
+
+
+class TestLeRapportEstLISIBLE(BaseBilan):
+    """LIVE_WEEK.md est en anglais et envoie le lecteur ici : « Where the
+    numbers come from : python3 bilan_semaine.py ». Le rapport sortait en
+    francais. C'est le livrable du 04/09, celui qu'un juge d'un hackathon
+    international lit apres avoir suivi l'instruction."""
+
+    def test_le_rapport_sort_en_anglais(self):
+        d = self._dossier([self._passage("2026-08-28T19:37:00+00:00")])
+        try:
+            code, sortie = self._lancer(d)
+            self.assertEqual(code, 0)
+            self.assertIn("LIVE WEEK REPORT", sortie, sortie)
+            # LES TITRES SONT VERIFIES AVEC LEUR NUMERO, pas seulement dans
+            # l'ordre ou ils sortent. Ma premiere version ne comparait que les
+            # positions dans le texte : renumeroter « 0. P&L » et « 9. THE
+            # REFUSAL MECHANISM » la laissait VERTE, alors qu'un juge lit les
+            # numeros et y verrait l'inverse exact de l'engagement pris.
+            titres = ("1. THE REFUSAL MECHANISM", "2. EXECUTION REGULARITY",
+                      "3. ENTRIES", "4. P&L")
+            for attendu in titres:
+                self.assertIn(attendu, sortie,
+                              "titre manquant ou renumerote : %r\n%s"
+                              % (attendu, sortie))
+            positions = [sortie.index(t) for t in titres]
+            self.assertEqual(positions, sorted(positions),
+                             "l'ordre annonce dans LIVE_WEEK.md n'est plus "
+                             "celui du rapport :\n%s" % sortie)
+        finally:
+            __import__("shutil").rmtree(d, ignore_errors=True)
+
+    def test_les_lignes_illisibles_sont_comptees_MEME_A_ZERO(self):
+        """LIVE_WEEK.md promet publiquement : « Unreadable log lines are
+        skipped AND COUNTED IN THE OUTPUT ». Le compte ne s'imprimait que
+        s'il y en avait -- la phrase n'etait donc vraie que dans ce cas, et
+        un lecteur ne pouvait pas distinguer « aucune » de « pas verifie »."""
+        d = self._dossier([self._passage("2026-08-28T19:37:00+00:00")])
+        try:
+            code, sortie = self._lancer(d)
+            self.assertIn("unreadable log lines skipped: 0", sortie,
+                          "a zero, le rapport ne dit plus rien des lignes "
+                          "illisibles :\n%s" % sortie)
+        finally:
+            __import__("shutil").rmtree(d, ignore_errors=True)
+
+    def test_une_ligne_illisible_est_comptee_et_le_rapport_continue(self):
+        """TEMOIN : imprimer « 0 » en dur passerait le test ci-dessus."""
+        d = self._dossier([self._passage("2026-08-28T19:37:00+00:00")])
+        try:
+            journal = d / "decision_log.jsonl"
+            journal.write_text(journal.read_text(encoding="utf-8")
+                               + "{ceci n'est pas du json\n", encoding="utf-8")
+            code, sortie = self._lancer(d)
+            self.assertEqual(code, 0)
+            self.assertIn("unreadable log lines skipped: 1", sortie, sortie)
+            self.assertIn("XLK", sortie,
+                          "une ligne illisible a emporte le reste du rapport")
+        finally:
+            __import__("shutil").rmtree(d, ignore_errors=True)
+
+    def test_l_aide_est_lisible_et_en_anglais(self):
+        """`description=__doc__` deversait la docstring francaise dans --help,
+        reflowee par argparse : la liste numerotee de l'ordre -- qui est tout
+        l'engagement de LIVE_WEEK.md -- sortait en un pave illisible."""
+        d = self._dossier([self._passage("2026-08-28T19:37:00+00:00")])
+        try:
+            r = subprocess.run([sys.executable, str(d / "bilan_semaine.py"),
+                                "--help"], cwd=str(d), capture_output=True,
+                               text=True, timeout=60)
+            sortie = r.stdout + r.stderr
+            self.assertEqual(r.returncode, 0, sortie)
+            self.assertIn("1. the refusal mechanism", sortie, sortie)
+            self.assertIn("4. P&L", sortie, sortie)
+            self.assertIn("LIVE_WEEK.md", sortie,
+                          "l'aide ne renvoie plus a l'engagement qu'elle "
+                          "resume :\n%s" % sortie)
+            # TEMOIN inclus : la docstring francaise ne doit plus s'y
+            # deverser. « POURQUOI CE FICHIER EXISTE » en est le titre.
+            self.assertNotIn("POURQUOI CE FICHIER EXISTE", sortie,
+                             "la docstring interne repart dans --help :\n%s"
+                             % sortie)
+        finally:
+            __import__("shutil").rmtree(d, ignore_errors=True)
+
+    def test_un_pourcentage_nomme_sa_base(self):
+        """Le denominateur est le TOTAL des verdicts, retenus compris. Sous
+        un titre « refused », les pourcentages ne font donc pas 100 % : un
+        lecteur qui les somme trouve 75 % et cherche l'erreur. Un
+        pourcentage sans sa base est une invitation a se tromper."""
+        d = self._dossier([self._passage("2026-08-28T19:37:00+00:00")])
+        try:
+            code, sortie = self._lancer(d)
+            self.assertIn("of all verdicts", sortie,
+                          "les pourcentages ne disent plus sur quoi ils "
+                          "portent :\n%s" % sortie)
         finally:
             __import__("shutil").rmtree(d, ignore_errors=True)
 
