@@ -50,6 +50,26 @@
 
 **hindsight_guard verdict for this symbol:** LEAK DETECTED — full-window winner: 90 days, in-sample winner: 10 days.
 
+*Reproduced independently on 29/08/2026, through a different data path: bars
+fetched straight from the Alpaca REST API over HTTPS instead of through the
+`alpaca` CLI this repository uses, then scored by the same `score_hv_window`.
+All four symbols came back with the same verdict — SPY 10/10, GLD 90/90, XLV
+10/10 agreeing, and XLK disagreeing 90 (full) against 10 (in-sample). The
+refusal is not an artefact of one client.*
+
+*The margins, since a verdict decided at the noise floor would not be worth
+much: on the full window, 90 beats 10 by **0.119** Sharpe; in-sample, 10 beats
+90 by **0.024**. The second is thin, and it is the one that produces the
+disagreement — worth stating rather than leaving to be discovered.*
+
+*One sensitivity found while reproducing, and it is not a small one: on the
+**IEX** feed instead of the consolidated **SIP** feed, the in-sample winner
+flips to 90 and XLK stops being refused. The `alpaca` CLI defaults to `sip`
+and this repository never overrides it, so the live behaviour is the one
+recorded above — but the feed is a choice that decides the headline verdict,
+and it is not among the constants frozen in `kickoff_freeze.json`. It is
+pinned in practice only by the CLI version, which `requirements.txt` seals.*
+
 ## XLV (657 bars used)
 
 *Buy-and-hold over the same bars: **23.93%**. 🔴 This is NOT comparable to the payoff column below and must never be ranked against it: buy-and-hold is a compounded price return over every day of the period, while `cum. proxy payoff` is a SUM of daily `abs(return) - cost` payoffs on the minority of days the rule was in a position at all. Different quantities, different denominators. It is printed for context on what the underlying did, not as a benchmark to beat.*
