@@ -5246,6 +5246,45 @@ class TestAucuneECRITURE_ne_depend_du_ramassage(unittest.TestCase):
             "classe plus rien, donc il ne peut plus rien attraper")
 
 
+def _est_bibliotheque_standard(origine: str, chemins: dict) -> bool:
+    """Ce module vient-il de la bibliotheque STANDARD, et non d'un paquet
+    installe ?
+
+    CORRIGE le 29/08/2026, apres avoir lu le journal de la CI plutot que
+    devine. La regle etait `origine.startswith(stdlib)`. Elle est juste sur
+    ce Mac, ou le site-packages utilisateur vit ailleurs :
+
+        stdlib  /Library/Developer/.../Versions/3.9/lib/python3.9
+        dotenv  /Users/.../Library/Python/3.9/lib/python/site-packages/...
+
+    Elle est FAUSSE sur un runner GitHub, et dans tout environnement virtuel,
+    ou site-packages est un SOUS-DOSSIER du prefixe stdlib :
+
+        stdlib  /opt/hostedtoolcache/Python/3.9.x/x64/lib/python3.9
+        dotenv  /opt/hostedtoolcache/Python/3.9.x/x64/lib/python3.9/site-packages/...
+
+    `dotenv` y etait donc classe « bibliotheque standard », le detecteur ne
+    trouvait plus AUCUN module tiers, et son temoin d'instrument criait --
+    a juste titre. C'est ce qui met la CI publique au rouge depuis le 28/08
+    au soir, exactement depuis le commit qui lui a fait installer les
+    dependances : avant, `dotenv` etait introuvable, donc classe tiers par
+    defaut, et le temoin passait POUR LA MAUVAISE RAISON.
+
+    Fonction pure et nommee pour qu'elle se teste sur les deux dispositions
+    sans dependre de celle de la machine qui execute les tests."""
+    stdlib = chemins.get("stdlib") or ""
+    if not origine or not stdlib or not origine.startswith(stdlib):
+        return False
+    for cle in ("purelib", "platlib"):
+        site = chemins.get(cle)
+        if site and origine.startswith(site):
+            return False
+    # Ceinture et bretelles : une disposition inconnue qui poserait quand
+    # meme les paquets dans un dossier nomme site-packages / dist-packages.
+    return not any(seg in origine.split(os.sep)
+                   for seg in ("site-packages", "dist-packages"))
+
+
 class TestChaqueDependanceTierceEstDECLAREE(unittest.TestCase):
     """La CI a échoué toute la soirée sur une dépendance qu'elle n'installait
     pas.
@@ -5288,7 +5327,7 @@ class TestChaqueDependanceTierceEstDECLAREE(unittest.TestCase):
         # sans qu'on y pense.
         locaux = {f.stem for f in self.RACINE.rglob("*.py")
                   if ".git" not in f.parts and "worktrees" not in f.parts}
-        stdlib = sysconfig.get_paths()["stdlib"]
+        chemins = sysconfig.get_paths()
         vus = {}
         for f in sorted(self.RACINE.glob("*.py")):
             arbre = ast.parse(f.read_text(encoding="utf-8"))
@@ -5310,7 +5349,8 @@ class TestChaqueDependanceTierceEstDECLAREE(unittest.TestCase):
                     except Exception:
                         spec = None
                     origine = getattr(spec, "origin", None) or ""
-                    if spec is not None and origine.startswith(stdlib):
+                    if spec is not None and _est_bibliotheque_standard(
+                            origine, chemins):
                         continue
                     vus.setdefault(racine, set()).add(f.name)
         return vus
@@ -5337,6 +5377,50 @@ class TestChaqueDependanceTierceEstDECLAREE(unittest.TestCase):
             "dotenv", self._modules_tiers(),
             "le détecteur ne voit plus dotenv : il ne classe plus rien comme "
             "tiers, donc il ne peut plus rien attraper")
+
+    def test_un_paquet_installe_SOUS_le_prefixe_stdlib_reste_tiers(self):
+        """LE CAS QUI A MIS LA CI AU ROUGE, teste sur les deux dispositions
+        plutôt que sur celle de la machine qui exécute ce test.
+
+        Sur ce Mac, le site-packages utilisateur vit hors du préfixe stdlib :
+        la règle naïve `origine.startswith(stdlib)` y marche. Sur un runner
+        GitHub — et dans tout environnement virtuel — site-packages est un
+        SOUS-DOSSIER de ce préfixe, et la règle naïve classe `dotenv` comme
+        bibliothèque standard. Le détecteur ne trouvait alors plus AUCUN
+        module tiers.
+
+        Et le témoin d'instrument passait quand même AVANT le 28/08 au soir,
+        pour la mauvaise raison : `dotenv` n'était pas installé du tout, donc
+        `find_spec` échouait et il était classé tiers par défaut. Le commit
+        qui a fait installer les dépendances a révélé le défaut ; il ne l'a
+        pas créé."""
+        runner = {
+            "stdlib": "/opt/hostedtoolcache/Python/3.9.23/x64/lib/python3.9",
+            "purelib": "/opt/hostedtoolcache/Python/3.9.23/x64/lib/python3.9/site-packages",
+            "platlib": "/opt/hostedtoolcache/Python/3.9.23/x64/lib/python3.9/site-packages",
+        }
+        self.assertFalse(
+            _est_bibliotheque_standard(
+                runner["purelib"] + "/dotenv/__init__.py", runner),
+            "un paquet installé sous le préfixe stdlib est pris pour la "
+            "bibliothèque standard — le détecteur devient aveugle")
+        self.assertTrue(
+            _est_bibliotheque_standard(runner["stdlib"] + "/json/__init__.py",
+                                       runner),
+            "un vrai module standard n'est plus reconnu")
+
+        mac = {
+            "stdlib": "/Library/Developer/CommandLineTools/Library/Frameworks/"
+                      "Python3.framework/Versions/3.9/lib/python3.9",
+            "purelib": "/Library/Python/3.9/site-packages",
+            "platlib": "/Library/Python/3.9/site-packages",
+        }
+        self.assertFalse(
+            _est_bibliotheque_standard(
+                "/Users/x/Library/Python/3.9/lib/python/site-packages/"
+                "dotenv/__init__.py", mac))
+        self.assertTrue(
+            _est_bibliotheque_standard(mac["stdlib"] + "/json/__init__.py", mac))
 
     def test_la_CI_installe_les_dependances_declarees(self):
         ci = (self.RACINE / ".github" / "workflows" / "garde-fou.yml").read_text(
