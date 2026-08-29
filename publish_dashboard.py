@@ -43,6 +43,7 @@ import decision_log
 from monitor_exits import MONITOR_STATUS_FILE
 
 DOCS_DIR = Path(__file__).parent / "docs"
+GEL = Path(__file__).parent / "kickoff_freeze.json"
 DATA_FILE = DOCS_DIR / "data.json"
 
 
@@ -169,6 +170,37 @@ def _position_publiable(position: dict) -> dict:
     return {champ: position.get(champ) for champ in CHAMPS_DE_POSITION_PUBLIES}
 
 
+def _kickoff_publie() -> "str | None":
+    """La frontiere du kickoff, LUE dans le fichier de gel et publiee avec le
+    reste.
+
+    AJOUTE le 29/08/2026. La page portait la meme date EN DUR :
+
+        docs/index.html   const KICKOFF_MS = Date.UTC(2026, 7, 28, 15, 0);
+        kickoff_freeze.json   "kickoff": "2026-08-28T15:00:00+00:00"
+
+    Les deux valeurs sont identiques aujourd'hui -- ce n'est pas un ecart
+    constate, c'est une seconde source de verite. Et bilan_semaine.py refuse
+    explicitement d'ecrire cette date en dur, en disant pourquoi dans sa
+    docstring : « une date en dur serait une seconde source de verite, et
+    elles finissent toujours par diverger ». La regle etait appliquee d'un
+    cote et pas de l'autre.
+
+    Or cette frontiere gouverne les DEUX chiffres de tete de la page : le
+    partage « 1 depuis le kickoff / 11 au total » et le « 28 des 30
+    enregistrements » du separateur. Si le kickoff bougeait, le bilan
+    suivrait et la page non.
+
+    Rend None si le fichier est illisible : la page a une valeur de repli
+    compilee, et elle DIT laquelle elle a utilisee."""
+    try:
+        with open(GEL, encoding="utf-8") as fh:
+            valeur = json.load(fh).get("kickoff")
+    except (OSError, ValueError, json.JSONDecodeError):
+        return None
+    return valeur if isinstance(valeur, str) and valeur else None
+
+
 def build_snapshot() -> dict:
     config.require_credentials()
     account = alpaca_cli.get_account()
@@ -206,6 +238,11 @@ def build_snapshot() -> dict:
 
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
+        # LU par docs/index.html pour placer le separateur du kickoff et
+        # partager le compteur de fuites. Publie parce qu'il est lu : meme
+        # discipline que celle appliquee a `portfolio_value`, retire le 28/08
+        # pour la raison inverse.
+        "kickoff": _kickoff_publie(),
         "team": "Hindsight Alpha",
         # Provenance embarquee dans les DONNEES, pas seulement dans la
         # page : si quelqu'un reprend data.json sans le HTML, l'origine

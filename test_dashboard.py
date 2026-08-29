@@ -1427,5 +1427,70 @@ class TestUneSectionVideDitPourquoi(BaseRendu):
         self.assertEqual(r["compte"], "DES CHIFFRES REELS")
 
 
+class TestLaFrontiereVientDuFichierDeGel(BaseRendu):
+    """La page portait la date du kickoff EN DUR, alors que
+    kickoff_freeze.json la porte deja et que bilan_semaine.py refuse
+    explicitement de la recopier -- sa docstring dit pourquoi : « une date en
+    dur serait une seconde source de verite, et elles finissent toujours par
+    diverger ». La regle etait appliquee cote Python et pas dans la page.
+
+    Les deux valeurs sont identiques aujourd'hui : ce n'est pas un ecart
+    constate, c'est la possibilite d'un ecart sur la frontiere qui gouverne
+    les DEUX chiffres de tete."""
+
+    def test_la_date_publiee_gagne_sur_le_repli(self):
+        r = self.executer("""
+            _adopterLeKickoff("2026-08-24T00:00:00+00:00");
+            const el = document.getElementById('leak-stat');
+            const fuite = [{symbol:"XLK", reason:"hindsight_guard: disagree"}];
+            renderLeakStat([
+              {timestamp:"2026-08-25T19:37:00+00:00", verdicts:fuite},
+              {timestamp:"2026-08-23T19:37:00+00:00", verdicts:fuite}
+            ]);
+            _resultats.texte = el.textContent;
+        """)
+        # Avec la frontiere au 24/08, le passage du 25 est DANS la semaine et
+        # celui du 23 avant. Avec le repli du 28, les deux seraient avant.
+        self.assertIn("1 since the 28 Aug kickoff", r["texte"], r["texte"])
+        self.assertIn("1 of them from development", r["texte"], r["texte"])
+
+    def test_un_champ_absent_garde_le_repli_sans_bruit(self):
+        """TEMOIN : un data.json publie avant l'existence du champ est le cas
+        NORMAL. Il ne doit pas allumer un bandeau d'erreur."""
+        r = self.executer("""
+            _adopterLeKickoff(undefined);
+            const b = document.getElementById('error-banner');
+            _resultats.aff = b.style.display || "";
+            _resultats.txt = b.textContent;
+        """)
+        self.assertNotEqual(r["aff"], "block")
+        self.assertEqual(r["txt"], "")
+
+    def test_une_date_ILLISIBLE_est_DITE_au_lieu_d_etre_avalee(self):
+        """SECOND TEMOIN, et le seul qui compte vraiment : retomber en
+        silence sur la date compilee, sur la frontiere qui gouverne les deux
+        chiffres de tete, serait « je n'ai pas compris » rendu comme « tout
+        va bien »."""
+        r = self.executer("""
+            _adopterLeKickoff("pas-une-date");
+            const b = document.getElementById('error-banner');
+            _resultats.aff = b.style.display;
+            _resultats.txt = b.textContent;
+        """)
+        self.assertEqual(r["aff"], "block")
+        self.assertIn("kickoff boundary could not be read", r["txt"])
+        self.assertIn("fall back to the date built into this page", r["txt"],
+                      "le message ne dit pas quelle frontiere a servi")
+
+    def test_la_page_ne_fige_plus_la_date(self):
+        """La constante doit rester REASSIGNABLE : un `const` reintroduirait
+        la seconde source de verite en silence, en faisant echouer
+        l'adoption sans que rien ne le dise."""
+        page = PAGE.read_text(encoding="utf-8")
+        self.assertIn("let KICKOFF_MS", page,
+                      "KICKOFF_MS n'est plus remplacable par la valeur "
+                      "publiee : la page redevient sa propre source")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

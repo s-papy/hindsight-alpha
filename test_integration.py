@@ -4111,6 +4111,54 @@ class TestAucunChampMortDansLesDonneesPubliees(unittest.TestCase):
                          "publier ce que personne ne lit, c'est publier sans "
                          "l'avoir décidé" % ", ".join(morts))
 
+    def test_la_frontiere_du_kickoff_est_PUBLIEE_depuis_le_fichier_de_gel(self):
+        """La page portait la date du kickoff EN DUR, alors que
+        kickoff_freeze.json la porte déjà et que `bilan_semaine.py` refuse
+        explicitement de la recopier, en disant pourquoi : « une date en dur
+        serait une seconde source de vérité, et elles finissent toujours par
+        diverger ». La règle était appliquée d'un côté et pas de l'autre.
+
+        Cette frontière gouverne les DEUX chiffres de tête de la page : le
+        partage « depuis le kickoff / au total » du compteur de fuites, et le
+        « 28 des 30 enregistrements » du séparateur."""
+        from unittest import mock
+        import publish_dashboard
+
+        with mock.patch.object(publish_dashboard.config, "require_credentials"), \
+             mock.patch.object(publish_dashboard.config, "ACCOUNT_ID", None), \
+             mock.patch.object(publish_dashboard.alpaca_cli, "get_account",
+                               return_value={"account_number": "PA0",
+                                             "status": "ACTIVE"}), \
+             mock.patch.object(publish_dashboard.alpaca_cli, "list_positions",
+                               return_value=[]), \
+             mock.patch.object(publish_dashboard.decision_log, "read_log",
+                               return_value=[]):
+            instantane = publish_dashboard.build_snapshot()
+
+        attendu = json.loads(
+            Path(publish_dashboard.GEL).read_text(encoding="utf-8"))["kickoff"]
+        self.assertEqual(instantane.get("kickoff"), attendu,
+                         "la frontière publiée ne vient pas de "
+                         "kickoff_freeze.json — la page a de nouveau sa "
+                         "propre date")
+
+    def test_un_fichier_de_gel_illisible_ne_FABRIQUE_pas_de_date(self):
+        """TÉMOIN : plutôt aucune frontière qu'une frontière inventée. La
+        page a une valeur de repli compilée, et elle DIT laquelle elle a
+        utilisée ; publier une date au hasard ici la priverait de ce choix."""
+        import publish_dashboard, tempfile
+        with tempfile.TemporaryDirectory() as d:
+            faux = Path(d) / "kickoff_freeze.json"
+            faux.write_text("{ceci n'est pas du json", encoding="utf-8")
+            from unittest import mock
+            with mock.patch.object(publish_dashboard, "GEL", faux):
+                self.assertIsNone(publish_dashboard._kickoff_publie())
+            # ...et un fichier valide SANS le champ non plus.
+            faux.write_text('{"gele_le": "2026-08-27T21:07:02+00:00"}',
+                            encoding="utf-8")
+            with mock.patch.object(publish_dashboard, "GEL", faux):
+                self.assertIsNone(publish_dashboard._kickoff_publie())
+
     def test_build_snapshot_APPLIQUE_reellement_le_filtre(self):
         """LE test qui manquait, et son absence était instructive : une
         première version de cette classe vérifiait la liste blanche et la

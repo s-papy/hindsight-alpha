@@ -417,6 +417,7 @@ async function loadDashboard() {
     const res = await fetch('./data.json', { cache: 'no-store' });
     if (!res.ok) throw new Error('data.json not found yet — run publish_dashboard.py at least once');
     const data = await res.json();
+    _adopterLeKickoff(data.kickoff);
     // AJOUTE 27/08 au soir. Ces cinq appels etaient enchaines dans le meme
     // try : une section qui leve empechait toutes les SUIVANTES de se rendre.
     // Mesure sur un enregistrement null -- renderLeakStat, renderMonitorHealth
@@ -489,6 +490,32 @@ async function loadDashboard() {
     banner.style.display = 'block';
     banner.textContent = 'Could not load dashboard data: ' + err.message;
     _direQueRienN_aEteCharge();
+  }
+}
+
+// LA FRONTIERE PUBLIEE REMPLACE LE REPLI -- ou le dit.
+//
+// Trois cas, et le troisieme est celui qui compte :
+//   . champ absent      -> data.json publie avant ce champ. On garde le
+//                          repli, sans un mot : c'est le cas normal d'un
+//                          ancien instantane ;
+//   . date lisible      -> elle gagne, silencieusement ;
+//   . date ILLISIBLE    -> on le DIT dans le bandeau. Retomber en silence
+//                          sur une date compilee, sur la frontiere qui
+//                          gouverne les deux chiffres de tete, serait
+//                          exactement « je n'ai pas compris » rendu comme
+//                          « tout va bien ».
+function _adopterLeKickoff(publie) {
+  if (publie === undefined || publie === null || publie === '') return;
+  const t = new Date(publie).getTime();
+  if (!isNaN(t)) { KICKOFF_MS = t; return; }
+  const banner = document.getElementById('error-banner');
+  if (banner) {
+    banner.style.display = 'block';
+    banner.textContent = 'The published kickoff boundary could not be read ('
+      + String(publie) + '), so the counts below fall back to the date built '
+      + 'into this page (28 Aug 2026, 15:00 UTC). If the two ever differ, the '
+      + 'split between the live week and the development runs is wrong.';
   }
 }
 
@@ -1230,7 +1257,19 @@ function renderTrade(d) {
 // 29/08/2026, quand le compteur de fuites en a eu besoin a son tour : deux
 // copies de la meme date auraient diverge, comme les trois normalisations du
 // numero de compte l'avaient fait dans config.py le 28.
-const KICKOFF_MS = Date.UTC(2026, 7, 28, 15, 0);   // 28 aout 2026, 15:00 UTC
+//
+// ET ELLE VIENT MAINTENANT DU FICHIER DE GEL, plus d'ici. La valeur
+// ci-dessous n'est qu'un REPLI, pour un data.json publie avant que le champ
+// `kickoff` existe. La vraie source est kickoff_freeze.json, recopiee dans
+// data.json par publish_dashboard.py -- la meme que lit bilan_semaine.py,
+// dont la docstring dit noir sur blanc pourquoi : « une date en dur serait
+// une seconde source de verite, et elles finissent toujours par diverger ».
+// La regle etait appliquee cote Python et pas ici.
+//
+// Cette frontiere gouverne les DEUX chiffres de tete de la page : le partage
+// « 1 depuis le kickoff / 11 au total » et le « 28 des 30 enregistrements »
+// du separateur.
+let KICKOFF_MS = Date.UTC(2026, 7, 28, 15, 0);   // repli : 28 aout 2026, 15:00 UTC
 // `d &&` ajoute le 27/08 : cette fonction tourne dans des `some()` AVANT la
 // boucle isolee par enregistrement, donc un enregistrement null y levait hors
 // de toute protection et vidait le tableau malgre elle.
