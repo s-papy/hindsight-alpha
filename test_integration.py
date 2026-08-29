@@ -6090,6 +6090,91 @@ class TestLeScriptVIDEOTientDansLesCinqMinutes(unittest.TestCase):
                 % (debit, trouve.group(1), attendu_txt, n, self.SECONDES_ECRAN))
 
 
+class TestLeVerdictEstPublieAvecSonECART(unittest.TestCase):
+    """`BACKTEST_RESULTS.md` publiait « full-window winner: 90 days,
+    in-sample winner: 10 days » sans dire de COMBIEN.
+
+    Or c'est l'écart qui dit si le verdict vaut quelque chose. Mesuré le
+    29/08 : sur XLK le gagnant in-sample devance le suivant de **0,024** de
+    Sharpe, et le désaccord DISPARAÎT sur le flux IEX au lieu de SIP. Sur GLD,
+    **0,028** a suffi pour que la fenêtre gagnante passe de 20 à 90 jours
+    entre le 24/08 et le 29/08.
+
+    Ce n'est pas un défaut du mécanisme — les deux séries se recouvrent à
+    97 % par construction, donc l'écart est petit. Le défaut serait de
+    publier le verdict sans l'écart.
+
+    CALCULÉ DANS LE GÉNÉRATEUR, et c'est le point de méthode : j'avais
+    d'abord écrit ces observations À LA MAIN dans `BACKTEST_RESULTS.md`
+    — un fichier **généré** par `backtest.py`. Elles auraient disparu à la
+    régénération suivante. Même discipline que `HINDSIGHT_HOLDOUT.md` :
+    l'artefact ne se retouche pas, le générateur se corrige."""
+
+    RACINE = Path(__file__).resolve().parent
+
+    def _module(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "bt_marge", str(self.RACINE / "backtest.py"))
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules["bt_marge"] = mod
+        spec.loader.exec_module(mod)
+        return mod
+
+    def test_l_ecart_est_celui_du_gagnant_sur_le_suivant(self):
+        bt = self._module()
+        # Les scores in-sample reels de XLK le 29/08.
+        self.assertAlmostEqual(
+            bt._marge({10: 0.8120, 20: -0.6350, 30: -1.0912,
+                       60: -1.9285, 90: 0.7880}), 0.024, places=3)
+
+    def test_moins_de_deux_scores_finis_rend_NONE_et_pas_zero(self):
+        """TÉMOIN : rendre 0.0 laisserait croire à une égalité parfaite —
+        c'est-à-dire au verdict le plus fragile possible — alors qu'il n'y a
+        simplement rien à comparer. Même règle que partout ailleurs ici :
+        « je n'ai pas pu mesurer » n'est pas une mesure."""
+        bt = self._module()
+        self.assertIsNone(bt._marge({10: 1.0}))
+        self.assertIsNone(bt._marge({10: float("nan"), 90: 2.0}))
+        self.assertIsNone(bt._marge({}))
+
+    def test_le_rapport_genere_porte_les_deux_ecarts(self):
+        """On teste le GÉNÉRATEUR, pas l'artefact : régénérer
+        BACKTEST_RESULTS.md demande le CLI Alpaca et le réseau."""
+        bt = self._module()
+        faux = [{
+            "symbol": "XLK", "bars_used": 657, "buy_and_hold_return_pct": -5.56,
+            "windows": {}, "concentration": {},
+            "hindsight_guard_verdict": {
+                "agrees": False, "verdict": "LEAK DETECTED",
+                "full_winner": 90, "in_sample_winner": 10, "summary": "",
+                "marge_plein": 0.119, "marge_in_sample": 0.024},
+        }]
+        texte = bt.format_report(faux)
+        self.assertIn("0.119", texte, "l'écart sur la fenêtre pleine manque")
+        self.assertIn("0.024", texte, "l'écart in-sample manque")
+        self.assertIn("97%", texte,
+                      "le rapport ne dit pas POURQUOI l'écart est petit : "
+                      "un lecteur lirait 0,024 comme une faiblesse plutôt "
+                      "que comme une propriété du recouvrement")
+
+    def test_sans_ecart_mesurable_le_rapport_n_invente_rien(self):
+        """SECOND TÉMOIN : un verdict sans écart calculable doit s'écrire
+        sans phrase sur l'écart, pas avec « 0.000 »."""
+        bt = self._module()
+        faux = [{
+            "symbol": "XLK", "bars_used": 10, "buy_and_hold_return_pct": 0.0,
+            "windows": {}, "concentration": {},
+            "hindsight_guard_verdict": {
+                "agrees": False, "verdict": "CANNOT CONCLUDE",
+                "full_winner": 90, "in_sample_winner": 10, "summary": "",
+                "marge_plein": None, "marge_in_sample": None},
+        }]
+        texte = bt.format_report(faux)
+        self.assertNotIn("Sharpe unit", texte)
+        self.assertIn("CANNOT CONCLUDE", texte, "le verdict lui-même a disparu")
+
+
 class TestUnSeulPLANCHERDeSignificativite(unittest.TestCase):
     """`HINDSIGHT_HOLDOUT.md` annonçait DEUX planchers pour la même chose,
     avec les mêmes mots :

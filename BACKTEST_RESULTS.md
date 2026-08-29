@@ -65,6 +65,8 @@ and should know that was expected rather than wonder what broke.*
 
 **hindsight_guard verdict for this symbol:** LEAK DETECTED — full-window winner: 90 days, in-sample winner: 10 days.
 
+*⚠️ Les deux notes ci-dessous ont été AJOUTÉES À LA MAIN le 29/08 dans un fichier **généré** par `backtest.py` : elles disparaîtront à la prochaine régénération. Les écarts qu'elles citent sont désormais calculés par le générateur lui-même et réapparaîtront automatiquement sur la ligne de verdict de chaque symbole ; le reste — la reproduction indépendante, la sensibilité au flux — est une observation datée qui n'a pas vocation à se régénérer. La régénération demande le CLI Alpaca et le réseau.*
+
 *Reproduced independently on 29/08/2026, through a different data path: bars
 fetched straight from the Alpaca REST API over HTTPS instead of through the
 `alpaca` CLI this repository uses, then scored by the same `score_hv_window`.

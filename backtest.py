@@ -38,6 +38,8 @@ paragraph when it's time to make a slide.
 
 from __future__ import annotations
 
+import math
+
 import argparse
 from datetime import datetime, timezone
 from pathlib import Path
@@ -125,6 +127,17 @@ def etiquette_de_verdict(report) -> str:
     return detail.get(cle, cle)
 
 
+def _marge(scores: dict) -> "float | None":
+    """De combien le meilleur candidat devance le deuxieme, en points de
+    Sharpe. None si moins de deux scores finis -- il n'y a alors pas d'ecart
+    a mesurer, et rendre 0.0 laisserait croire a une egalite parfaite."""
+    finis = sorted(v for v in scores.values()
+                   if isinstance(v, (int, float)) and math.isfinite(v))
+    if len(finis) < 2:
+        return None
+    return round(finis[-1] - finis[-2], 4)
+
+
 def backtest_symbol(symbol: str, bars: List[Bar]) -> dict:
     result: dict = {"symbol": symbol, "bars_used": len(bars), "windows": {}}
 
@@ -169,6 +182,26 @@ def backtest_symbol(symbol: str, bars: List[Bar]) -> dict:
         "full_winner": report.full_winner,
         "in_sample_winner": report.in_sample_winner,
         "summary": report.summary(),
+        # DE COMBIEN LE GAGNANT DEVANCE LE SUIVANT. Ajoute le 29/08/2026.
+        #
+        # Le verdict etait publie sans son ecart, alors que c'est lui qui dit
+        # si le verdict vaut quelque chose. Mesure du meme jour : sur XLK, le
+        # gagnant in-sample devance le deuxieme de 0,024 de Sharpe, et le
+        # desaccord DISPARAIT sur le flux IEX au lieu du flux SIP. Sur GLD,
+        # 0,028 a suffi pour que la fenetre gagnante passe de 20 a 90 jours
+        # entre le 24/08 et le 29/08.
+        #
+        # Ce n'est pas un defaut du mecanisme : les deux series comparees se
+        # recouvrent a 97 % par construction (voir HINDSIGHT_HOLDOUT.md), donc
+        # l'ecart qui tranche est petit. Ce qui serait un defaut, c'est de
+        # publier le verdict sans l'ecart.
+        #
+        # CALCULE ICI plutot qu'ecrit a la main dans le .md : ce fichier est
+        # GENERE, et une note ajoutee a la main y disparait a la regeneration
+        # suivante -- c'est exactement ce qui serait arrive aux deux notes que
+        # j'y avais ecrites le matin meme.
+        "marge_plein": _marge(report.full_scores),
+        "marge_in_sample": _marge(report.in_sample_scores),
     }
 
     result["buy_and_hold_return_pct"] = round(100 * buy_and_hold_return(bars), 2)
@@ -221,7 +254,16 @@ def format_report(results: List[dict]) -> str:
                 "would bite hardest on exactly what remains after those days are removed."
             )
         lines.append("")
-        lines.append(f"**hindsight_guard verdict for this symbol:** {r['hindsight_guard_verdict']['verdict']} — full-window winner: {r['hindsight_guard_verdict']['full_winner']} days, in-sample winner: {r['hindsight_guard_verdict']['in_sample_winner']} days.")
+        v = r['hindsight_guard_verdict']
+        marges = ""
+        if v.get("marge_plein") is not None and v.get("marge_in_sample") is not None:
+            marges = (" *Winner's lead over the runner-up: %.3f of a Sharpe unit "
+                      "on the full window, %.3f in-sample. The two series overlap "
+                      "by 97%%, so the gap that decides a verdict is small by "
+                      "construction — which is why it is published with the "
+                      "verdict rather than left to be discovered.*"
+                      % (v["marge_plein"], v["marge_in_sample"]))
+        lines.append(f"**hindsight_guard verdict for this symbol:** {v['verdict']} — full-window winner: {v['full_winner']} days, in-sample winner: {v['in_sample_winner']} days.{marges}")
         lines.append("")
     return "\n".join(lines)
 
