@@ -1582,6 +1582,33 @@ def check_gates(
 
     open_positions = alpaca_cli.list_open_option_positions()
 
+    # CE QUE CETTE LISTE NE CONTIENT PAS, mesure du 29/08/2026. Elle ne rend
+    # QUE les options. Apres un exercice ou une assignation a l'echeance, le
+    # compte porte une ligne ACTIONS -- et elle est invisible a tout ce qui
+    # suit :
+    #
+    #     list_open_option_positions()  ->  ['SPY260904P00769000']
+    #     option_underlying(ligne actions)  ->  None
+    #
+    #   . la regle « jamais deux positions sur le meme sous-jacent » ne la
+    #     voit pas : une nouvelle option SPY serait autorisee alors que le
+    #     compte porte deja 200 SPY short ;
+    #   . MAX_OPEN_POSITIONS ne la compte pas ;
+    #   . les plafonds 1 % / 3 % / 1,5 % somment de la PRIME d'option : une
+    #     position actions y contribue zero, quel que soit son notionnel.
+    #
+    # CE QUI LA VOIT QUAND MEME, et ce n'est pas rien : le verrou de perte
+    # hebdomadaire lit l'EQUITE du compte, donc le P&L d'une position actions
+    # y entre normalement. Et manage_exits() emet depuis le 29/08 une action
+    # EQUITY_UNEXPECTED, journalisee et rendue en rouge sur la page publique,
+    # a chacun de ses 28 passages quotidiens.
+    #
+    # AUCUN REFUS N'EST AJOUTE ICI. Refuser une entree tant qu'une ligne
+    # actions traine serait un garde de risque, et aucun seuil de ce depot ne
+    # bouge sans decision humaine -- c'est une decision a prendre, pas un
+    # oubli a corriger. Elle est ecrite ici pour qu'elle soit prise en
+    # connaissance de cause, et non decouverte apres coup.
+
     # Avant tout dimensionnement : sait-on seulement ce qu'on porte deja ?
     # Voir positions_au_cout_illisible() pour la mesure. Place ici, donc AVANT
     # le plafond sectoriel comme avant le plafond global -- les deux reposent

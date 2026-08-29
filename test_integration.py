@@ -1505,7 +1505,11 @@ class TestAucunIdentifiantPublie(unittest.TestCase):
                       "complémentaires")
         # Une valeur acceptée par ce filtre traverse json.dumps sans être
         # échappée — donc la couche 2 la verrait telle quelle.
-        for valeur in ("aB3xY9QwErTyUiOpAsDfGhJkL", "PA3K8MP3MF0U",
+        # « PA0EXEMPLE00 » et non le vrai numero : le garde-fou l a
+        # signale ici le 29/08, pour la deuxieme fois de la journee. Une
+        # fixture n a pas besoin d une valeur vraie pour prouver qu une
+        # chaine alphanumerique traverse json.dumps inchangee.
+        for valeur in ("aB3xY9QwErTyUiOpAsDfGhJkL", "PA0EXEMPLE00",
                        "clef_avec-tirets_1234567890"):
             self.assertEqual(_json.dumps(valeur)[1:-1], valeur,
                              "%r est accepté par le filtre ET modifié par "
