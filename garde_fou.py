@@ -2840,6 +2840,121 @@ def controle_plists_sont_du_xml_valide() -> None:
                        "logs systeme." % cle)
 
 
+def controle_le_refus_annonce_tient_dans_le_journal() -> None:
+    """Le README annonce qu'un symbole est refuse A CHAQUE PASSAGE. Le
+    journal le confirme-t-il encore ?
+
+    AJOUTE le 29/08/2026. C'est la revendication la plus visible du dossier
+    -- elle apparait QUATRE FOIS dans le README, dont le tableau de tete et
+    le diagramme -- et c'est aussi la plus fragile : mesure du meme jour, le
+    desaccord de XLK se joue a 0,024 de Sharpe entre deux fenetres
+    candidates, et il DISPARAIT si l'on interroge le flux IEX au lieu du
+    flux SIP. Quelques seances de donnees nouvelles peuvent le retourner.
+
+    Si cela arrive pendant la semaine jugee, la premiere ligne que lit un
+    juge devient fausse et PERSONNE NE LE VERRAIT : le tableau de bord
+    afficherait simplement un verdict de plus, vert au lieu de rouge.
+
+    Verifie le 29/08 sur le journal committe : 15 verdicts XLK, 15 refus,
+    tous par le garde anti-retrospection, zero retenu. Un seizieme passage
+    n'evaluait pas XLK -- il date du 24/08, avant que ce symbole entre dans
+    l'univers.
+
+    AUCUNE LISTE RECOPIEE : l'univers est lu dans agent.py, le symbole
+    revendique est lu dans le README, et le resultat est lu dans le journal.
+    Ce controle ne sait rien de « XLK » par lui-meme.
+
+    TROIS ISSUES, et la troisieme est celle qui compte :
+      . tous refuses            -> rien a dire ;
+      . un seul retenu          -> alerte nommant la date ;
+      . AUCUN verdict trouve    -> alerte aussi. « Je n'ai pas pu verifier »
+        n'est pas « c'est verifie » -- surtout pour la phrase de tete."""
+    chemin_readme = os.path.join(RACINE, "README.md")
+    chemin_journal = os.path.join(RACINE, "decision_log.jsonl")
+    if not os.path.exists(chemin_readme) or not os.path.exists(chemin_journal):
+        return
+    univers = _univers_de_l_agent()
+    if not univers:
+        alerte("agent.py", "DEFAULT_UNIVERSE n'a pas pu etre lu : la "
+                           "revendication « refuse a chaque passage » du "
+                           "README n'a PAS ete verifiee.")
+        return
+    texte = open(chemin_readme, encoding="utf-8", errors="replace").read()
+    revendiques = []
+    for sym in univers:
+        for m in re.finditer(r"every run", texte, re.I):
+            avant = texte[max(0, m.start() - 90):m.start()]
+            if (re.search(r"\b%s\b" % re.escape(sym), avant)
+                    and re.search(r"refus", avant, re.I)):
+                revendiques.append(sym)
+                break
+    if not revendiques:
+        return
+    for sym in revendiques:
+        total, retenus = _verdicts_du_journal(chemin_journal, sym)
+        if total == 0:
+            alerte("README.md",
+                   "annonce que %s est refuse a CHAQUE passage, et le journal "
+                   "ne contient AUCUN verdict pour ce symbole : la phrase "
+                   "n'est pas verifiee, elle est invérifiable ici." % sym)
+        elif retenus:
+            alerte("README.md",
+                   "annonce que %s est refuse a CHAQUE passage, mais le "
+                   "journal contient %d verdict(s) OU IL EST RETENU (%s) sur "
+                   "%d. La premiere ligne que lit un juge n'est plus vraie."
+                   % (sym, len(retenus), ", ".join(retenus[:3]), total))
+
+
+def _univers_de_l_agent() -> list:
+    """DEFAULT_UNIVERSE, lu dans agent.py par l'arbre syntaxique -- pas
+    importe (agent.py a des effets de bord au chargement) et pas recopie."""
+    try:
+        with open(os.path.join(RACINE, "agent.py"), encoding="utf-8") as fh:
+            arbre = ast.parse(fh.read())
+    except (OSError, SyntaxError):
+        return []
+    for n in ast.walk(arbre):
+        if not isinstance(n, ast.Assign):
+            continue
+        if not any(getattr(t, "id", "") == "DEFAULT_UNIVERSE" for t in n.targets):
+            continue
+        if not isinstance(n.value, (ast.List, ast.Tuple)):
+            return []
+        return [e.value for e in n.value.elts
+                if isinstance(e, ast.Constant) and isinstance(e.value, str)]
+    return []
+
+
+def _verdicts_du_journal(chemin: str, symbole: str) -> "tuple[int, list]":
+    """(nombre de verdicts pour ce symbole, dates de ceux ou il est RETENU).
+
+    Une ligne illisible est sautee : le journal est append-only et porte des
+    formes anciennes. Ce qui compte ici est de ne jamais compter un verdict
+    inexistant, pas de tout lire."""
+    total, retenus = 0, []
+    try:
+        with open(chemin, encoding="utf-8") as fh:
+            for ligne in fh:
+                ligne = ligne.strip()
+                if not ligne:
+                    continue
+                try:
+                    e = json.loads(ligne)
+                except (ValueError, TypeError):
+                    continue
+                if not isinstance(e, dict):
+                    continue
+                for v in (e.get("verdicts") or []):
+                    if not isinstance(v, dict) or v.get("symbol") != symbole:
+                        continue
+                    total += 1
+                    if v.get("tradeable"):
+                        retenus.append(str(e.get("timestamp"))[:19])
+    except OSError:
+        return 0, []
+    return total, retenus
+
+
 def controle_pannes_traitees_symetriquement() -> None:
     """Une meme fonction traite-t-elle ses pannes JUMELLES de la meme facon ?
 
@@ -3012,6 +3127,7 @@ def main() -> int:
         controle_reveil_programme,
         controle_renvois_resolvent,
         controle_pannes_traitees_symetriquement,
+        controle_le_refus_annonce_tient_dans_le_journal,
     )
     for controle in CONTROLES:
         controle()

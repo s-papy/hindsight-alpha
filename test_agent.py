@@ -1440,5 +1440,87 @@ class TestLeMotifDesJUMELLESEstDetecteToutSeul(unittest.TestCase):
                          "le dépôt porte une asymétrie non résolue")
 
 
+
+class TestLaRevendicationDeREFUSEstVerifieeContreLeJOURNAL(unittest.TestCase):
+    """« XLK is refused live, every run » apparaît QUATRE FOIS dans le
+    README, dont le tableau de tête et le diagramme. C'est la revendication
+    la plus visible du dossier — et la plus fragile.
+
+    Mesuré le 29/08 : le désaccord de XLK se joue à **0,024** de Sharpe
+    entre deux fenêtres candidates, et il DISPARAÎT si l'on interroge le flux
+    IEX au lieu du flux SIP. Quelques séances de données nouvelles peuvent le
+    retourner.
+
+    Si cela arrive pendant la semaine jugée, la première ligne que lit un
+    juge devient fausse et personne ne le verrait : le tableau de bord
+    afficherait simplement un verdict de plus, vert au lieu de rouge.
+
+    État vérifié le 29/08 sur le journal committé : 15 verdicts XLK, 15
+    refus, tous par le garde anti-rétrospection, zéro retenu."""
+
+    RACINE = Path(__file__).resolve().parent
+
+    def _lancer(self, lignes_journal, readme=None):
+        d = Path(tempfile.mkdtemp(prefix="hindsight-refus-"))
+        try:
+            for nom in ("garde_fou.py", "config.py"):
+                shutil.copy(self.RACINE / nom, d / nom)
+            (d / "agent.py").write_text(
+                'DEFAULT_UNIVERSE = ["SPY", "XLK"]\n', encoding="utf-8")
+            (d / "README.md").write_text(
+                readme if readme is not None
+                else "# Projet\n\nyes: XLK is refused live, every run, on real bars\n",
+                encoding="utf-8")
+            with open(d / "decision_log.jsonl", "w", encoding="utf-8") as fh:
+                for e in lignes_journal:
+                    fh.write(json.dumps(e) + "\n")
+            r = subprocess.run([sys.executable, str(d / "garde_fou.py")],
+                               cwd=str(d), capture_output=True, text=True,
+                               timeout=120)
+            return r.stdout + r.stderr
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
+    @staticmethod
+    def _passage(tradeable, quand="2026-08-28T19:37:00+00:00"):
+        return {"timestamp": quand, "verdicts": [
+            {"symbol": "XLK", "tradeable": tradeable, "reason": "peu importe"}]}
+
+    def test_un_seul_verdict_RETENU_fait_tomber_la_phrase(self):
+        sortie = self._lancer([self._passage(False), self._passage(True,
+                               "2026-09-02T19:37:00+00:00")])
+        self.assertIn("n'est plus vraie", sortie,
+                      "un XLK retenu ne contredit pas la phrase de tête :\n%s"
+                      % sortie[-800:])
+        self.assertIn("2026-09-02", sortie,
+                      "la date du verdict fautif n'est pas nommée :\n%s"
+                      % sortie[-800:])
+
+    def test_tous_refuses_ne_declenche_rien(self):
+        """TÉMOIN : un contrôle qui crierait toujours rendrait la phrase
+        indéfendable même quand elle est vraie."""
+        sortie = self._lancer([self._passage(False), self._passage(False)])
+        self.assertNotIn("n'est plus vraie", sortie, sortie[-800:])
+
+    def test_AUCUN_verdict_n_est_pas_une_confirmation(self):
+        """SECOND TÉMOIN, et c'est la leçon de la semaine : un journal sans
+        aucun verdict pour ce symbole ne CONFIRME pas la phrase — il la rend
+        invérifiable, ce qui n'est pas la même chose."""
+        sortie = self._lancer([{"timestamp": "2026-08-28T19:37:00+00:00",
+                                "verdicts": [{"symbol": "SPY",
+                                              "tradeable": True}]}])
+        self.assertIn("invérifiable", sortie,
+                      "l'absence de preuve passe pour une preuve :\n%s"
+                      % sortie[-800:])
+
+    def test_sans_revendication_dans_le_README_le_controle_se_tait(self):
+        """TROISIÈME TÉMOIN : le contrôle ne connaît pas « XLK » par
+        lui-même. Il lit l'univers dans agent.py et la revendication dans le
+        README. Sans la phrase, il n'a rien à vérifier."""
+        sortie = self._lancer([self._passage(True)],
+                              readme="# Projet\n\nRien de particulier.\n")
+        self.assertNotIn("n'est plus vraie", sortie, sortie[-800:])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
