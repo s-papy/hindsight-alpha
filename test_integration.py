@@ -4508,6 +4508,116 @@ class TestLeJournalNeRendQueDesEnregistrements(unittest.TestCase):
         self.assertEqual([r["run_type"] for r in self.d.read_log()], ["b", "a"])
 
 
+class TestLaPhraseDuPalierEstLueDansLaMesure(unittest.TestCase):
+    """Le paragraphe qui chiffre le coût d'un seuil de Sharpe non nul
+    affirmait trois choses EN DUR — « jusqu'à 0.30 », « vers 0.60 », « 8 % de
+    bruit » — dans un texte dont les autres chiffres étaient calculés. Il
+    disait aussi « dans les deux cas » en n'imprimant qu'un seul des deux
+    coûts.
+
+    Reproduit le 29/08/2026 en portant σ à 0.55, un paramètre documenté du
+    banc : le coût passait de 42.17 à 42.55 et la phrase continuait d'imprimer
+    « ne bouge pas — 42.2 % dans les deux cas », pendant que le bruit à 0.60
+    valait 31.8 % et non 8 %.
+
+    C'est le paragraphe qui documente une décision de seuil encore ouverte.
+    Une phrase fausse à cet endroit oriente un arbitrage humain."""
+
+    def setUp(self):
+        import hindsight_benchmark
+        self.hb = hindsight_benchmark
+        self._sigma = hindsight_benchmark.SIGMA
+        self._n = hindsight_benchmark.N_ESSAIS
+        self._seuils = hindsight_benchmark.SEUILS_BALAYES
+
+    def tearDown(self):
+        self.hb.SIGMA = self._sigma
+        self.hb.N_ESSAIS = self._n
+        self.hb.SEUILS_BALAYES = self._seuils
+
+    def _phrase(self):
+        for l in self.hb.construire_rapport().splitlines():
+            if "le coût ne bouge pas" in l or "pas de palier gratuit" in l:
+                return l
+        self.fail("le rapport ne contient plus la phrase du palier")
+
+    def test_le_palier_annonce_est_celui_que_la_mesure_donne(self):
+        seuils = self.hb.balayage_du_seuil()
+        base = seuils[0][2]
+        marge = 100.0 * 2.0 * ((base / 100.0 * (1 - base / 100.0)
+                                / self.hb.N_ESSAIS) ** 0.5)
+        attendu = [s for s, _b, c in seuils if c <= base + marge][-1]
+        self.assertIn("Jusqu'à %.2f" % attendu, self._phrase(),
+                      "le palier annoncé n'est pas celui mesuré :\n%s"
+                      % self._phrase())
+
+    def test_un_balayage_sans_palier_le_dit_au_lieu_d_en_annoncer_un(self):
+        """LE TÉMOIN QUI MORD, et il a fallu deux essais pour le viser juste.
+
+        J'avais parié sur σ=0.55 pour supprimer le palier. Mesuré : monter le
+        bruit APLATIT la courbe de coût, donc le palier s'ÉLARGIT (0.40 à
+        σ=0.30 comme à σ=0.80, 0.60 à σ=1.80). L'hypothèse était fausse dans
+        le sens exactement inverse.
+
+        Ce qui supprime le palier, c'est un balayage qui démarre au-dessus du
+        Sharpe vrai du meilleur candidat (0.85) — l'édition que ferait un
+        mainteneur demandant « et si on exigeait beaucoup plus ? ». Le rapport
+        doit alors DIRE qu'il n'y a plus de palier, pas continuer à en
+        annoncer un."""
+        self.hb.SEUILS_BALAYES = (0.0, 0.90, 1.20)
+        phrase = self._phrase()
+        self.assertIn("pas de palier gratuit", phrase,
+                      "le rapport annonce encore un palier alors que le coût "
+                      "monte dès le premier seuil :\n%s" % phrase)
+
+    def test_le_niveau_de_bruit_de_la_bascule_est_calcule(self):
+        """Le « 8 % » était en dur. Sous σ=0.55 la vraie valeur à 0.60 est
+        31.8 % : aucun nombre de cette phrase ne doit survivre à un changement
+        de σ sans bouger."""
+        self.hb.SIGMA = 0.55
+        texte = self.hb.construire_rapport()
+        self.assertNotIn("où 8 % de bruit", texte,
+                         "un niveau de bruit écrit en dur a survécu")
+        seuils = self.hb.balayage_du_seuil()
+        base = seuils[0][2]
+        marge = 100.0 * 2.0 * ((base / 100.0 * (1 - base / 100.0)
+                                / self.hb.N_ESSAIS) ** 0.5)
+        bascule = next((x for x in seuils if x[2] > base + marge), None)
+        if bascule is not None:
+            self.assertIn("où %.1f %% de bruit" % bascule[1], texte,
+                          "le niveau de bruit de la bascule n'est pas celui "
+                          "mesuré")
+
+    def test_le_palier_tolere_le_bruit_de_monte_carlo(self):
+        """SECOND TÉMOIN, en sens inverse : sans marge, la phrase basculait
+        sur 0.125 point d'écart — cinq essais sur quatre mille. Un palier qui
+        se coupe sur du bruit d'échantillonnage ne vaut pas mieux qu'un palier
+        écrit en dur."""
+        seuils = self.hb.balayage_du_seuil()
+        base = seuils[0][2]
+        strictement_egal = [s for s, _b, c in seuils if c <= base][-1]
+        annonce = self._phrase()
+        self.assertNotIn("Jusqu'à %.2f le" % strictement_egal, annonce,
+                         "le palier s'arrête à l'égalité stricte, donc sur du "
+                         "bruit d'échantillonnage :\n%s" % annonce)
+        self.assertIn("deux sigma", self.hb.construire_rapport(),
+                      "le rapport ne dit nulle part ce que « ne bouge pas » "
+                      "tolère : un palier sans sa marge est une affirmation "
+                      "non qualifiée")
+
+    def test_aucun_chiffre_de_mesure_n_est_recopie_dans_la_docstring(self):
+        """La docstring de `balayage_du_seuil` portait 29.8 %, 52.7 % et
+        35.6 %. En rejouant le fichier tel qu'il était au commit qui les a
+        écrits, il rendait 30.25, 52.02 et 34.60 : ces chiffres n'ont été
+        produits par AUCUNE version de ce code."""
+        import re
+        doc = self.hb.balayage_du_seuil.__doc__ or ""
+        vivants = re.findall(r"\d+\.\d+\s*%", doc.split("AUCUN CHIFFRE")[0])
+        self.assertEqual(vivants, [],
+                         "des mesures sont de nouveau recopiées à la main "
+                         "dans la docstring : %s" % vivants)
+
+
 class TestLesBancsEmploientLeSeuilDuProjet(unittest.TestCase):
     """Un banc qui mesure le projet doit le mesurer AVEC SES PARAMÈTRES.
 

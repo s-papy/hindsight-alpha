@@ -94,6 +94,14 @@ RHO = 0.70
 N_ESSAIS = 4000
 GRAINE = 20260827
 
+# Les seuils de Sharpe explores par `balayage_du_seuil`. Sortis en constante
+# le 29/08/2026 : la liste vivait dans le corps de la fonction et la prose du
+# rapport la lisait par INDICE (`seuils[3]`, `seuils[5]`). Allonger ou
+# raccourcir le balayage ne cassait rien -- ca deplacait silencieusement ce
+# que la phrase decrivait. Le rapport lit desormais le palier et la bascule
+# dans la mesure, plus par position.
+SEUILS_BALAYES = (0.0, 0.10, 0.20, 0.30, 0.40, 0.60)
+
 # Les quatre verdicts possibles sont ceux de LeakageReport.verdict_label().
 # Ils ne sont PAS recopies dans une constante ici : une liste declaree a
 # cote de la vraie regle, jamais lue, ne fait que promettre une
@@ -203,17 +211,30 @@ def balayage_du_seuil():
       . jeu A — part de VRAIS edges refuses. C est ce que ca coute, et il ne
         faut pas le laisser exploser.
 
-    Le resultat est inhabituel et vaut d etre dit : jusqu a 0.30 le cout ne
-    bouge PAS (29.8 % dans les deux cas), pendant que le bruit certifie tombe
-    de 52.7 % a 35.6 %. Ce n est pas un arbitrage a cet endroit, c est un gain
-    sans contrepartie mesurable. L arbitrage commence vers 0.60.
+    Le resultat est inhabituel et vaut d etre dit : il existe un PALIER ou le
+    cout ne bouge pas du tout pendant que le bruit certifie s effondre. Ce
+    n est pas un arbitrage a cet endroit, c est un gain sans contrepartie
+    mesurable ; l arbitrage ne commence qu apres.
+
+    AUCUN CHIFFRE N EST RECOPIE ICI, et c est deliberé. Cette docstring en
+    portait trois -- « 29.8 % dans les deux cas », « de 52.7 % a 35.6 % ».
+    Verification faite le 29/08/2026 en rejouant le fichier tel qu il etait au
+    commit qui les a ecrits : il rendait 30.25, 52.02 et 34.60. Ces trois
+    chiffres n ont donc ete produits par AUCUNE version de ce code -- ils ont
+    ete tapes a la main et jamais relus contre la sortie.
+
+    C est la deuxieme fois dans ce meme fichier (la premiere etait SEUIL=0.3
+    presente comme « celui du projet »), et c est exactement le defaut que ce
+    projet existe pour attraper. La parade n est pas de corriger les chiffres,
+    c est de ne plus en ecrire ici : ils vivent dans le tableau du rapport,
+    calcule a chaque execution, et nulle part ailleurs.
     """
     edge = {10: 0.35, 20: 0.45, 30: 0.85, 60: 0.40, 90: 0.30}
     nul = {c: 0.0 for c in CANDIDATS}
     global SEUIL
     ancien, sortie = SEUIL, []
     try:
-        for seuil in (0.0, 0.10, 0.20, 0.30, 0.40, 0.60):
+        for seuil in SEUILS_BALAYES:
             SEUIL = seuil
             d = _campagne("D", nul, {}, GRAINE + 3)
             a = _campagne("A", edge, {}, GRAINE + 1)
@@ -515,13 +536,62 @@ def construire_rapport() -> str:
         marque = " ← livré" if seuil == 0.0 else ""
         L.append("| %.2f%s | %.1f %% | %.1f %% |" % (seuil, marque, bruit, cout))
     L.append("")
-    L.append("**Jusqu'à 0.30 le coût ne bouge pas** — %.1f %% dans les deux "
-             "cas — pendant que le bruit certifié tombe de %.1f %% à %.1f %%. "
-             "Ce n'est pas un arbitrage à cet endroit : c'est un gain sans "
-             "contrepartie mesurable. L'arbitrage commence vers 0.60, où 8 %% "
-             "de bruit se paient %.1f points de vrais edges refusés."
-             % (seuils[0][2], seuils[0][1], seuils[3][1],
-                seuils[5][2] - seuils[0][2]))
+    # Cette phrase affirmait « jusqu'à 0.30 », « vers 0.60 » et « 8 %% de
+    # bruit » en dur, dans un texte dont seuls les autres chiffres étaient
+    # calculés. Elle affirmait aussi « dans les deux cas » en n'imprimant
+    # qu'UN des deux coûts. Reproduit le 29/08/2026 en portant σ à 0.55 : le
+    # coût passait de 42.17 à 42.55 et la phrase continuait d'imprimer « ne
+    # bouge pas — 42.2 %% dans les deux cas », pendant que le bruit à 0.60
+    # valait 31.8 %% et non 8 %%. Trois affirmations fausses d'un coup, dans
+    # le paragraphe qui documente une décision de seuil encore ouverte.
+    #
+    # Le palier et la bascule se LISENT maintenant dans la mesure, et la
+    # branche « pas de palier » existe pour que le fichier puisse dire qu'il
+    # n'y en a plus plutôt que de continuer à en annoncer un.
+    # « Ne bouge pas » doit tolerer le bruit de Monte-Carlo, sinon la phrase
+    # bascule sur 5 essais d'ecart. Reproduit : sans marge, le palier s'arretait
+    # a 0.30 et l'arbitrage etait annonce a 0.40 pour +0.1 point — soit
+    # 30.375 %% contre 30.250 %% sur 4000 tirages. Conclure la-dessus serait
+    # lire un signal dans le bruit, l'erreur exacte que ce banc reproche au
+    # README du projet deux sections plus bas.
+    #
+    # La marge est l'ecart-type binomial du coût de reference, a deux sigma.
+    base = seuils[0][2]
+    p_ = base / 100.0
+    marge = 100.0 * 2.0 * ((p_ * (1.0 - p_) / N_ESSAIS) ** 0.5)
+    palier = [s_ for s_, _bruit, cout in seuils if cout <= base + marge]
+    bascule = next(((s_, bruit, cout) for s_, bruit, cout in seuils
+                    if cout > base + marge), None)
+    if len(palier) > 1:
+        fin = palier[-1]
+        bruit_fin = next(bruit for s_, bruit, _c in seuils if s_ == fin)
+        L.append("**Jusqu'à %.2f le coût ne bouge pas** — %.1f %% sur tout ce "
+                 "palier — pendant que le bruit certifié tombe de %.1f %% à "
+                 "%.1f %%. Ce n'est pas un arbitrage à cet endroit : c'est un "
+                 "gain sans contrepartie mesurable.\n\n*« Ne bouge pas » veut "
+                 "dire : reste sous %.1f %% + %.1f, la marge à deux sigma du "
+                 "tirage Monte-Carlo sur %d essais. Sans cette marge la phrase "
+                 "basculerait sur cinq essais d'écart — lire un signal dans le "
+                 "bruit est précisément ce que la section suivante reproche au "
+                 "README.*"
+                 % (fin, base, seuils[0][1], bruit_fin, base, marge, N_ESSAIS))
+        if bascule is not None:
+            L.append("")
+            L.append("L'arbitrage commence à %.2f, où %.1f %% de bruit se "
+                     "paient %.1f points de vrais edges refusés."
+                     % (bascule[0], bascule[1], bascule[2] - base))
+        else:
+            L.append("")
+            L.append("Aucun seuil balayé ne fait monter le coût : le balayage "
+                     "s'arrête avant l'arbitrage, il faudrait l'étendre pour "
+                     "le situer.")
+    else:
+        L.append("**Il n'y a pas de palier gratuit sur ce balayage** : le coût "
+                 "monte dès le premier seuil non nul (%.1f %% à 0.00, %.1f %% "
+                 "à %.2f). La phrase publiée ici jusqu'au 29/08/2026 annonçait "
+                 "un palier jusqu'à 0.30 ; elle l'annonçait en dur, sans le "
+                 "relire dans la mesure."
+                 % (base, seuils[1][2], seuils[1][0]))
     L.append("")
     L.append("### Décision prise le 28/08/2026 : **le seuil reste à 0.0**")
     L.append("")

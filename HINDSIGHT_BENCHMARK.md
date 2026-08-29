@@ -104,7 +104,11 @@ Le jeu D montre qu'avec le seuil livré (**0.0**) rien ne protège contre une s�
 | 0.40 | 24.1 % | 30.4 % |
 | 0.60 | 8.2 % | 33.3 % |
 
-**Jusqu'à 0.30 le coût ne bouge pas** — 30.2 % dans les deux cas — pendant que le bruit certifié tombe de 52.0 % à 34.6 %. Ce n'est pas un arbitrage à cet endroit : c'est un gain sans contrepartie mesurable. L'arbitrage commence vers 0.60, où 8 % de bruit se paient 3.1 points de vrais edges refusés.
+**Jusqu'à 0.40 le coût ne bouge pas** — 30.2 % sur tout ce palier — pendant que le bruit certifié tombe de 52.0 % à 24.1 %. Ce n'est pas un arbitrage à cet endroit : c'est un gain sans contrepartie mesurable.
+
+*« Ne bouge pas » veut dire : reste sous 30.2 % + 1.5, la marge à deux sigma du tirage Monte-Carlo sur 4000 essais. Sans cette marge la phrase basculerait sur cinq essais d'écart — lire un signal dans le bruit est précisément ce que la section suivante reproche au README.*
+
+L'arbitrage commence à 0.60, où 8.2 % de bruit se paient 3.1 points de vrais edges refusés.
 
 ### Décision prise le 28/08/2026 : **le seuil reste à 0.0**
 
