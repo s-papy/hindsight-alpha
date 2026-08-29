@@ -5889,6 +5889,114 @@ class TestLaVerificationDeKickoff(unittest.TestCase):
                       sortie)
 
 
+class TestUneComparaisonIMPOSSIBLENEstPasUnSUCCES(unittest.TestCase):
+    """`travail_pousse()` comptait les commits d'avance avec
+
+        _git("rev-list", "--count", "origin/main..HEAD")
+
+    et `_git` rend `""` aussi bien quand git ÉCHOUE que quand sa sortie est
+    vide. Un dépôt sans remote, sans `origin/main`, ou avec une branche
+    renommée faisait donc échouer la commande — et l'échec passait dans la
+    branche « rien en attente ».
+
+    REPRODUIT le 29/08/2026 dans un dépôt git neuf, sans aucun remote, avec
+    un commit local : verdict affiché **🟢 « rien en attente »**. Rien n'était
+    publié nulle part, et le contrôle dont la raison d'être est « une
+    antériorité non poussée ne prouve rien publiquement » annonçait que tout
+    était poussé."""
+
+    SCRIPT = Path(__file__).resolve().parent / "verifier_le_kickoff.py"
+
+    def _dans_un_depot(self, preparer):
+        import importlib.util, io, contextlib, shutil, subprocess, tempfile
+        d = Path(tempfile.mkdtemp(prefix="hindsight-push-"))
+        try:
+            subprocess.run(["git", "init", "-q", "."], cwd=str(d), check=True)
+            subprocess.run(["git", "-c", "user.email=a@b", "-c", "user.name=a",
+                            "commit", "-q", "--allow-empty", "-m", "un"],
+                           cwd=str(d), check=True)
+            preparer(d)
+            spec = importlib.util.spec_from_file_location(
+                "kickoff_push", str(self.SCRIPT))
+            mod = importlib.util.module_from_spec(spec)
+            sys.modules["kickoff_push"] = mod
+            spec.loader.exec_module(mod)
+            mod.RACINE = d
+            tampon = io.StringIO()
+            with contextlib.redirect_stdout(tampon):
+                mod.travail_pousse()
+            return tampon.getvalue()
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
+    def test_sans_remote_ce_n_est_PAS_rien_en_attente(self):
+        sortie = self._dans_un_depot(lambda d: None)
+        self.assertNotIn("rien en attente\n", sortie.replace("PAS « rien en attente »", ""),
+                         "un dépôt sans remote passe pour entièrement "
+                         "poussé :\n%s" % sortie)
+        self.assertIn("impossible de comparer", sortie, sortie)
+        self.assertIn("🟡", sortie,
+                      "ni vert ni rouge : on ne sait pas — %s" % sortie)
+
+    def test_avec_un_commit_en_avance_c_est_ROUGE(self):
+        """TÉMOIN : le cas normal doit continuer de bloquer. On fabrique un
+        vrai origin/main en clonant, puis on committe par-dessus."""
+        import subprocess
+        def preparer(d):
+            source = d / "amont.git"
+            subprocess.run(["git", "clone", "-q", "--bare", str(d), str(source)],
+                           check=True)
+            subprocess.run(["git", "remote", "add", "origin", str(source)],
+                           cwd=str(d), check=True)
+            subprocess.run(["git", "fetch", "-q", "origin"], cwd=str(d), check=True)
+            subprocess.run(["git", "branch", "-q", "-M", "main"], cwd=str(d), check=True)
+            subprocess.run(["git", "-c", "user.email=a@b", "-c", "user.name=a",
+                            "commit", "-q", "--allow-empty", "-m", "deux"],
+                           cwd=str(d), check=True)
+        sortie = self._dans_un_depot(preparer)
+        self.assertIn("🔴", sortie, sortie)
+        self.assertIn("commit(s) locaux", sortie, sortie)
+
+    def test_git_essai_distingue_l_echec_de_la_sortie_vide(self):
+        """DEUX MUTATIONS N'ONT RIEN CASSE au premier essai, et c'est
+        instructif plutôt qu'inquiétant : `not ok` et `not isdigit()` se
+        couvrent l'un l'autre sur le cas reproduit — git échoue ET n'écrit
+        rien sur stdout. Aucun test de COMPORTEMENT ne peut donc les
+        distinguer ; c'est ce que veut dire une garde redondante.
+
+        Celui-ci teste le helper lui-même, ce qui redonne du mordant à la
+        première : `_git_essai` doit rendre `False` sur un échec, pas
+        seulement une chaîne vide qu'un appelant confondrait avec zéro."""
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "kickoff_essai", str(self.SCRIPT))
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules["kickoff_essai"] = mod
+        spec.loader.exec_module(mod)
+        ok, sortie = mod._git_essai("rev-list", "--count",
+                                    "cette-reference-n-existe-pas..HEAD")
+        self.assertFalse(ok, "un échec de git est rapporté comme un succès")
+        ok_vrai, _ = mod._git_essai("rev-parse", "--git-dir")
+        self.assertTrue(ok_vrai,
+                        "TÉMOIN : une commande qui marche doit rendre True")
+
+    def test_tout_pousse_reste_VERT(self):
+        """SECOND TÉMOIN : à force de nuancer, ne plus jamais dire « rien en
+        attente » passerait les deux tests ci-dessus."""
+        import subprocess
+        def preparer(d):
+            source = d / "amont.git"
+            subprocess.run(["git", "clone", "-q", "--bare", str(d), str(source)],
+                           check=True)
+            subprocess.run(["git", "remote", "add", "origin", str(source)],
+                           cwd=str(d), check=True)
+            subprocess.run(["git", "fetch", "-q", "origin"], cwd=str(d), check=True)
+            subprocess.run(["git", "branch", "-q", "-M", "main"], cwd=str(d), check=True)
+        sortie = self._dans_un_depot(preparer)
+        self.assertIn("🟢", sortie, sortie)
+        self.assertIn("rien en attente", sortie, sortie)
+
+
 class TestLesPlistsCHARGESSontVerifies(unittest.TestCase):
     """`plists_a_jour()` comparait les FICHIERS — dépôt contre
     ~/Library/LaunchAgents — et titrait sa ligne « LaunchAgents chargés ».

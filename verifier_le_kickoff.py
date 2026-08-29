@@ -186,9 +186,48 @@ def plists_a_jour() -> bool:
     return True
 
 
+def _git_essai(*args: str) -> "tuple[bool, str]":
+    """Comme `_git`, mais dit si la commande a REUSSI.
+
+    `_git` rend "" aussi bien quand git echoue que quand sa sortie est vide.
+    Pour la plupart des appels c'est sans consequence ; pour un comptage, les
+    deux se confondent avec « zero » -- voir travail_pousse()."""
+    try:
+        r = subprocess.run(["git", *args], cwd=RACINE, capture_output=True,
+                           text=True, timeout=20)
+    except Exception:
+        return False, ""
+    return r.returncode == 0, r.stdout.strip()
+
+
 def travail_pousse() -> bool:
-    en_attente = _git("rev-list", "--count", "origin/main..HEAD")
-    if en_attente and en_attente != "0":
+    """Le travail local est-il publie ?
+
+    REPRODUIT le 29/08/2026, dans un depot git SANS AUCUN REMOTE, avec un
+    commit local :
+
+        rev-list --count origin/main..HEAD  ->  echoue, `_git` rend ""
+        verdict affiche                     ->  🟢 « rien en attente »
+
+    Rien n'etait publie nulle part, et le controle dont la raison d'etre est
+    « une anteriorite non poussee ne prouve rien publiquement » annoncait que
+    tout etait pousse. La comparaison avait echoue, et son echec etait rendu
+    comme un succes.
+
+    Atteignable pour de vrai : remote renomme ou retire, branche renommee,
+    clone frais sans fetch. Sur cette machine origin/main existe, donc le
+    verdict d'aujourd'hui ne change pas -- ce qui change, c'est ce qui
+    s'affiche le jour ou il n'existe plus."""
+    ok, en_attente = _git_essai("rev-list", "--count", "origin/main..HEAD")
+    if not ok or not en_attente.isdigit():
+        # NI VERT NI ROUGE. On ne sait pas. Le dire, et dire quoi regarder.
+        amont = _git("rev-parse", "--abbrev-ref", "HEAD@{upstream}")
+        _dire(JAUNE, "travail pousse",
+              "impossible de comparer a origin/main (%s) — ce n'est PAS "
+              "« rien en attente »" % (("amont declare : " + amont) if amont
+                                       else "aucun amont pour cette branche"))
+        return True
+    if en_attente != "0":
         _dire(ROUGE, "travail pousse",
               "%s commit(s) locaux : une anteriorite non poussee ne prouve "
               "rien publiquement" % en_attente)
