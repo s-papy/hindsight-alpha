@@ -1492,5 +1492,86 @@ class TestLaFrontiereVientDuFichierDeGel(BaseRendu):
                       "publiee : la page redevient sa propre source")
 
 
+class TestLEcheanceEstVISIBLE(BaseRendu):
+    """MESURE le 29/08/2026 sur le compte reel : la seule position ouverte
+    est un SPY 769 put qui expire le 04/09 — le jour meme de la date limite
+    de soumission. SPY a cloture a 769,28, soit 0,28 AU-DESSUS du strike :
+    l'option est a la monnaie a 0,04 % pres, a six jours de l'echeance.
+
+    La page affichait « expires 4 Sep 2026 » et rien d'autre. Elle ne disait
+    pas que c'etait dans six jours, puis dans un, puis aujourd'hui.
+
+    CE QUE CA COUTE : une option arrivee a echeance DANS LA MONNAIE est
+    exercee automatiquement. Un long put devient une position SHORT sur le
+    sous-jacent — ici 200 SPY, environ 154 000 $ de notionnel sur un compte
+    de 100 000 $. Et les regles de sortie du depot ne s'y opposent pas : a
+    +50 % / -50 % de prime, une option legerement dans la monnaie n'atteint
+    NI l'un NI l'autre.
+
+    AUCUN SEUIL N'EST AJOUTE : ce serait un garde de risque, et aucun seuil
+    de ce depot ne bouge sans decision humaine. On mesure et on affiche —
+    meme choix que la marge avant la cloche mesuree dans agent.py le 28/08."""
+
+    def _rendu(self, symbole, maintenant_iso):
+        r = self.executer("""
+            _resultats.x = _symboleAffiche(%s, Date.parse(%s));
+        """ % (json.dumps(symbole), json.dumps(maintenant_iso)))
+        return r["x"]
+
+    def test_le_nombre_de_jours_restants_est_affiche(self):
+        sortie = self._rendu("SPY260904P00769000", "2026-08-29T09:00:00Z")
+        self.assertIn("6 days left", sortie, sortie)
+        self.assertIn("SPY 769 put", sortie, "prerequis : le symbole se lit")
+
+    def test_la_veille_est_MISE_EN_AVANT(self):
+        sortie = self._rendu("SPY260904P00769000", "2026-09-03T09:00:00Z")
+        self.assertIn("1 day left", sortie, sortie)
+        self.assertIn("echeance-proche", sortie,
+                      "la veille de l'echeance ne se distingue pas d'un "
+                      "jour ordinaire : %s" % sortie)
+
+    def test_le_jour_meme_le_dit_en_toutes_lettres(self):
+        sortie = self._rendu("SPY260904P00769000", "2026-09-04T09:00:00Z")
+        self.assertIn("EXPIRES TODAY", sortie, sortie)
+        self.assertIn("echeance-proche", sortie, sortie)
+
+    def test_une_echeance_DEPASSEE_est_dite_expiree(self):
+        """Une position encore ouverte apres son echeance n'est pas un
+        « -1 day left » : c'est une anomalie, et elle doit se lire comme
+        telle."""
+        sortie = self._rendu("SPY260904P00769000", "2026-09-07T09:00:00Z")
+        self.assertIn("EXPIRED", sortie, sortie)
+        self.assertNotIn("-1", sortie, sortie)
+
+    def test_l_heure_dans_la_journee_ne_change_RIEN(self):
+        """TEMOIN : on compare des DATES, pas des instants. Sans le troncage
+        au jour, « expire aujourd'hui » basculerait a « expire demain »
+        selon l'heure a laquelle un juge ouvre la page."""
+        tot = self._rendu("SPY260904P00769000", "2026-09-04T00:01:00Z")
+        tard = self._rendu("SPY260904P00769000", "2026-09-04T23:59:00Z")
+        self.assertIn("EXPIRES TODAY", tot, tot)
+        self.assertIn("EXPIRES TODAY", tard, tard)
+
+    def test_un_symbole_ordinaire_n_a_pas_d_echeance(self):
+        """SECOND TEMOIN : rien ne doit etre invente pour une action."""
+        sortie = self._rendu("SPY", "2026-08-29T09:00:00Z")
+        self.assertNotIn("days left", sortie)
+        self.assertNotIn("EXPIRES", sortie)
+        self.assertIn("SPY", sortie)
+
+    def test_les_jours_restants_apparaissent_dans_le_tableau(self):
+        """Le rendu isole ne prouve pas que la table s'en sert. Ici on passe
+        par renderPositions, comme la page."""
+        r = self.executer("""
+            const p = document.getElementById('positions-container');
+            renderPositions([{symbol:"SPY260904P00769000", asset_class:"us_option",
+                              qty:"2", cost_basis:"778", unrealized_plpc:"-0.049"}]);
+            _resultats.pos = p.innerHTML;
+        """)
+        self.assertRegex(r["pos"], r"(days left|day left|EXPIRES TODAY|EXPIRED)",
+                         "le tableau des positions n'affiche aucune echeance : "
+                         "%s" % r["pos"][:300])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

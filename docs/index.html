@@ -93,6 +93,13 @@
        celle-la -- une equite a sept chiffres deborderait pareil. */
     overflow-wrap: anywhere;
   }
+  .echeance { color: var(--muted); }
+  .echeance-proche {
+    /* La veille et le jour meme : une option laissee ouverte cesse d'etre
+       une position et devient un exercice automatique. */
+    color: var(--yellow);
+    font-weight: 600;
+  }
   .symbole-brut {
     /* Le symbole OCC reste affiche sous sa traduction : c'est lui qu'on
        recopie pour verifier la position chez Alpaca. Discret, mais present
@@ -647,16 +654,68 @@ function _optionEnClair(symbole) {
   // `parseFloat(toFixed(3))` retire les zeros inutiles : 769.000 -> 769,
   // 769.500 -> 769.5. Le strike garde ses milliemes quand il en a.
   const strikeLisible = String(parseFloat(strike.toFixed(3)));
-  return racine + ' ' + strikeLisible + ' ' + (sens === 'P' ? 'put' : 'call')
-       + ' · expires ' + jour + ' ' + _MOIS[mois - 1] + ' 20' + aa;
+  return {
+    texte: racine + ' ' + strikeLisible + ' ' + (sens === 'P' ? 'put' : 'call')
+         + ' · expires ' + jour + ' ' + _MOIS[mois - 1] + ' 20' + aa,
+    // L'echeance en millisecondes UTC, pour compter les jours restants.
+    echeanceMs: Date.UTC(2000 + parseInt(aa, 10), mois - 1, jour),
+  };
 }
 
-function _symboleAffiche(symbole) {
+// COMBIEN DE JOURS AVANT L'ECHEANCE. Ajoute le 29/08/2026.
+//
+// POURQUOI : la seule position ouverte est un SPY 769 put qui expire le
+// 04/09 -- le jour meme de la date limite de soumission. Mesure du 29/08 :
+// SPY a cloture a 769,28, soit 0,28 AU-DESSUS du strike. L'option est a la
+// monnaie a 0,04 % pres, a six jours de l'echeance.
+//
+// CE QUE LA PAGE NE DISAIT PAS : rien, sur l'echeance. Elle affichait
+// « expires 4 Sep 2026 » sans dire que c'etait dans six jours, puis dans
+// un, puis aujourd'hui. Une option arrivee a echeance DANS LA MONNAIE est
+// exercee automatiquement -- un long put devient une position SHORT sur le
+// sous-jacent, ici 200 SPY, soit environ 154 000 $ de notionnel sur un
+// compte de 100 000 $. Et les regles de sortie du depot (+50 % / -50 %) ne
+// s'y opposent pas : une option legerement dans la monnaie n'atteint aucun
+// des deux seuils.
+//
+// AUCUN SEUIL N'EST AJOUTE ICI, et c'est deliberé : ce serait un garde de
+// risque, et aucun seuil de ce depot ne bouge sans decision humaine. Meme
+// choix que la marge avant la cloche mesuree dans agent.py le 28/08 -- ON
+// MESURE, ON AFFICHE, on ne refuse pas a la place de l'operateur.
+function _joursAvantEcheance(echeanceMs, maintenantMs) {
+  if (!Number.isFinite(echeanceMs) || !Number.isFinite(maintenantMs)) return null;
+  const JOUR = 86400000;
+  // On compare des DATES, pas des instants : l'echeance est un jour de
+  // calendrier, pas une heure. Sans ce troncage, « expire aujourd'hui »
+  // basculerait a « expire demain » selon l'heure a laquelle on regarde.
+  const aujourdhui = Math.floor(maintenantMs / JOUR) * JOUR;
+  return Math.round((echeanceMs - aujourdhui) / JOUR);
+}
+
+function _echeanceLisible(jours) {
+  if (jours === null) return '';
+  if (jours < 0) return ' — EXPIRED';
+  if (jours === 0) return ' — EXPIRES TODAY';
+  if (jours === 1) return ' — 1 day left';
+  return ' — ' + jours + ' days left';
+}
+
+function _symboleAffiche(symbole, maintenantMs) {
   const brut = esc(symbole || '—');
   const clair = _optionEnClair(symbole);
   // Sans traduction, exactement l'affichage d'avant.
   if (!clair) return brut;
-  return esc(clair) + `<div class="symbole-brut">${brut}</div>`;
+  const jours = _joursAvantEcheance(clair.echeanceMs,
+      maintenantMs === undefined ? Date.now() : maintenantMs);
+  // Le compte a rebours est mis en avant a partir de la veille : c'est la
+  // fenetre ou une option laissee ouverte cesse d'etre une position et
+  // devient une exercice automatique.
+  const urgent = jours !== null && jours <= 1;
+  const suffixe = _echeanceLisible(jours);
+  return esc(clair.texte)
+       + (suffixe ? `<span class="${urgent ? 'echeance-proche' : 'echeance'}">`
+                    + esc(suffixe) + '</span>' : '')
+       + `<div class="symbole-brut">${brut}</div>`;
 }
 
 function renderPositions(positions) {
