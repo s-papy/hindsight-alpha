@@ -1677,5 +1677,130 @@ class TestUneANCREMorteEstSignalee(unittest.TestCase):
                          "le dépôt porte une ancre morte")
 
 
+
+class TestUnHorodatageNaifEstSignaleParLeGardeFou(unittest.TestCase):
+    """`datetime.fromisoformat("2026-08-28T14:00:00")` ne lève RIEN : elle
+    rend un datetime naïf. La panne arrive une ligne plus loin, à la
+    comparaison. Le `try` autour de l'analyse est visé une ligne trop tôt.
+
+    Cinquième occurrence en une session du motif « une règle appliquée ici
+    mais pas à son jumeau », et la seconde qui se lise dans un arbre
+    syntaxique. Condition posée avant de l'ajouter, et vérifiée : rejouée sur
+    l'arbre d'avant les corrections du 29/08, la règle crie sur les trois
+    sites fautifs et sur eux seuls ; rejouée sur l'arbre corrigé, elle se tait
+    entièrement."""
+
+    RACINE = Path(__file__).resolve().parent
+    MOTIF = "sans garantir son fuseau"
+    MOTIF_NOW = "lit le fuseau SUR la valeur analysee"
+
+    def _lancer(self, corps_python):
+        d = Path(tempfile.mkdtemp(prefix="hindsight-fuseau-"))
+        try:
+            for nom in ("garde_fou.py", "config.py"):
+                shutil.copy(self.RACINE / nom, d / nom)
+            (d / "sujet.py").write_text(
+                "from datetime import datetime, timezone\n\n" + corps_python,
+                encoding="utf-8")
+            subprocess.run(["git", "init", "-q", "."], cwd=str(d), check=True)
+            subprocess.run(["git", "add", "-A"], cwd=str(d), check=True)
+            r = subprocess.run([sys.executable, str(d / "garde_fou.py")],
+                               cwd=str(d), capture_output=True, text=True,
+                               timeout=180)
+            return r.stdout + r.stderr
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
+    def test_une_analyse_sans_parade_est_signalee(self):
+        sortie = self._lancer(
+            "def age(brut, debut):\n"
+            "    t = datetime.fromisoformat(brut)\n"
+            "    return t >= debut\n")
+        self.assertIn(self.MOTIF, sortie, sortie[-900:])
+        self.assertIn("age()", sortie, sortie[-900:])
+
+    def test_normaliser_par_replace_suffit(self):
+        """TÉMOIN 1a : la parade d'`agent.py` et de `bilan_semaine.py`.
+
+        SÉPARÉ de 1b après mesure : mon témoin d'origine employait les DEUX
+        reconnaisseurs à la fois (`t.tzinfo is None` ET `replace(tzinfo=)`).
+        Supprimer l'un des deux dans le contrôle ne faisait donc échouer
+        aucun test — l'autre couvrait. Deux mutations survivaient sur un
+        témoin qui avait l'air de les couvrir."""
+        sortie = self._lancer(
+            "def age(brut, debut):\n"
+            "    t = datetime.fromisoformat(brut).replace(tzinfo=timezone.utc)\n"
+            "    return t >= debut\n")
+        self.assertNotIn(self.MOTIF, sortie, sortie[-900:])
+
+    def test_tester_tzinfo_is_None_suffit(self):
+        """TÉMOIN 1b : l'autre moitié, seule."""
+        sortie = self._lancer(
+            "def age(brut, debut):\n"
+            "    t = datetime.fromisoformat(brut)\n"
+            "    if t.tzinfo is None:\n"
+            "        return None\n"
+            "    return t >= debut\n")
+        self.assertNotIn(self.MOTIF, sortie, sortie[-900:])
+
+    def test_rattraper_le_TypeError_suffit(self):
+        """TÉMOIN 2 sur 4 : la parade de `monitor_exits.py`, qui traite la
+        comparaison impossible comme « dû », pas comme « silencieux »."""
+        sortie = self._lancer(
+            "def age(brut, debut):\n"
+            "    t = datetime.fromisoformat(brut)\n"
+            "    try:\n"
+            "        return t >= debut\n"
+            "    except TypeError:\n"
+            "        return True\n")
+        self.assertNotIn(self.MOTIF, sortie, sortie[-900:])
+
+    def test_analyser_une_CONSTANTE_en_majuscules_suffit(self):
+        """TÉMOIN 3 sur 4 : la parade du garde-fou lui-même — `KICKOFF_UTC`
+        est un littéral qui porte son fuseau et ne peut pas dériver."""
+        sortie = self._lancer(
+            'KICKOFF = "2026-08-28T15:00:00+00:00"\n\n'
+            "def age(debut):\n"
+            "    return datetime.fromisoformat(KICKOFF) >= debut\n")
+        self.assertNotIn(self.MOTIF, sortie, sortie[-900:])
+
+    def test_now_sur_le_fuseau_analyse_est_signale_MALGRE_l_apparence(self):
+        """TÉMOIN 4, et c'est celui qui justifie tout le contrôle.
+
+        `datetime.now(valeur.tzinfo)` RESSEMBLE à une parade : elle ne lève
+        jamais de TypeError. Elle n'évite pas le problème, elle le rend
+        silencieux — et du côté qui AUTORISE. Mesuré le 29/08 sur la porte de
+        fraîcheur : une barre vieille de 5 j 3 h, limite à 5 jours, REFUSÉE à
+        Paris et à UTC, ACCEPTÉE à Los Angeles et à Honolulu."""
+        sortie = self._lancer(
+            "def age(brut):\n"
+            "    t = datetime.fromisoformat(brut)\n"
+            "    return (datetime.now(t.tzinfo) - t).days\n")
+        self.assertIn(self.MOTIF_NOW, sortie, sortie[-900:])
+
+    def test_une_docstring_qui_CITE_la_parade_ne_vaut_pas_parade(self):
+        """SECOND TÉMOIN sur la lecture : la première version de ce contrôle
+        cherchait des sous-chaînes et exemptait `_horodatage_utc`
+        d'`alpaca_cli.py` — parce que sa docstring CITE le défaut qu'elle
+        corrige. Le contrôle lit l'arbre, pas le texte."""
+        sortie = self._lancer(
+            "def age(brut, debut):\n"
+            '    """On pourrait ecrire t.replace(tzinfo=timezone.utc) ici,\n'
+            '    ou attraper TypeError. On ne le fait pas."""\n'
+            "    t = datetime.fromisoformat(brut)\n"
+            "    return t >= debut\n")
+        self.assertIn(self.MOTIF, sortie, sortie[-900:])
+
+    def test_le_depot_reel_est_vert_sur_ce_controle(self):
+        """Une alerte qu'on ne peut pas résoudre apprend à ignorer les
+        alertes. Celle-ci doit être verte sur le dépôt aujourd'hui."""
+        r = subprocess.run([sys.executable, str(self.RACINE / "garde_fou.py")],
+                           cwd=str(self.RACINE), capture_output=True,
+                           text=True, timeout=240)
+        sortie = r.stdout + r.stderr
+        self.assertNotIn(self.MOTIF, sortie, sortie[-900:])
+        self.assertNotIn(self.MOTIF_NOW, sortie, sortie[-900:])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

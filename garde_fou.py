@@ -3103,6 +3103,110 @@ def controle_pannes_traitees_symetriquement() -> None:
                        ", ".join(str(l) for l in nus)))
 
 
+def _fuseau_garanti(fonction: ast.AST) -> "str | None":
+    r"""Cette fonction analyse-t-elle un horodatage ISO sans garantir son
+    fuseau ? Rend le motif de l'alerte, ou None si elle est en regle.
+
+    `datetime.fromisoformat("2026-08-28T14:00:00")` ne leve RIEN : elle rend
+    un datetime naif. La panne arrive une ligne plus loin, a la comparaison,
+    avec « can't compare offset-naive and offset-aware datetimes ». Le `try`
+    qu'on met autour de l'analyse ne l'attrape donc jamais -- il est vise une
+    ligne trop tot.
+
+    QUATRE PARADES SONT ACCEPTEES, parce que les quatre existent dans ce
+    depot et sont justes :
+
+      . normaliser -- `t.replace(tzinfo=...)` ou un test `t.tzinfo is None`
+        (`agent.py`, `bilan_semaine.py`, `alpaca_cli.py`) ;
+      . rattraper le `TypeError` de la comparaison (`monitor_exits.py`, qui
+        le nomme et explique pourquoi il traite le cas comme « du », pas
+        comme « silencieux ») ;
+      . analyser une CONSTANTE en majuscules (`garde_fou.py` lui-meme, avec
+        `KICKOFF_UTC`, un litteral qui porte son fuseau et ne peut pas
+        deriver).
+
+    UNE FORME EST TOUJOURS SIGNALEE, meme si elle ressemble a une parade :
+    `datetime.now(valeur_analysee.tzinfo)`. C'est astucieux -- ca ne leve
+    jamais de TypeError -- et c'est le defaut mesure le 29/08/2026 dans la
+    porte de fraicheur d'`alpaca_cli.py` : quand la valeur est naive,
+    `tzinfo` vaut None, `datetime.now(None)` rend l'heure LOCALE, et le
+    verdict d'une porte de donnees se met a dependre du fuseau de la machine.
+    Sur une barre vieille de 5 j 3 h et une limite de 5 jours : REFUSE a
+    Paris et a UTC, ACCEPTE a Los Angeles et a Honolulu. Cette expression
+    n'evite pas le probleme, elle le rend silencieux -- et du cote qui
+    AUTORISE.
+
+    POURQUOI CE CONTROLE EXISTE : c'est la CINQUIEME occurrence en une
+    session du motif « une regle appliquee ici mais pas a son jumeau », et la
+    seconde qui se lise dans un arbre syntaxique. Rejoue sur l'arbre tel
+    qu'il etait avant les corrections du 29/08, cette regle crie sur les
+    trois sites fautifs et sur eux seuls ; rejouee sur l'arbre corrige, elle
+    se tait entierement. C'etait la condition pour l'ajouter : une alerte
+    qu'on ne peut pas resoudre apprend a ignorer les alertes.
+
+    Lu dans l'ARBRE et non en sous-chaines, apres mesure : la version en
+    sous-chaines exemptait `alpaca_cli._horodatage_utc` parce que sa
+    docstring CITE le defaut qu'elle corrige."""
+    analyse = normalise = rattrape = constante = False
+    now_sur_le_fuseau = False
+    for n in ast.walk(fonction):
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute):
+            if n.func.attr == "fromisoformat":
+                analyse = True
+                premier = n.args[0] if n.args else None
+                if isinstance(premier, ast.Name) and premier.id.isupper():
+                    constante = True
+            if n.func.attr == "replace" and any(k.arg == "tzinfo"
+                                                for k in n.keywords):
+                normalise = True
+            if n.func.attr == "now":
+                for a in n.args:
+                    if isinstance(a, ast.Attribute) and a.attr == "tzinfo":
+                        now_sur_le_fuseau = True
+        if isinstance(n, ast.Compare) and isinstance(n.left, ast.Attribute) \
+                and n.left.attr == "tzinfo":
+            normalise = True
+        if isinstance(n, ast.ExceptHandler) and n.type is not None:
+            for t in ast.walk(n.type):
+                if isinstance(t, ast.Name) and t.id == "TypeError":
+                    rattrape = True
+    if not analyse:
+        return None
+    if now_sur_le_fuseau:
+        return ("lit le fuseau SUR la valeur analysee pour fabriquer now() : "
+                "quand l'horodatage est naif, c'est l'heure LOCALE de la "
+                "machine qui sert de reference, et le verdict se met a "
+                "dependre du fuseau ou tourne l'agent")
+    if normalise or rattrape or constante:
+        return None
+    return ("analyse un horodatage ISO sans garantir son fuseau : un "
+            "horodatage naif ne fait pas echouer l'analyse, il fait echouer "
+            "la COMPARAISON une ligne plus loin")
+
+
+def controle_horodatages_toujours_conscients_du_fuseau() -> None:
+    """Un horodatage analyse doit toujours porter son fuseau — voir
+    `_fuseau_garanti` pour ce qui est accepte et pourquoi.
+
+    NON BLOQUANT : comme le controle des pannes jumelles, une absence de
+    parade est une piste. Elle peut etre deliberee — encore faut-il l'avoir
+    decidee."""
+    for rel, chemin in _fichiers_python_du_depot():
+        try:
+            with open(chemin, encoding="utf-8") as fh:
+                arbre = ast.parse(fh.read())
+        except (OSError, SyntaxError):
+            alerte(rel, "n'a pas pu etre analyse pour les fuseaux horaires "
+                        "— ce n'est pas « aucun horodatage naif ».")
+            continue
+        for fonction in [n for n in ast.walk(arbre)
+                         if isinstance(n, (ast.FunctionDef,
+                                           ast.AsyncFunctionDef))]:
+            motif = _fuseau_garanti(fonction)
+            if motif:
+                alerte(rel, "dans %s(), %s." % (fonction.name, motif))
+
+
 def _appels_verifies(fonction: ast.AST) -> "tuple[list, list]":
     """(lignes protegees, lignes nues) des `subprocess.run(check=True)` de
     cette fonction. « Protege » = enveloppe d'un `try` dont un handler
@@ -3214,6 +3318,7 @@ def main() -> int:
         controle_reveil_programme,
         controle_renvois_resolvent,
         controle_pannes_traitees_symetriquement,
+        controle_horodatages_toujours_conscients_du_fuseau,
         controle_le_refus_annonce_tient_dans_le_journal,
         controle_ancres_resolvent,
     )
