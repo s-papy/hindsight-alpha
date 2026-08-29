@@ -584,10 +584,10 @@ def _reglages(paras, caches):
 
 
 def mesurer(chemin_deck: Path,
-            seulement: "int | None") -> "tuple[list, list, list, float]":
+            seulement: "int | None") -> "tuple[list, list, list, float, set]":
     """(alertes, notes). Une alerte = une zone dont le texte remplit plus que
     du seuil de remplissage, ou dont un mot depasse en largeur."""
-    caches, notes, exact_par_cle = {}, [], {}
+    caches, notes, exact_par_cle, sans_police = {}, [], {}, set()
     for demandee, variantes in POLICES.items():
         for graisse, chemins in variantes.items():
             for c in chemins:
@@ -629,6 +629,7 @@ def mesurer(chemin_deck: Path,
                                         Path(c).name, raison))
                     break
             else:
+                sans_police.add(demandee)
                 notes.append("« %s »%s : aucune police trouvee — les zones "
                              "qui l'emploient ne sont PAS mesurees"
                              % (demandee, " gras" if graisse else ""))
@@ -747,7 +748,7 @@ def mesurer(chemin_deck: Path,
             debord = max(0.0, al["hauteur_texte_px"] - h) / 2.0
             al["touche"] = _collisions_causees(al["forme"], (x, y, w, h),
                                                debord, boites)
-    return alertes, notes, non_mesurables, seuil_global
+    return alertes, notes, non_mesurables, seuil_global, sans_police
 
 
 def _collisions_causees(numero, boite, debord, boites):
@@ -803,7 +804,7 @@ def main() -> None:
         print("\nCE QUI N'A PAS ETE RENDU FIDELEMENT (%d) :" % len(problemes))
         for p in problemes:
             print("  . %s" % p)
-    alertes, notes, non_mesurables, seuil_utilise = mesurer(
+    alertes, notes, non_mesurables, seuil_utilise, sans_police = mesurer(
         chemin, args.slide)
     print("\nMESURE DES DEBORDEMENTS (metriques de police lues dans le "
           "fichier TTF, sans navigateur)")
@@ -812,9 +813,21 @@ def main() -> None:
     print("  . seuil d'alerte : %d %% quand les metriques sont exactes, "
           "%d %% sinon — et c'est decide PAR ZONE, selon les polices qu'elle "
           "emploie." % (SEUIL_EXACT * 100, SEUIL_APPROCHE * 100))
-    if not alertes:
+    if sans_police:
+        # UN VERDICT NE DOIT PAS RASSURER SUR CE QU'IL N'A PAS REGARDE.
+        # Sans police pour une famille, aucune de ses zones n'est mesuree --
+        # et elles sont la quasi-totalite du deck. « Aucune zone au-dela du
+        # seuil » se lirait alors comme « tout va bien » alors que rien n'a
+        # ete mesure. Meme defaut que la section NON MESURE cachee derriere
+        # la branche des alertes, un cran plus haut.
+        print("\n  AUCUN VERDICT POSSIBLE : pas de police pour %s. Les zones "
+              "qui l'emploient — la quasi-totalite du deck — n'ont PAS ete "
+              "mesurees.\n  Installer Carlito et Caladea (clones libres,\n"
+              "  metriquement compatibles) dans ~/Library/Fonts y remedie."
+              % ", ".join(sorted(sans_police)))
+    elif not alertes:
         print("\n  aucune zone au-dela du seuil.")
-    else:
+    elif alertes:
         print("\n  %d zone(s) a regarder :" % len(alertes))
         for al in sorted(alertes, key=lambda x: -x["remplissage"]):
             print("    slide %-2d forme %-3d  %5.1f %% de la hauteur"

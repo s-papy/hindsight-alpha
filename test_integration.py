@@ -4417,8 +4417,17 @@ class TestLeHookNAnnoncePasUneDureeEcriteALaMain(unittest.TestCase):
 
     def _commit(self, d, message):
         subprocess.run(["git", "add", "-A"], cwd=d, check=True)
-        r = subprocess.run(["git", "commit", "-m", message], cwd=d,
-                           capture_output=True, text=True, timeout=180)
+        # IDENTITE EXPLICITE, corrigee le 29/08 apres avoir mis la CI PUBLIQUE
+        # au rouge. Un runner GitHub n'a pas de `~/.gitconfig` : `git commit`
+        # y refuse de s'executer (« Please tell me who you are »). Ces trois
+        # tests passaient donc uniquement sur une machine dont l'operateur a
+        # deja configure git — « ca marche chez qui l'a, et nulle part
+        # ailleurs », le defaut exact que ce depot a un test dedie pour
+        # interdire, commis dans un test que j'ai ecrit le meme jour.
+        r = subprocess.run(
+            ["git", "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+             "commit", "-m", message],
+            cwd=d, capture_output=True, text=True, timeout=180)
         return r.stdout + r.stderr
 
     def test_le_premier_passage_dit_qu_il_ne_sait_pas(self):

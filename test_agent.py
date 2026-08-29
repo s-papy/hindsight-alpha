@@ -1934,11 +1934,39 @@ class TestLeMoteurDeRenduDuDeckDitCeQuIlNeSaitPasFaire(unittest.TestCase):
         drapeau unique, redevient faux pour presque tous — c'est le motif que
         ce dépôt attrape le plus souvent."""
         _code, sortie = self._lancer()
-        self.assertIn("VERIFIE", sortie,
-                      "la compatibilité métrique n'est plus vérifiée :\n%s"
-                      % sortie[-900:])
+
+        # CE QUI EST VRAI PARTOUT : chaque famille reçoit un verdict nommé, et
+        # le seuil se dit par zone. Ces deux-là ne dépendent d'aucune police.
+        for famille in ("Calibri", "Cambria"):
+            self.assertIn("« %s »" % famille, sortie,
+                          "la famille %s n'est plus annoncée :\n%s"
+                          % (famille, sortie[-900:]))
         self.assertIn("PAR ZONE", sortie,
                       "le seuil ne se dit plus par zone")
+
+        # CE QUI DÉPEND DE LA MACHINE, et c'est le piège dans lequel je suis
+        # tombé : ma première version exigeait « VERIFIE » sans condition. Elle
+        # ne passait que sur le Mac où Carlito venait d'être installé, et elle
+        # a mis LA CI PUBLIQUE AU ROUGE — sur un runner Linux il n'y a ni
+        # Carlito, ni Arial. Reproduit en rejouant la suite avec HOME vide :
+        # « metriques DIFFERENTES de Calibri (asc 1854/1950) », donc pas de
+        # « VERIFIE », donc échec.
+        #
+        # « Ça marche chez qui les a déjà, et nulle part ailleurs » est
+        # exactement ce que ce dépôt a un test dédié pour interdire. Un test
+        # d'outil ne doit pas exiger l'environnement de son auteur.
+        sys.path.insert(0, str(self.RACINE / "submission"))
+        from rendre_le_deck import POLICES, METRIQUES_ATTENDUES
+        dispo = any(Path(c).exists()
+                    for fam, var in POLICES.items() if fam in METRIQUES_ATTENDUES
+                    for chemins in var.values() for c in chemins[:1])
+        if not dispo:
+            self.skipTest("aucune police métriquement compatible installée "
+                          "ici — le rapport le dit, et c'est tout ce qu'on "
+                          "peut lui demander sur cette machine")
+        self.assertIn("VERIFIE", sortie,
+                      "une police métriquement compatible est installée mais "
+                      "le rapport ne le dit pas :\n%s" % sortie[-900:])
         # Volontairement PAS d'assertion sur « mesure exacte » : elle
         # exigerait qu'une zone en Calibri déborde encore. La version
         # précédente le faisait, et elle est tombée dès que le deck a été
@@ -1973,6 +2001,33 @@ class TestLeMoteurDeRenduDuDeckDitCeQuIlNeSaitPasFaire(unittest.TestCase):
                           "les diapos blanches ne sont plus rendues en blanc")
         finally:
             shutil.rmtree(d, ignore_errors=True)
+
+    def test_sans_police_le_verdict_REFUSE_de_rassurer(self):
+        """Sans police pour Calibri, aucune zone du deck n'est mesurée — et
+        le rapport affichait quand même « aucune zone au-delà du seuil ».
+        Ça se lit comme « tout va bien » alors que RIEN n'a été regardé.
+
+        C'est le même défaut que la section NON MESURE cachée derrière la
+        branche des alertes, un cran plus haut : ce qu'un contrôle fait quand
+        il ne peut pas conclure compte plus que ce qu'il vérifie quand tout va
+        bien. Un runner Linux est exactement dans ce cas."""
+        sys.path.insert(0, str(self.RACINE / "submission"))
+        import importlib
+        import rendre_le_deck as R
+        importlib.reload(R)
+        vraies = R.POLICES
+        R.POLICES = {f: {g: ["/introuvable.ttf"] for g in v}
+                     for f, v in vraies.items()}
+        try:
+            _a, notes, _nm, _s, sans = R.mesurer(
+                self.RACINE / "submission" / "Hindsight_Alpha_Deck.pptx", None)
+            self.assertEqual(sorted(sans), ["Calibri", "Cambria"],
+                             "les familles sans police ne sont pas remontées")
+            self.assertTrue(any("ne sont PAS mesurees" in n for n in notes),
+                            "les notes ne disent pas que ces zones ne sont "
+                            "pas mesurées : %s" % notes)
+        finally:
+            R.POLICES = vraies
 
     def test_le_rendu_produit_bien_les_dix_diapos(self):
         """TÉMOIN : un script qui n'écrirait rien passerait les deux tests
