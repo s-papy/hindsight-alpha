@@ -5889,6 +5889,95 @@ class TestLaVerificationDeKickoff(unittest.TestCase):
                       sortie)
 
 
+class TestLeScriptVIDEOTientDansLesCinqMinutes(unittest.TestCase):
+    """La règle lablab est **5 minutes maximum, MP4**. Le script annonce son
+    propre budget — nombre de mots prononcés, et durées à trois débits.
+
+    Mesuré le 29/08 : **deux des trois durées ne dérivaient pas du compte de
+    mots**.
+
+        débit        dérivé de 601 mots + 21 s      annoncé
+        145               4:29                       4:31
+        165               3:59                       4:09   ← +10 s
+        130               4:58                       4:48   ← -10 s
+
+    La dernière est celle qui compte. La note disait « 4:48, soit 12 secondes
+    de marge seulement » ; le calcul donne **4:58, soit 2 secondes**. Un
+    opérateur qui articule lentement — exactement ce qu'on fait en filmant une
+    démo sérieuse — arrive sur la limite réglementaire en croyant avoir de la
+    marge.
+
+    Ce test recalcule tout depuis le texte, et refuse un script qui dépasse
+    5:00 au débit lent."""
+
+    RACINE = Path(__file__).resolve().parent
+    SCRIPT = RACINE / "submission" / "Video_Script.md"
+    SECONDES_ECRAN = 21          # manipulations à l'écran, annoncées par le script
+    DEBIT_LENT = 130
+
+    def _mots_prononces(self):
+        """La convention que le script DÉCLARE : les lignes commençant par
+        « > », didascalies entre crochets retirées."""
+        import re
+        n = 0
+        for l in self.SCRIPT.read_text(encoding="utf-8").splitlines():
+            if not l.lstrip().startswith(">"):
+                continue
+            t = re.sub(r"\[[^\]]*\]", " ", l.lstrip()[1:])
+            n += len([m for m in re.split(r"\s+", t)
+                      if re.search(r"[\wÀ-ÿ]", m)])
+        return n
+
+    def test_le_script_reste_sous_cinq_minutes_au_debit_lent(self):
+        n = self._mots_prononces()
+        total = n / self.DEBIT_LENT * 60 + self.SECONDES_ECRAN
+        self.assertLess(total, 300,
+                        "%d mots à %d mots/min + %d s d'écran = %d:%02d — "
+                        "au-delà des 5 minutes réglementaires. Couper un bloc."
+                        % (n, self.DEBIT_LENT, self.SECONDES_ECRAN,
+                           total // 60, total % 60))
+
+    def test_le_compte_annonce_est_le_compte_reel(self):
+        """Un chiffre publié comme MESURÉ doit se re-dériver. Celui-ci
+        s'était déjà périmé une fois — le script le raconte lui-même."""
+        import re
+        n = self._mots_prononces()
+        texte = self.SCRIPT.read_text(encoding="utf-8")
+        annonce = re.search(r"\*\*(\d+) mots prononcés\*\*", texte)
+        self.assertIsNotNone(annonce, "le script n'annonce plus son compte")
+        self.assertEqual(int(annonce.group(1)), n,
+                         "le script annonce %s mots prononcés, il en contient "
+                         "%d" % (annonce.group(1), n))
+
+    def test_les_durees_annoncees_derivent_du_compte(self):
+        """TÉMOIN de la correction : chaque durée citée dans les notes doit
+        se recalculer, à la seconde près, depuis le compte de mots."""
+        import re
+        n = self._mots_prononces()
+        texte = self.SCRIPT.read_text(encoding="utf-8")
+        # ON LIT LA DUREE ATTACHEE A CHAQUE DEBIT, pas sa simple présence
+        # quelque part. Ma première version cherchait la chaîne « 4:58 » dans
+        # tout le fichier : remettre l'ancien « 4:48 » sur la ligne du débit
+        # lent la laissait verte, parce que « 4:58 » subsistait dans la note
+        # de correction juste à côté. Un test de présence ne mesure pas ce
+        # qu'il croit mesurer.
+        for debit in (130, 145, 165):
+            attendu = n / debit * 60 + self.SECONDES_ECRAN
+            attendu_txt = "%d:%02d" % (attendu // 60, attendu % 60)
+            # `re.I` : le script écrit « à 145 » en minuscule et « À 165 »
+            # en majuscule. Ma première version n'attrapait que la majuscule
+            # et déclarait « aucune durée annoncée » pour 145.
+            trouve = re.search(r"à %d[^→\n]*→[^\d\n]*(\d+:\d\d)"
+                               % debit, texte, re.I)
+            self.assertIsNotNone(
+                trouve, "aucune durée n'est annoncée pour %d mots/min" % debit)
+            self.assertEqual(
+                trouve.group(1), attendu_txt,
+                "à %d mots/min le script annonce %s, le calcul donne %s "
+                "(%d mots + %d s d'écran)"
+                % (debit, trouve.group(1), attendu_txt, n, self.SECONDES_ECRAN))
+
+
 class TestUnSeulPLANCHERDeSignificativite(unittest.TestCase):
     """`HINDSIGHT_HOLDOUT.md` annonçait DEUX planchers pour la même chose,
     avec les mêmes mots :
