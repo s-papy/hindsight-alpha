@@ -871,6 +871,43 @@ def find_near_the_money_contract(
               flush=True)
     contracts = lisibles
 
+    # LA FENETRE D'ECHEANCE ETAIT DEMANDEE, JAMAIS VERIFIEE. Ajoute le
+    # 30/08/2026. `expiration_date_gte/lte` part dans la requete, et le
+    # contrat rendu etait achete sans qu'on regarde SA date. C'est le motif
+    # que cette fonction meme a deja corrige DEUX fois -- la troncature de
+    # page le 24/08, l'ordre a echeance egale le 27/08 : faire confiance a ce
+    # qu'une reponse externe est censee contenir plutot que de le mesurer.
+    #
+    # « 7 a 21 jours » n'est pas un detail : c'est publie dans le README, le
+    # deck, le script video et la fiche de soumission, et c'est ce que le
+    # payoff simule par backtest.py suppose. Un contrat a six mois passerait
+    # ces trois affirmations a faux sans qu'une ligne ne bronche.
+    #
+    # Mesure du 30/08 contre l'API reelle, SPY, put, fenetre 06/09-20/09 :
+    # 100 contrats rendus, echeances 08/09 et 09/09, ZERO hors fenetre. Ce
+    # filtre est donc sans effet aujourd'hui -- c'est un trou de detection
+    # qu'il ferme, pas une panne observee.
+    dans_la_fenetre = [c for c in contracts
+                       if gte <= str(c.get("expiration_date", "")) <= lte]
+    if len(dans_la_fenetre) != len(contracts):
+        print("  WARNING: %d of %d option contracts for %s came back OUTSIDE "
+              "the %d-%d day window that was asked for, and were dropped. The "
+              "query filters on expiration_date; something answered it "
+              "differently."
+              % (len(contracts) - len(dans_la_fenetre), len(contracts),
+                 underlying, min_days_out, max_days_out), flush=True)
+    if not dans_la_fenetre:
+        # Meme discipline que les strikes illisibles juste au-dessus : on ne
+        # choisit pas au hasard parmi des contrats dont aucun ne repond a la
+        # question posee. Le symbole saute sa journee, et le message dit
+        # pourquoi.
+        print("  WARNING: not one of the %d option contracts returned for %s "
+              "falls inside the %d-%d day window. No contract picked."
+              % (len(contracts), underlying, min_days_out, max_days_out),
+              flush=True)
+        return None
+    contracts = dans_la_fenetre
+
     # AJOUTE le 27/08/2026. La bande a +/-5% (ci-dessus, 24/08) a REDUIT la
     # troncature de page sans la fermer, et l'arithmetique le montre :
     #

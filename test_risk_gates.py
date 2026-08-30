@@ -2311,6 +2311,66 @@ class TestStatutDeLaCloture(BaseExit):
                                  "une clôture normale est comptée comme un "
                                  "échec : %s" % actions[0].kind)
 
+class TestLaFenetreDEcheanceEstVERIFIEE_pas_seulement_demandee(unittest.TestCase):
+    """`expiration_date_gte/lte` partait dans la requête, et le contrat rendu
+    était acheté sans qu'on regarde SA date.
+
+    C'est le motif que cette fonction a déjà corrigé DEUX fois — la troncature
+    de page le 24/08, l'ordre à échéance égale le 27/08 : faire confiance à ce
+    qu'une réponse externe est censée contenir, plutôt que de le mesurer.
+
+    « 7 à 21 jours » est publié dans le README, le deck, le script vidéo et la
+    fiche de soumission, et c'est ce que le payoff simulé par backtest.py
+    suppose. Un contrat à six mois rendait ces affirmations fausses sans qu'une
+    ligne ne bronche.
+
+    Mesuré le 30/08 contre l'API réelle : 100 contrats, zéro hors fenêtre. Ce
+    contrôle ferme un trou de détection, il ne corrige pas une panne observée."""
+
+    def _demander(self, contrats):
+        from unittest import mock
+        rep = {"option_contracts": contrats}
+        with mock.patch.object(alpaca_cli, "run", lambda a: rep):
+            return alpaca_cli.find_near_the_money_contract("SPY", -1, spot=500.0)
+
+    @staticmethod
+    def _dans(jours, strike="500", suffixe=""):
+        from datetime import datetime, timezone, timedelta
+        d = (datetime.now(timezone.utc).date() + timedelta(days=jours)).isoformat()
+        return {"strike_price": strike, "expiration_date": d,
+                "symbol": "SPY%s" % (suffixe or jours)}
+
+    def test_un_contrat_HORS_fenetre_n_est_pas_retenu(self):
+        """Le cas qui compte : l'API rend un contrat à six mois, plus proche
+        du spot que celui dans la fenêtre. Sans vérification c'est lui qui
+        gagne, parce que la clé de tri ne regarde que le strike."""
+        choisi = self._demander([self._dans(180, "500"),      # pile au spot
+                                 self._dans(10, "501")])      # dans la fenêtre
+        self.assertEqual(choisi, "SPY10",
+                         "un contrat hors de la fenêtre 7-21 jours a été "
+                         "retenu : %s" % choisi)
+
+    def test_si_AUCUN_n_est_dans_la_fenetre_rien_n_est_achete(self):
+        self.assertIsNone(self._demander([self._dans(180), self._dans(365)]),
+                          "un contrat est acheté alors qu'aucun ne répond à "
+                          "la question posée")
+
+    def test_une_echeance_ILLISIBLE_ne_passe_pas_pour_valide(self):
+        """Même discipline que les strikes illisibles : « je n'ai pas su
+        lire » n'est pas « c'est bon »."""
+        self.assertIsNone(
+            self._demander([{"strike_price": "500", "symbol": "SPYX"}]),
+            "un contrat sans date d'échéance a été acheté")
+
+    def test_TEMOIN_une_reponse_normale_passe_intacte(self):
+        """SANS LUI, un filtre qui rejetterait TOUT passerait les trois tests
+        ci-dessus — et l'agent ne tradrait plus jamais."""
+        choisi = self._demander([self._dans(8, "499"), self._dans(15, "520")])
+        self.assertEqual(choisi, "SPY8",
+                         "une réponse parfaitement normale est rejetée : %s"
+                         % choisi)
+
+
 class TestCetAgentNAchèteQueDesOptionsJamaisIlNEnVend(unittest.TestCase):
     """LA PROPRIÉTÉ LA PLUS IMPORTANTE DU PROJET, et rien ne la gardait.
 
@@ -3052,7 +3112,30 @@ class TestChoixDuContrat(unittest.TestCase):
     """
 
     SPOT = 500.0
-    ECHEANCES = ["2026-09-02", "2026-09-04", "2026-09-08", "2026-09-11", "2026-09-15"]
+    # ÉCHÉANCES RELATIVES À AUJOURD'HUI, pas des dates gelées. Elles étaient
+    # écrites en dur (« 2026-09-02 » … « 2026-09-15 »), figées le 27/08. Deux
+    # conséquences trouvées le 30/08 :
+    #
+    #   . la première, à 3 jours, ne pouvait DÉJÀ PAS sortir de la requête,
+    #     qui filtre sur 7-21 jours — la fixture décrivait une réponse que
+    #     l'API ne peut pas produire ;
+    #   . et toutes seraient sorties de la fenêtre après le 20 septembre,
+    #     faisant tomber trois tests sans qu'une ligne de code ait changé.
+    #
+    # C'est le même défaut que le témoin de l'agent mort, corrigé le matin
+    # même : un test qui lit le calendrier au lieu d'énoncer la règle. Les
+    # jours choisis couvrent la fenêtre réelle, bornes comprises.
+    JOURS = [7, 9, 13, 17, 21]
+
+    @classmethod
+    def _echeance(cls, jours):
+        from datetime import datetime, timezone, timedelta
+        return (datetime.now(timezone.utc).date()
+                + timedelta(days=jours)).isoformat()
+
+    @property
+    def ECHEANCES(self):
+        return [self._echeance(j) for j in self.JOURS]
 
     def setUp(self):
         self._vrai_run = alpaca_cli.run
@@ -3091,8 +3174,8 @@ class TestChoixDuContrat(unittest.TestCase):
         """Sans ceci, départager d'abord par échéance passerait le test du
         dessus tout en achetant un strike plus éloigné du spot."""
         contrats = (
-            self._contrats(["2026-09-02"], strikes=(520.0,))   # proche, mais loin du spot
-            + self._contrats(["2026-09-15"], strikes=(500.0,))  # lointain, pile au spot
+            self._contrats([self._echeance(7)], strikes=(520.0,))   # proche, loin du spot
+            + self._contrats([self._echeance(21)], strikes=(500.0,))  # lointain, pile au spot
         )
         choisi = self._choisir(contrats)
         self.assertIn("C00500000", choisi,
@@ -3105,7 +3188,10 @@ class TestChoixDuContrat(unittest.TestCase):
         plus proche. Si quelqu'un décide l'inverse, ce test doit tomber et
         forcer la discussion, pas laisser le changement passer inaperçu."""
         choisi = self._choisir(self._contrats(list(reversed(self.ECHEANCES))))
-        self.assertIn("260902", choisi)
+        proche = self._echeance(self.JOURS[0]).replace("-", "")[2:]
+        self.assertIn(proche, choisi,
+                      "à strike égal, ce n'est pas l'échéance la plus proche "
+                      "qui est retenue : %s" % choisi)
 
     def test_aucun_contrat_rend_None(self):
         self.assertIsNone(self._choisir([]))
@@ -3128,10 +3214,14 @@ class TestChoixDuContrat(unittest.TestCase):
         strike = depart if depart is not None else round(self.SPOT_TRONQUE * 0.95, 2)
         page = []
         for i in range(nb):
-            page.append({"symbol": "SPY2609%02dC%08d" % (2 + i % echeances,
-                                                          int(strike * 1000)),
+            # Échéances relatives, pour la même raison que JOURS ci-dessus :
+            # une page dont toutes les dates sont hors fenêtre ne teste plus
+            # la troncature, elle teste le filtre d'échéance.
+            exp = self._echeance(7 + (i % echeances))
+            page.append({"symbol": "SPY%sC%08d" % (exp.replace("-", "")[2:],
+                                                   int(strike * 1000)),
                          "strike_price": "%.2f" % strike,
-                         "expiration_date": "2026-09-%02d" % (2 + i % echeances)})
+                         "expiration_date": exp})
             if i % echeances == echeances - 1:
                 strike += pas
         return page
