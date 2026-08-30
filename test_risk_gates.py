@@ -2311,6 +2311,69 @@ class TestStatutDeLaCloture(BaseExit):
                                  "une clôture normale est comptée comme un "
                                  "échec : %s" % actions[0].kind)
 
+class TestLAskQuiDimensionneVientDuBONContrat(unittest.TestCase):
+    """`get_option_ask_price` déballait `{"snapshots": {SYM: ...}}` avec
+    `next(iter(...values()))` — le PREMIER snapshot, sans jamais regarder de
+    quel contrat il parlait.
+
+    C'est mot pour mot le défaut corrigé le 27/08 dans `_extract_bars`,
+    quarante lignes plus bas dans le même fichier, dont la docstring dit
+    « la conséquence est la pire de ce dépôt ». La leçon avait été appliquée
+    aux barres et pas au snapshot d'option.
+
+    Ici elle coûte plus cher, pour une raison arithmétique : cet ask
+    DIMENSIONNE la position, `qty = per_trade_dollars // (ask * 100)`. Mesuré
+    le 30/08 sur l'équité réelle (99 961,91 $, plafond par trade 1 %) :
+
+        ask lu 3.74 (le bon contrat)      ->   2 contrats ->    748 $   0,7 %
+        ask lu 0.50 (un autre contrat)    ->  19 contrats ->  7 106 $   7,1 %
+        ask lu 0.05 (un contrat lointain) -> 199 contrats -> 74 426 $  74,5 %
+
+    Un ask lu sur le mauvais contrat ne fait pas payer un peu trop : il fait
+    sauter TOUS les plafonds à la fois, pendant que chaque garde reste vert."""
+
+    DEMANDE = "SPY260904P00769000"
+    AUTRE = "SPY261218P00500000"
+
+    def _ask(self, reponse):
+        from unittest import mock
+        with mock.patch.object(alpaca_cli, "run", lambda a: reponse):
+            return alpaca_cli.get_option_ask_price(self.DEMANDE)
+
+    def test_un_snapshot_d_un_AUTRE_contrat_est_refuse(self):
+        with self.assertRaises(alpaca_cli.AlpacaCLIError,
+                               msg="l'ask d'un autre contrat est accepté pour "
+                                   "dimensionner la position") as e:
+            self._ask({"snapshots": {self.AUTRE: {"latestQuote": {"ap": 0.05}}}})
+        self.assertIn(self.DEMANDE, str(e.exception),
+                      "le message ne nomme pas le contrat demandé : %s"
+                      % e.exception)
+
+    def test_TEMOIN_le_bon_contrat_donne_bien_son_ask(self):
+        """Sans lui, un contrôle qui refuserait TOUT passerait le test
+        ci-dessus — et l'agent ne pourrait plus jamais dimensionner."""
+        self.assertEqual(
+            self._ask({"snapshots": {self.DEMANDE: {"latestQuote": {"ap": 3.74}}}}),
+            3.74)
+
+    def test_la_casse_ne_fait_pas_un_faux_positif(self):
+        """Même règle que son jumeau : refuser « spy… » face à « SPY… »
+        serait un faux positif, et un contrôle qui crie sur du normal
+        s'apprend à ignorer."""
+        self.assertEqual(
+            self._ask({"snapshots": {self.DEMANDE.lower():
+                                     {"latestQuote": {"ap": 3.74}}}}),
+            3.74)
+
+    def test_un_snapshot_EN_PLUS_du_bon_ne_fait_pas_perdre_le_bon(self):
+        """La réponse peut légitimement porter plusieurs contrats : c'est le
+        BON qu'il faut y trouver, pas le premier."""
+        self.assertEqual(
+            self._ask({"snapshots": {self.AUTRE: {"latestQuote": {"ap": 0.05}},
+                                     self.DEMANDE: {"latestQuote": {"ap": 3.74}}}}),
+            3.74)
+
+
 class TestLaFenetreDEcheanceEstVERIFIEE_pas_seulement_demandee(unittest.TestCase):
     """`expiration_date_gte/lte` partait dans la requête, et le contrat rendu
     était acheté sans qu'on regarde SA date.

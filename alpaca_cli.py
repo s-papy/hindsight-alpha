@@ -373,10 +373,48 @@ def get_option_ask_price(option_symbol: str) -> Optional[float]:
     if not isinstance(data, dict):
         return None
 
-    # unwrap a possible {"snapshots": {"SYMBOL": {...}}} or {"SYMBOL": {...}} wrapper
+    # LA CLE EST VERIFIEE, PAS SUPPOSEE. Ajoute le 30/08/2026.
+    #
+    # Cette ligne etait `next(iter(data["snapshots"].values()), {})` : elle
+    # prenait le PREMIER snapshot sans jamais regarder de quel contrat il
+    # parlait. C'est mot pour mot le defaut corrige le 27/08 dans
+    # `_extract_bars`, quarante lignes plus bas, dont la docstring dit « la
+    # consequence est la pire de ce depot ». La lecon avait ete appliquee aux
+    # barres et pas au snapshot d'option, dans le meme fichier.
+    #
+    # Et ici elle coute plus cher que la pour une raison arithmetique : cet
+    # ask DIMENSIONNE la position. `qty = per_trade_dollars // (ask * 100)`.
+    # Mesure du 30/08 sur l'equite reelle (99 961,91 $, plafond 1 %) :
+    #
+    #     ask lu 3.74 (le bon contrat)      ->   2 contrats ->    748 $  0,7 %
+    #     ask lu 0.50 (un autre contrat)    ->  19 contrats ->  7 106 $  7,1 %
+    #     ask lu 0.05 (un contrat lointain) -> 199 contrats -> 74 426 $ 74,5 %
+    #
+    # Un ask lu sur le mauvais contrat ne fait donc pas payer un peu trop :
+    # il fait sauter TOUS les plafonds a la fois, en restant vert.
+    #
+    # ATTEIGNABILITE NON DEMONTREE, comme pour `_extract_bars` : l'appel passe
+    # --symbols avec UN seul symbole, donc une API qui se comporte bien ne
+    # peut rendre que celui-la. Le cout du controle est de trois lignes.
+    #
+    # Comparaison insensible a la casse, meme raison que son jumeau : refuser
+    # « spy... » face a « SPY... » serait un faux positif.
     candidate = data
     if "snapshots" in data and isinstance(data["snapshots"], dict):
-        candidate = next(iter(data["snapshots"].values()), {})
+        par_cle = {str(k).upper(): v for k, v in data["snapshots"].items()}
+        attendu = str(option_symbol).upper()
+        if attendu not in par_cle:
+            raise AlpacaCLIError(
+                "option snapshot is keyed by symbol but does not contain the "
+                "one that was requested: asked for %r, got %s. Refusing to "
+                "size a position on another contract's ask -- that price "
+                "decides the quantity, so a cheaper contract's ask would "
+                "blow through every exposure cap while every gate stayed "
+                "green."
+                % (option_symbol,
+                   ", ".join(repr(k) for k in sorted(data["snapshots"]))
+                   or "(none)"))
+        candidate = par_cle[attendu]
     elif option_symbol in data:
         candidate = data[option_symbol]
 
