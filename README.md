@@ -190,7 +190,9 @@ one is named with what it actually launches.
   there would have stayed open overnight.
 
 - **`launchagents/com.hindsightalpha.market-hours-awake.plist`** — a
-  `caffeinate` job holding the machine awake from 15:20 to 22:05 on weekdays.
+  `caffeinate` job holding the machine awake from 15:20 to 22:20 on weekdays
+  — seven hours, twenty minutes past the close. A test derives that end time
+  from the plist rather than trusting this sentence.
   It exists because the exit monitor once failed eleven times in a row: not a
   permissions fault, but a sleeping machine that `launchd` woke only for
   maintenance windows too short for Wi-Fi to reconnect. Each failure timestamp

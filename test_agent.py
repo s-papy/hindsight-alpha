@@ -1886,6 +1886,48 @@ class TestUnHorodatageNaifEstSignaleParLeGardeFou(unittest.TestCase):
 
 
 
+class TestLesHORAIRESAnnoncesSontCeuxDesPlists(unittest.TestCase):
+    """Le README annonce des horaires précis pour chaque agent planifié. Ils
+    étaient recopiés à la main, et l'un d'eux était faux.
+
+    Mesuré le 30/08/2026 en lisant les plists : `caffeinate` reçoit
+    `-t 25200`, soit sept heures depuis 15:20 — il tient donc jusqu'à
+    **22:20**. Le README annonçait **22:05**. L'écart est sans danger dans ce
+    sens-là (la machine reste éveillée plus longtemps que promis), mais c'est
+    une affirmation publiée qui ne correspond pas au fichier qu'elle décrit,
+    sur le mécanisme dont tout le reste dépend : sans machine éveillée, la
+    boucle de sortie ne tourne pas, et c'est la seule chose qui protège une
+    position ouverte.
+
+    Ce test dérive l'heure de fin du plist et exige que le README la porte.
+    Même mécanisme que le décompte de commits : un nombre écrit à la main
+    vieillit en silence, un nombre vérifié non."""
+
+    RACINE = Path(__file__).resolve().parent
+
+    def test_la_fin_de_la_veille_est_celle_du_plist(self):
+        import plistlib
+        chemin = (self.RACINE / "launchagents"
+                  / "com.hindsightalpha.market-hours-awake.plist")
+        d = plistlib.loads(chemin.read_bytes())
+        args = d["ProgramArguments"]
+        self.assertIn("-t", args,
+                      "le plist ne borne plus la durée de caffeinate : il "
+                      "tiendrait la machine éveillée indéfiniment")
+        duree = int(args[args.index("-t") + 1])
+        cal = d["StartCalendarInterval"]
+        if isinstance(cal, dict):
+            cal = [cal]
+        debut_min = cal[0]["Hour"] * 60 + cal[0].get("Minute", 0)
+        fin = debut_min + duree // 60
+        attendu = "%02d:%02d" % (fin // 60 % 24, fin % 60)
+        readme = (self.RACINE / "README.md").read_text(encoding="utf-8")
+        self.assertIn(attendu, readme,
+                      "le plist tient la machine éveillée jusqu'à %s, le "
+                      "README ne l'annonce nulle part — il en annonce un "
+                      "autre" % attendu)
+
+
 class TestLeMoteurDeRenduDuDeckDitCeQuIlNeSaitPasFaire(unittest.TestCase):
     """`submission/rendre_le_deck.py` existe parce que cette machine n'a aucun
     moteur de rendu — ni LibreOffice, ni pdftoppm, ni markitdown — et que la
