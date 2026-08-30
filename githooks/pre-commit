@@ -101,10 +101,13 @@ if [ "$code" -eq 0 ]; then
     # docs/data.json, toutes les 30 minutes ; ils ne paient jamais ce coût.
     #
     # docs/index.html AJOUTÉ le 29/08/2026, après quatre commits de suite qui
-    # ne touchaient que lui. Ce fichier porte ~900 lignes de JavaScript, et
-    # test_dashboard.py en extrait le <script> pour l'exécuter sous Node :
-    # 73 tests portent dessus. La règle « un .py est indexé » lisait
-    # l'EXTENSION, pas ce qui est testé.
+    # ne touchaient que lui. Ce fichier portait ~900 lignes de JavaScript à
+    # l'ajout (1187 mesurées le 30/08, le fichier a grandi depuis -- ce
+    # nombre-ci n'est PAS relu par le hook, contrairement à la durée de
+    # suite plus haut, donc laissé approximatif plutôt que faux à date
+    # fixe), et test_dashboard.py en extrait le <script> pour l'exécuter
+    # sous Node : 97 tests portent dessus au 30/08 (73 à l'ajout). La règle
+    # « un .py est indexé » lisait l'EXTENSION, pas ce qui est testé.
     #
     # REPRODUIT dans un clone avant de corriger : on casse _sens() dans
     # docs/index.html, on n'indexe que ce fichier, et le commit PASSE --
