@@ -2311,6 +2311,70 @@ class TestStatutDeLaCloture(BaseExit):
                                  "une clôture normale est comptée comme un "
                                  "échec : %s" % actions[0].kind)
 
+class TestCetAgentNAchèteQueDesOptionsJamaisIlNEnVend(unittest.TestCase):
+    """LA PROPRIÉTÉ LA PLUS IMPORTANTE DU PROJET, et rien ne la gardait.
+
+    Le README, le deck, le script vidéo et la fiche de soumission affirment
+    tous la même chose : « the most any position can lose is the premium
+    paid ». Cette phrase n'est vraie que parce que l'agent est ACHETEUR — un
+    seul point de soumission, `--side buy` écrit en dur.
+
+    Vendre une option nue, c'est une perte non bornée et un appel de marge :
+    l'inverse exact de ce que ce dossier promet.
+
+    Mesuré le 30/08/2026, en remplaçant `buy` par `sell` :
+
+        692 tests            -> VERTS
+        garde_fou.py         -> 🟢 APPROUVÉ
+
+    Rien n'a bronché, parce que tous les tests remplacent
+    `submit_paper_option_order` par un faux et ne voient donc jamais ses
+    arguments. Une seule chaîne de trois lettres portait la propriété que
+    tout le dossier vend, et un caractère la retournait en silence.
+
+    Ce test regarde l'argv réellement passé au CLI, pas la valeur de retour.
+    C'est la seule façon de voir un côté d'ordre."""
+
+    def _argv_de_l_ordre(self):
+        from unittest import mock
+        vu = {}
+
+        def faux_run(args):
+            vu["args"] = list(args)
+            return {"id": "abc", "status": "accepted"}
+
+        with mock.patch.object(alpaca_cli, "run", faux_run):
+            alpaca_cli.submit_paper_option_order("SPY260911C00500000", 3)
+        return vu["args"]
+
+    def test_l_ordre_soumis_est_un_ACHAT(self):
+        argv = self._argv_de_l_ordre()
+        self.assertIn("--side", argv,
+                      "l'ordre ne précise plus de côté : Alpaca choisit "
+                      "alors le sien, et ce n'est plus notre garantie : %s"
+                      % argv)
+        self.assertEqual(argv[argv.index("--side") + 1], "buy",
+                         "l'agent soumet un ordre qui n'est pas un achat : "
+                         "la perte cesse d'être bornée à la prime, ce que "
+                         "tout le dossier affirme publiquement : %s" % argv)
+
+    def test_aucune_VENTE_n_est_soumise_nulle_part(self):
+        """SECOND TÉMOIN, sur le fichier plutôt que sur un appel : un second
+        chemin de soumission ajouté demain échapperait au test ci-dessus,
+        qui n'exerce que celui d'aujourd'hui."""
+        import re
+        source = (Path(alpaca_cli.__file__).read_text(encoding="utf-8"))
+        # Les occurrences dans les commentaires et docstrings ne comptent
+        # pas : c'est un ARGUMENT passé au CLI qu'on cherche.
+        code = re.sub(r'"""[\s\S]*?"""', "", source)
+        code = re.sub(r"#.*", "", code)
+        ventes = re.findall(r'"--side",\s*"([a-z_]+)"', code)
+        self.assertTrue(ventes, "plus aucun côté d'ordre n'est passé au CLI")
+        self.assertEqual(set(ventes), {"buy"},
+                         "un chemin de soumission passe un côté autre que "
+                         "« buy » : %s" % ventes)
+
+
 class TestStatutDeLOrdre(unittest.TestCase):
     """Ajouté le 27/08 au soir, la veille du kickoff.
 
