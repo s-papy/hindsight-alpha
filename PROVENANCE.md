@@ -51,7 +51,7 @@ signé ici, c'est **cette implémentation**, pas le concept.
 
 ## Limites assumées
 
-- **Les 177 premiers commits ne sont pas signés.** Les signer aurait exigé
+- **Les 203 premiers commits ne sont pas signés.** Les signer aurait exigé
   de réécrire l'historique, ce qui change tous les identifiants de commit —
   donc détruit précisément la preuve d'antériorité qu'on cherche à
   protéger. La signature porte sur les **tags**, qui couvrent l'état

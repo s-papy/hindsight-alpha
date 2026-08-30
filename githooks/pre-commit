@@ -28,6 +28,33 @@
 # brut du sous-processus). Constaté sur le premier témoin lancé.
 cd "$(git rev-parse --show-toplevel)" || exit 1
 
+# TROUVÉ le 30/08/2026 au soir, en committant pour de vrai (pas en test) :
+# git invoque tout hook avec GIT_DIR (et parfois GIT_INDEX_FILE) déjà fixés
+# dans l'ENVIRONNEMENT du process -- c'est documenté (githooks(5)) et
+# systématiquement oublié. `python3 -m unittest discover`, lancé plus bas,
+# hérite cet environnement, et donc TOUT `subprocess.run(["git", "-C",
+# tempdir, ...])` dans les tests hérite GIT_DIR aussi. Or `-C tempdir`
+# change seulement le cwd de git, pas GIT_DIR : GIT_DIR gagne pour la
+# résolution des objets/index, et le work-tree se résout au cwd courant
+# (tempdir) en l'absence de GIT_WORK_TREE explicite. Résultat mesuré :
+# `git -C tempdir add -A && git -C tempdir commit` a comparé le VRAI index
+# (via GIT_DIR = ce dépôt-ci) au contenu du tempdir presque vide, et a donc
+# committé DIRECTEMENT SUR LA VRAIE BRANCHE -- 4 commits parasites
+# ("propre"/"fautif"/"retire"/"base"), garde_fou.py et README.md rayés du
+# HEAD. Reproduit isolément dans un faux dépôt avant de corriger : GIT_DIR
+# hérité + `-C autredossier` déplace bien un commit "base" sur le mauvais
+# dépôt ; le retrait de ces variables de l'environnement l'empêche.
+#
+# Rien n'a été perdu (les fichiers sur disque n'ont jamais bougé, seul HEAD
+# a dérivé, `git reset --mixed` a tout restauré), mais RETENTER un commit
+# sans ce correctif aurait reproduit l'incident à l'identique. La ligne
+# ci-dessous purge ces variables AVANT tout sous-processus, pour ce hook et
+# pour tout ce qu'il lance (garde_fou.py, la suite de tests) -- un seul
+# point de correction plutôt que d'assainir chaque appel git dans chaque
+# test isolé, qui grandiraient sans fin.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY \
+      GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_COMMON_DIR GIT_PREFIX
+
 # CORRIGÉ le 28/08/2026 : ce bloc sortait 0 EN SILENCE quand garde_fou.py
 # était absent. Mesuré de bout en bout, dans une copie du dépôt avec les
 # hooks actifs :

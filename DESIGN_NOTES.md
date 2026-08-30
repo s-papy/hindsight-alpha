@@ -116,10 +116,11 @@ The hackathon's hard requirement: *"MCP or CLI — projects must utilize
 either Alpaca's MCP server or its CLI tools."* An earlier draft called the
 `alpaca-py` SDK directly, which doesn't satisfy that. Switched to Alpaca's
 official CLI (`github.com/alpacahq/cli`) instead of the MCP server because
-Alpaca's own docs say so explicitly: the CLI is built for "scripts, cron,
-CI, focused agent actions" (one command per call, then exit); the MCP
-server is built for "long-lived AI sessions, multi-tool orchestration" with
-a human-driven AI host attached. This agent runs
+Alpaca's own docs say so explicitly: the CLI fits "shell scripts, cron
+jobs, CI pipelines, copy and paste runbooks, and focused agent actions"
+(one command per call, then exit); the MCP server "aligns with long-lived
+agent sessions where the host benefits from tool schemas, shared context,
+and multi-tool orchestration." This agent runs
 as a scheduled sweep-then-decide command — the CLI's exact use case, not
 the MCP server's. See `alpaca_cli.py` for the subprocess wrapper.
 
