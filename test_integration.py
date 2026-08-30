@@ -6840,7 +6840,12 @@ class TestLeTauxDeFAUSSEALERTEEstPublie(unittest.TestCase):
         y retrouvait. Un test de présence ne mesure pas ce qu'il croit
         mesurer ; c'est la troisième fois aujourd'hui."""
         readme = (self.RACINE / "README.md").read_text(encoding="utf-8")
-        debut = readme.index("How solid is that disagreement")
+        # Le titre de la section a change le 30/08 (« How solid is that
+        # disagreement » -> « How honest is the check itself ») en ramenant le
+        # README de 5 948 a ~2 500 mots. Ce que ce test verifie n'a pas bouge :
+        # les DEUX taux mesures et le cas le plus severe doivent etre dans le
+        # passage explicatif, pas seulement quelque part dans le fichier.
+        debut = readme.index("How honest is the check itself")
         fin = readme.index("\n### ", debut)
         return readme[debut:fin]
 
