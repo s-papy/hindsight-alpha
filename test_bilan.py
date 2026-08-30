@@ -383,6 +383,67 @@ class TestLeMessageNeNommePasUneCauseNonMESUREE(BaseBilan):
 if __name__ == "__main__":
     unittest.main(verbosity=2)
 
+class TestUnEssaiABlancNeCompteDansAucunChiffre(BaseBilan):
+    """Trouvé le 30/08/2026 en lançant `agent.py --dry-run` comme contrôle
+    avant la semaine notée. Cet unique essai a DOUBLÉ tous les chiffres du
+    bilan et du tableau de bord public : « 2 passages pour 1 attendu »,
+    8 verdicts, XLK refusé deux fois — alors qu'il n'avait soumis aucun ordre
+    et ouvert aucune position.
+
+    La règle existait déjà dans ce dépôt, à un seul endroit : la bannière de
+    santé peint un dry-run en JAUNE, « it submitted nothing, and opened no
+    position », précisément pour qu'une simulation ne repeigne pas
+    l'indicateur en vert. Le comptage, lui, les additionnait aux vrais
+    passages. Encore une règle appliquée ici et pas à son jumeau."""
+
+    def _entree(self, dry_run):
+        return {"timestamp": "2026-08-28T19:37:00+00:00", "run_type": "agent",
+                "dry_run": dry_run, "outcome": "no_trade",
+                "verdicts": [{"symbol": "XLK", "tradeable": False,
+                              "reason": "hindsight_guard: windows disagree"}]}
+
+    def test_un_essai_a_blanc_n_ajoute_ni_passage_ni_verdict(self):
+        d = self._dossier([self._entree(False), self._entree(True),
+                           self._entree(True)])
+        try:
+            code, sortie = self._lancer(d)
+            self.assertEqual(code, 0, sortie[-600:])
+            self.assertIn("1 actual run(s)", sortie,
+                          "les essais à blanc sont comptés comme des "
+                          "passages réels :\n%s" % sortie[-800:])
+            self.assertIn("1 verdict(s)", sortie,
+                          "les verdicts d'un essai à blanc entrent dans le "
+                          "décompte :\n%s" % sortie[-800:])
+        finally:
+            __import__("shutil").rmtree(d, ignore_errors=True)
+
+    def test_le_nombre_d_essais_exclus_est_DIT(self):
+        """TÉMOIN, et c'est lui qui compte. Exclure sans le dire serait le
+        défaut d'à côté : un lecteur ne peut pas distinguer « l'agent n'a
+        tourné qu'une fois » de « il a tourné trois fois dont deux à blanc »."""
+        d = self._dossier([self._entree(False), self._entree(True),
+                           self._entree(True)])
+        try:
+            _code, sortie = self._lancer(d)
+            self.assertIn("dry runs excluded from every figure above: 2",
+                          sortie,
+                          "les essais à blanc sont retirés en silence :\n%s"
+                          % sortie[-800:])
+        finally:
+            __import__("shutil").rmtree(d, ignore_errors=True)
+
+    def test_un_vrai_passage_reste_compte(self):
+        """SECOND TÉMOIN : un filtre qui jetterait TOUT passerait les deux
+        tests ci-dessus, et le bilan serait vide toute la semaine."""
+        d = self._dossier([self._entree(False)])
+        try:
+            _code, sortie = self._lancer(d)
+            self.assertIn("1 actual run(s)", sortie, sortie[-600:])
+            self.assertIn("hindsight guard", sortie, sortie[-600:])
+        finally:
+            __import__("shutil").rmtree(d, ignore_errors=True)
+
+
 class TestUnHorodatageSansFuseauNeTuePasLeBilan(BaseBilan):
     """Un horodatage sans fuseau ne leve rien a l'ANALYSE : il explose une
     ligne plus loin, a la COMPARAISON, avec « can't compare offset-naive and

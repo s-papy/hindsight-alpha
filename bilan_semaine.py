@@ -172,13 +172,31 @@ def compter_la_semaine(entrees, fenetre) -> dict:
 
     Rend des nombres, jamais de prose : l'appelant decide ce qu'il en dit."""
     debut, fin = fenetre
-    passages = []
+    passages, essais_a_blanc = [], 0
     for e in entrees or []:
         if e.get("run_type") not in (None, "", "agent"):
             continue
         t = _en_utc(e.get("timestamp"))
-        if t is not None and debut <= t <= fin:
-            passages.append(e)
+        if t is None or not (debut <= t <= fin):
+            continue
+        # UN ESSAI A BLANC NE COMPTE PAS, et il est DIT. Trouve le
+        # 30/08/2026 en lancant `agent.py --dry-run` comme controle avant la
+        # semaine notee : cet unique essai a DOUBLE tous les chiffres --
+        # 2 passages pour 1 attendu, 8 verdicts, XLK refuse deux fois --
+        # alors qu'il n'a soumis aucun ordre et ouvert aucune position.
+        #
+        # La regle existait deja dans ce depot, une seule fois : la banniere
+        # de sante peint un dry-run en JAUNE, « it submitted nothing, and
+        # opened no position », precisement pour ne pas laisser une
+        # simulation repeindre l'indicateur en vert. Le comptage de la
+        # semaine, lui, les additionnait aux vrais passages.
+        #
+        # Exclus, pas effaces : le nombre est rendu a l'appelant, qui le
+        # dit. Une ligne retiree en silence est le defaut d'a cote.
+        if e.get("dry_run"):
+            essais_a_blanc += 1
+            continue
+        passages.append(e)
     refus, refus_par_symbole, retenus = Counter(), Counter(), 0
     for e in passages:
         for v in (e.get("verdicts") or []):
@@ -191,6 +209,7 @@ def compter_la_semaine(entrees, fenetre) -> dict:
                 refus_par_symbole[v.get("symbol")] += 1
     return {"passages": passages, "retenus": retenus, "refus": refus,
             "refus_par_symbole": refus_par_symbole,
+            "essais_a_blanc": essais_a_blanc,
             "attendus": _passages_attendus(debut, fin)}
 
 
@@ -282,6 +301,9 @@ def main() -> None:
     print()
     print("  2. EXECUTION REGULARITY")
     print("     %d actual run(s) for %d expected" % (len(passages), attendus))
+    # TOUJOURS imprime, meme a zero -- meme raison que les lignes illisibles.
+    print("     dry runs excluded from every figure above: %d"
+          % compte["essais_a_blanc"])
     if attendus and len(passages) < attendus:
         print("     🔴 %d run(s) MISSING — an agent that did not run proved"
               % (attendus - len(passages)))

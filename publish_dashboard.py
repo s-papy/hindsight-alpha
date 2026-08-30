@@ -226,6 +226,9 @@ def _semaine_publiable() -> "dict | None":
         # est « je n'ai pas su lire ». Un compte qui omet en silence ce
         # qu'il n'a pas pu lire est le defaut que ce depot traque.
         "unreadable_log_lines": illisibles,
+        # Exclus des chiffres, mais DITS : un essai a blanc ne soumet rien,
+        # et le retirer en silence serait le defaut d'a cote.
+        "dry_runs_excluded": c["essais_a_blanc"],
         "runs": len(c["passages"]),
         "runs_expected": c["attendus"],
         "verdicts": c["retenus"] + sum(c["refus"].values()),

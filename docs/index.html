@@ -773,7 +773,11 @@ function renderWeek(week) {
     // DIT MEME A ZERO. Avec un journal entierement illisible ce bloc
     // annoncait « 0 verdict » -- « rien decide » au lieu de « rien lu ».
     + ' Unreadable log lines skipped: ' + (week.unreadable_log_lines || 0)
-    + '.</p>';
+    // DITS, PAS EFFACES. Un essai a blanc ne soumet rien : le compter
+    // doublerait les chiffres (mesure du 30/08 : un seul dry-run faisait
+    // « 2 passages pour 1 attendu »). Mais le retirer sans le dire serait
+    // le defaut d'a cote.
+    + '. Dry runs excluded: ' + (week.dry_runs_excluded || 0) + '.</p>';
 }
 
 

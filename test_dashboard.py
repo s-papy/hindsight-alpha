@@ -304,6 +304,27 @@ class TestLeCompteDeLaSemaineEstAffiche(BaseRendu):
                       "la page ne dit pas que rien n'a été compté : %s"
                       % r["texte"])
 
+    def test_les_ESSAIS_A_BLANC_exclus_sont_dits(self):
+        """Trouvé le 30/08 en lançant `agent.py --dry-run` comme contrôle
+        avant la semaine notée : cet unique essai DOUBLAIT tous les chiffres
+        publiés — 2 passages pour 1 attendu, 8 verdicts, XLK refusé deux
+        fois — alors qu'il n'avait soumis aucun ordre.
+
+        La bannière de santé peignait déjà un dry-run en jaune pour cette
+        raison exacte. La règle était appliquée là, pas au comptage. Ils sont
+        exclus, et le nombre est dit : une ligne retirée en silence est le
+        défaut d'à côté."""
+        r = self.executer("""
+            renderWeek({unreadable_log_lines: 0, dry_runs_excluded: 3,
+                        runs: 2, runs_expected: 2, verdicts: 8, tradeable: 2,
+                        refused: {"hindsight guard": 6},
+                        guard_refused_by_symbol: {XLK: 6}});
+            _resultats.texte = document.getElementById('week-container').innerHTML;
+        """)
+        self.assertIn("Dry runs excluded: 3", r["texte"],
+                      "les essais à blanc sont retirés sans le dire : %s"
+                      % r["texte"])
+
     def test_les_lignes_ILLISIBLES_du_journal_sont_dites_meme_a_zero(self):
         """Avec un journal entièrement illisible, le bloc annonçait
         « 0 verdict » — « rien décidé » au lieu de « rien lu »."""
