@@ -5714,6 +5714,35 @@ class TestLeDocumentDeReglesNeMentPas(unittest.TestCase):
                       "le document ne mentionne pas le décalage d'information "
                       "entre les deux stratégies")
 
+    def test_le_p_annonce_est_RECALCULE_pas_seulement_present(self):
+        """TROUVÉ le 30/08/2026 : le test ci-dessus vérifie que la CHAÎNE
+        « p = 1.000 » figure dans CLAUDE.md, jamais que le calcul qui la
+        produit rend encore ce chiffre. Même famille que les tests de
+        présence déjà corrigés ailleurs dans ce fichier (« assertIn » sur un
+        fichier entier au lieu du passage qui compte) : un texte peut mentir
+        sans qu'aucun contrôle ne le voie.
+
+        Recalculé le 30/08/2026 en important `hindsight_benchmark` pour de
+        vrai : Fisher exact bilatéral sur la table observée (4/0 contre
+        3/1) rend 1.0 -- exact, pas arrondi. Et la fourchette « 48 à 70 % »
+        de CLAUDE.md correspond aux taux de passage par symbole 0.90 et 0.70
+        (48.2 % et 69.7 % arrondis), pas à toute la plage testée par le banc
+        (0.95 rend 30.7 %, hors fourchette -- cohérent : un taux de 95 %
+        rendrait déjà un résultat 3/4 improbable sous l'hypothèse nulle, ce
+        n'est pas le régime que la phrase décrit)."""
+        import hindsight_benchmark
+        r = hindsight_benchmark.comparaison_a_quatre_symboles()
+        self.assertAlmostEqual(
+            r["fisher"], 1.0, places=6,
+            msg="le banc ne rend plus p = 1.000 pour la table observée -- "
+                "CLAUDE.md cite un chiffre que le calcul ne produit plus")
+        borne_basse = round(r["ecarts"][0.90] * 100)
+        borne_haute = round(r["ecarts"][0.70] * 100)
+        self.assertEqual(
+            (borne_basse, borne_haute), (48, 70),
+            "la fourchette recalculée (%d %% à %d %%) ne correspond plus "
+            "aux « 48 à 70 %% » cités dans CLAUDE.md" % (borne_basse, borne_haute))
+
     def test_la_contrainte_elle_meme_est_intacte(self):
         """TÉMOIN : nuancer la justification ne doit pas affaiblir la règle.
         Sans ce test, « corriger » le paragraphe pourrait supprimer la
