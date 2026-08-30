@@ -299,7 +299,26 @@ class TestBanniereDeSante(BaseRendu):
         Le message doit dire explicitement qu'une liste vide signifie « ne
         tourne pas », et non « pas d'edge »."""
         r = self.executer(self.PRE + """
-            renderAgentHealth({last_run_at: ilYA(30), outcome: "no_trade",
+            // UNE SECONDE AVANT LE DERNIER PASSAGE ATTENDU, et non « il y a
+            // 30 h ». Corrige le 30/08/2026, apres que ce test a mis le hook
+            // de commit au ROUGE -- alors qu'il etait vert onze heures plus
+            // tot, sur le meme code.
+            //
+            // « il y a 30 h » tombe d'un cote ou de l'autre de la frontiere
+            // selon l'instant du lancement. Dimanche 12:48, le dernier
+            // passage attendu est VENDREDI 19:37 UTC (le calcul saute le
+            // week-end) : 30 h en arriere tombe SAMEDI, donc APRES -- pas en
+            // retard, banniere verte. La meme nuit a 01:14, les memes 30 h
+            // tombaient AVANT vendredi 19:37 : rouge.
+            //
+            // Le temoin VERT jumeau porte deja, depuis le 28/08, un
+            // commentaire decrivant exactement ce piege et sa correction. La
+            // lecon avait ete appliquee a un jumeau et pas a l'autre -- le
+            // motif que ce depot traque le plus souvent, dans le test qui se
+            // dit « LA distinction qui porte ce dossier ».
+            const enRetardDUneSeconde = new Date(
+                dernierPassageAttenduDeLAgent().getTime() - 1000).toISOString();
+            renderAgentHealth({last_run_at: enRetardDUneSeconde, outcome: "no_trade",
                                dry_run: false, symbols_evaluated: 4, trades: 0});
             _resultats.classe = document.getElementById('agent-health-banner').className;
             _resultats.texte  = document.getElementById('agent-health-banner').textContent;

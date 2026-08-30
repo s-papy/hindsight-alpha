@@ -4435,10 +4435,23 @@ class TestLeTravailAnterieurAuKickoffEstDivulgue(unittest.TestCase):
         défaut que ce dépôt a passé la journée à corriger ailleurs."""
         import re
         texte = (self.RACINE / "README.md").read_text(encoding="utf-8")
-        m = re.search(r"\*\*(\d+) of this repository's (\d+) commits", texte)
+        m = re.search(
+            r"\*\*(\d+) of this repository's (\d+) commits — (\d+)%", texte)
         self.assertIsNotNone(m, "le README n'annonce plus de décompte de "
                                 "commits sous la forme attendue")
         annonce_avant, annonce_total = int(m.group(1)), int(m.group(2))
+        annonce_pct = int(m.group(3))
+        # LE POURCENTAGE DOIT DECOULER DE SES PROPRES DEUX NOMBRES. Trouve le
+        # 30/08/2026 : le README annoncait « 187 of 286 — 65% » alors que le
+        # depot en comptait 292, soit 64 %. Le total avait derive, le
+        # pourcentage etait reste. Ce test tolerait la derive du total sans
+        # regarder le pourcentage, donc le seul chiffre qu'un lecteur retient
+        # etait le seul que rien ne verifiait.
+        self.assertEqual(annonce_pct, round(100 * annonce_avant / annonce_total),
+                         "le README annonce %d %% pour %d commits sur %d, "
+                         "soit %.1f %%" % (annonce_pct, annonce_avant,
+                                           annonce_total,
+                                           100 * annonce_avant / annonce_total))
         vrai_total = self._compter("HEAD")
         vrai_avant = self._compter("HEAD", "--until=" + self.KICKOFF)
         if vrai_total == 0:

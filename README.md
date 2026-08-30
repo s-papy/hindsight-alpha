@@ -17,11 +17,11 @@ The organisers' FAQ permits setting up infrastructure and boilerplate before
 kickoff, and requires that it be disclosed. So, precisely, measured from the
 git history rather than remembered:
 
-**187 of this repository's 286 commits — 65% — predate the kickoff instant**
-(Friday 28 August 2026, 09:30 ET). The first is 24 August. The agent, the risk
-gates, the hindsight check, the dashboard and the guardrail script were all
-built in those four days; the 99 commits since are corrections, measurements
-and the live-week record.
+**187 of this repository's 292 commits — 64% — predate the kickoff instant**
+(Friday 28 August 2026, 09:30 ET), counted on 30 August. The first is
+24 August. The agent, the risk gates, the hindsight check, the dashboard and
+the guardrail script were all built in those four days; everything since is
+corrections, measurements and the live-week record.
 
 Nothing was traded on the competition account before kickoff — that account's
 order history contains exactly one pre-Monday order, submitted 28/08 at 19:37
