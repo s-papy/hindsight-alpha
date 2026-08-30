@@ -383,6 +383,52 @@ class TestLeMessageNeNommePasUneCauseNonMESUREE(BaseBilan):
 if __name__ == "__main__":
     unittest.main(verbosity=2)
 
+class TestUneACCUSATIONDitSurQuoiElleRepose(BaseBilan):
+    """« 🔴 N run(s) MISSING » est une accusation contre l'agent. Elle repose
+    sur `_passages_attendus`, qui compte les jours de SEMAINE, pas les jours
+    de BOURSE : un férié américain y compte comme un passage attendu, et
+    l'agent serait accusé d'avoir manqué un jour où le marché était fermé.
+
+    L'hypothèse n'est pas corrigée, délibérément : ce script tourne depuis le
+    journal SEUL, sans réseau ni identifiant — c'est ce que LIVE_WEEK.md
+    promet. Interroger le calendrier d'Alpaca lui coûterait cette propriété.
+
+    Vérifié contre le calendrier réel le 30/08 : du 31/08 au 04/09, les cinq
+    jours sont ouverts, aucun férié. Le premier est le 07/09, après la date
+    limite. Donc l'hypothèse tient pour la semaine jugée — et elle est écrite
+    plutôt que sous-entendue."""
+
+    def test_l_accusation_de_passage_manque_dit_son_hypothese(self):
+        # Une fenêtre ouverte depuis trois jours sans aucun passage : le
+        # rapport doit accuser, ET dire sur quoi l'accusation repose.
+        from datetime import datetime, timedelta, timezone
+        hier = datetime.now(timezone.utc) - timedelta(days=3)
+        d = self._dossier([], kickoff=hier.isoformat())
+        try:
+            _code, sortie = self._lancer(d)
+            self.assertIn("MISSING", sortie,
+                          "un passage manqué n'est plus signalé :\n%s"
+                          % sortie[-600:])
+            self.assertIn("market holidays are not", sortie,
+                          "l'accusation ne dit pas qu'elle compte des jours "
+                          "de semaine, pas des jours de bourse :\n%s"
+                          % sortie[-600:])
+        finally:
+            __import__("shutil").rmtree(d, ignore_errors=True)
+
+    def test_TEMOIN_sans_accusation_pas_de_mise_en_garde(self):
+        """Une réserve collée à chaque rapport, y compris quand rien n'est
+        reproché, devient du bruit qu'on apprend à sauter."""
+        d = self._dossier([self._passage("2026-08-28T19:37:00+00:00")])
+        try:
+            _code, sortie = self._lancer(d)
+            self.assertNotIn("market holidays are not", sortie,
+                             "la mise en garde s'affiche alors qu'aucun "
+                             "passage n'est reproché :\n%s" % sortie[-600:])
+        finally:
+            __import__("shutil").rmtree(d, ignore_errors=True)
+
+
 class TestUnEssaiABlancNeCompteDansAucunChiffre(BaseBilan):
     """Trouvé le 30/08/2026 en lançant `agent.py --dry-run` comme contrôle
     avant la semaine notée. Cet unique essai a DOUBLÉ tous les chiffres du

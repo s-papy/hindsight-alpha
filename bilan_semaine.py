@@ -308,6 +308,25 @@ def main() -> None:
         print("     🔴 %d run(s) MISSING — an agent that did not run proved"
               % (attendus - len(passages)))
         print("        nothing, in either direction.")
+        # L'HYPOTHESE QUI PORTE CETTE ACCUSATION, dite avec elle. Ajoutee le
+        # 30/08/2026. `_passages_attendus` compte les jours de SEMAINE, pas
+        # les jours de BOURSE : un ferie americain y compte comme un passage
+        # attendu, et l'agent serait accuse d'avoir manque un jour ou le
+        # marche etait ferme.
+        #
+        # Elle n'est pas corrigee, et c'est deliberé : ce script tourne
+        # depuis le journal SEUL, sans reseau ni identifiant -- c'est ce que
+        # LIVE_WEEK.md promet. Interroger le calendrier d'Alpaca pour lever
+        # l'hypothese lui couterait cette propriete, pour un cas qui ne se
+        # presente pas cette semaine.
+        #
+        # Verifie contre le calendrier reel le 30/08 : du 31/08 au 04/09,
+        # les CINQ jours sont ouverts 09:30-16:00, aucun ferie. Le premier
+        # est le 07/09, apres la date limite.
+        print("        (expected runs are counted on weekdays; US market "
+              "holidays are not")
+        print("        excluded — verified 30/08 that the 31 Aug–4 Sep window "
+              "has none)")
     elif attendus:
         print("     🟢 no missing run.")
 
