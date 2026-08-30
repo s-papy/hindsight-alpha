@@ -6998,9 +6998,6 @@ class TestLeTauxDeFAUSSEALERTEEstPublie(unittest.TestCase):
         Omettre là le
         seul chiffre qui joue contre le projet aurait vidé le titre.
 
-        Le deck ARRONDIT à 23 % — une slide n'a pas la place d'une décimale,
-        et le chiffre précis vit dans le README et dans le banc. Ce test
-        exige donc la NOTION, pas la décimale : le mot, et un nombre proche.
         Il utilise l'extraction du garde-fou, seule à savoir lire un .pptx."""
         import importlib.util, re
         spec = importlib.util.spec_from_file_location(
@@ -7024,6 +7021,50 @@ class TestLeTauxDeFAUSSEALERTEEstPublie(unittest.TestCase):
         self.assertTrue(any(abs(x - vrai) <= 0.5 for x in annonces),
                         "aucun pourcentage du deck n'est proche du taux "
                         "mesuré (%.1f%%) : %s" % (vrai, annonces))
+
+    def test_le_DECK_cite_les_DEUX_taux_pas_seulement_le_plus_bas(self):
+        """TROUVÉ le 30/08/2026, même défaut que celui déjà corrigé dans
+        README (`test_les_DEUX_taux_mesures_sont_cites`) : la slide
+        « HONEST RESULTS — NOT A HEADLINE NUMBER » ne citait que 23 %
+        (le plus bas des deux taux mesurés), sans le second (30.2 %,
+        mesuré par une construction différente) ni dire qu'il y en a deux.
+        Citer le plus bas des deux sans le dire, c'est exactement la
+        sélection de résultats que ce projet existe pour dénoncer — sur
+        la diapo qui porte ce titre-là.
+
+        Vérifié que la place existe avant de corriger : rendu réel via
+        `rendre_le_deck.py` sur une copie jetable, aucun débordement mesuré
+        avec les deux chiffres exacts ; une troisième version ajoutant
+        aussi le cas à 52 % débordait (116.5 % de la hauteur) — laissée de
+        côté, ce chiffre reste propre à README et au banc.
+
+        Les DEUX chiffres sont lus DANS leurs bancs respectifs, pas
+        recopiés ici : s'ils bougent, ce test l'exige aussi."""
+        import importlib.util, re
+        spec = importlib.util.spec_from_file_location(
+            "gf_deck2", str(self.RACINE / "garde_fou.py"))
+        gf = importlib.util.module_from_spec(spec)
+        sys.modules["gf_deck2"] = gf
+        try:
+            spec.loader.exec_module(gf)
+        except SystemExit:
+            pass
+        textes = gf._charger_textes_livrables()
+        deck = [t for nom, t in textes.items() if nom.endswith(".pptx")]
+        self.assertTrue(deck, "le deck n'a pas pu être lu")
+        texte = deck[0]
+        for fichier, motif in (
+                ("HINDSIGHT_HOLDOUT.md", r"\*\*livré\*\*.*?([\d.]+)%"),
+                ("HINDSIGHT_BENCHMARK.md", r"fausse alerte\s*:\s*([\d.]+)%")):
+            source = (self.RACINE / fichier).read_text(encoding="utf-8")
+            trouve = re.search(motif, source)
+            self.assertIsNotNone(
+                trouve, "le taux n'est plus lisible dans %s" % fichier)
+            self.assertIn(trouve.group(1), texte,
+                          "le deck ne cite pas le taux mesuré par %s (%s%%) "
+                          "— citer un seul des deux sur la diapo « HONEST "
+                          "RESULTS » choisit celui qui arrange"
+                          % (fichier, trouve.group(1)))
 
     def _passage_honnetete(self) -> str:
         """Le PASSAGE explicatif, pas le fichier entier.
