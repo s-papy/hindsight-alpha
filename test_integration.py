@@ -3512,6 +3512,55 @@ class TestComparabiliteDesDeuxStrategies(unittest.TestCase):
                          "les deux fonctions de score ne découpent plus "
                          "l'in-sample de la même façon")
 
+class TestLeBuyAndHoldCiteEstLeMemeQueLeBanc(unittest.TestCase):
+    """TROUVÉ le 30/08/2026 : STRATEGY_COMPARISON.md affirmait en prose
+    « GLD seul a fait +126,96 % sur la même période » — un chiffre qui
+    n'apparaît DANS AUCUN fichier .py du dépôt, donc écrit à la main plutôt
+    que recopié d'une sortie de script. `BACKTEST_RESULTS.md`, généré la
+    même soirée à 5 minutes d'écart sur les MÊMES 657 barres GLD par
+    `backtest.py::buy_and_hold_return()`, rend **127.57 %** pour la
+    identique quantité (rendement buy-and-hold de GLD sur la même
+    fenêtre). Les deux ne peuvent pas être vrais en même temps.
+
+    Même famille que le compte de commits de PROVENANCE.md corrigé le même
+    jour : un nombre qui a l'air mesuré, mais que rien ne recalculait
+    contre sa propre source.
+
+    Corrigé à 127.57 %, la valeur script-générée et traçable. Ce test lit
+    LES DEUX chiffres dans leurs fichiers respectifs plutôt que de les
+    recopier ici, pour qu'une dérive future soit détectée plutôt que
+    silencieusement approuvée."""
+
+    RACINE = Path(__file__).resolve().parent
+
+    def test_le_pourcentage_GLD_correspond_au_banc(self):
+        import re
+        backtest_md = (self.RACINE / "BACKTEST_RESULTS.md").read_text(
+            encoding="utf-8")
+        # Le buy-and-hold de GLD est dans la section « ## GLD », pas ailleurs
+        # dans le fichier (SPY et XLK ont aussi leur propre ligne).
+        debut = backtest_md.index("## GLD")
+        fin = backtest_md.index("\n## ", debut)
+        section = backtest_md[debut:fin]
+        m = re.search(r"Buy-and-hold over the same bars:\s*\*\*([\d.]+)%",
+                     section)
+        self.assertIsNotNone(
+            m, "le buy-and-hold de GLD n'est plus lisible dans "
+              "BACKTEST_RESULTS.md sous la forme attendue")
+        vrai = m.group(1)
+        # STRATEGY_COMPARISON.md est en français : virgule decimale, pas point.
+        vrai_virgule = vrai.replace(".", ",")
+
+        comparison_md = (self.RACINE / "STRATEGY_COMPARISON.md").read_text(
+            encoding="utf-8")
+        self.assertIn(
+            vrai_virgule, comparison_md,
+            "STRATEGY_COMPARISON.md ne cite pas le rendement buy-and-hold "
+            "de GLD mesuré par BACKTEST_RESULTS.md (%s%%) — un chiffre "
+            "écrit à la main pour la même quantité serait redevenu faux"
+            % vrai)
+
+
 class TestAucunSeuilMort(unittest.TestCase):
     """La thèse de ce projet, appliquée à lui-même.
 
