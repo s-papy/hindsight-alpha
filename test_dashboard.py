@@ -259,6 +259,55 @@ class TestLigneParSymbole(BaseRendu):
                          "la ligne par symbole affiche la chaîne machine")
 
 
+class TestUnVertMALGRE_UN_AGE_DIT_POURQUOI(BaseRendu):
+    """Rendu de la vraie page un dimanche : « 🟢 Exit monitor: last check
+    42h 52m ago, healthy. » — sans un mot de plus.
+
+    La branche est pourtant juste : hors session, un écart est normal, et
+    `isUsMarketHoursNow()` est bien consultée. C'est la PHRASE qui manquait.
+    Un juge lisant « il y a 42 heures, sain » a le choix entre croire que la
+    page ment et croire que le moniteur est mort ; les deux sont faux, et
+    c'est ce week-end qu'il peut regarder.
+
+    La note d'origine ne partait que si le DERNIER PASSAGE avait rapporté
+    `market_closed`. Le cas courant est l'inverse : celui de vendredi s'est
+    terminé normalement, et c'est le temps écoulé DEPUIS qui tombe hors
+    session."""
+
+    PRE_M = """
+        const T = 3600000;
+        const ilYA = (h) => new Date(Date.now() - h*T).toISOString();
+    """
+
+    def _rendre(self, heures_depuis, outcome="checked"):
+        return self.executer(self.PRE_M + """
+            renderMonitorHealth([], {last_run_at: ilYA(%s), outcome: "%s",
+                                     dry_run: false}, ilYA(0.01));
+            const e = document.getElementById('monitor-health-banner');
+            _resultats.classe = e.className;
+            _resultats.texte  = e.textContent;
+        """ % (heures_depuis, outcome))
+
+    def test_un_ecart_hors_session_est_vert_ET_explique(self):
+        r = self._rendre(42)
+        self.assertEqual(r["classe"], "health-green",
+                         "un écart hors session est traité comme une panne : "
+                         "%s" % r["texte"])
+        self.assertIn("market hours", r["texte"],
+                      "la bannière dit « healthy » après 42 h sans dire "
+                      "pourquoi : %s" % r["texte"])
+
+    def test_TEMOIN_un_ecart_COURT_ne_recoit_pas_l_explication(self):
+        """Sans lui, coller la phrase partout la rendrait insignifiante — et
+        surtout elle apparaîtrait en pleine séance, où un écart de dix
+        minutes n'a rien à voir avec les heures de marché."""
+        r = self._rendre(0.05)
+        self.assertEqual(r["classe"], "health-green")
+        self.assertNotIn("market hours", r["texte"],
+                         "l'explication du week-end s'affiche sur un écart "
+                         "de trois minutes : %s" % r["texte"])
+
+
 class TestLeCompteDeLaSemaineEstAffiche(BaseRendu):
     """Le tableau de bord listait chaque décision, jamais le TOTAL de la
     semaine notée. Or c'est le seul chiffre qu'un juge veut en dix secondes :

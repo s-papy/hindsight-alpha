@@ -1114,7 +1114,25 @@ function renderMonitorHealth(decisions, monitorStatus, generatedAt) {
       text = `🟡 Exit monitor: last check ${ageText} — later than the usual 15-minute cadence during market hours.`;
     } else {
       cls = 'health-green';
-      const note = lastOutcome === 'market_closed' ? ' (market was closed at last check)' : '';
+      // POURQUOI C'EST VERT, quand l'age seul dirait le contraire. Trouve le
+      // 30/08 en rendant la page reelle un dimanche : elle affichait
+      // « last check 42h 52m ago, healthy » sans un mot de plus. La branche
+      // ci-dessus est bien consciente des heures de marche -- un ecart hors
+      // session est normal -- mais la PHRASE ne le disait pas. Un lecteur
+      // avait donc le choix entre croire que la page ment et croire que le
+      // moniteur est mort ; les deux sont faux.
+      //
+      // La note d'origine ne partait que si le DERNIER PASSAGE avait
+      // rapporte `market_closed`. Or le cas courant est l'inverse : le
+      // dernier passage de vendredi s'est termine normalement (`checked`),
+      // et c'est le temps ECOULE DEPUIS qui tombe hors session.
+      let note = '';
+      if (lastOutcome === 'market_closed') {
+        note = ' (market was closed at last check)';
+      } else if (ageMin !== null && ageMin > STALE_MINUTES) {
+        note = ' — the gap is outside US market hours, when the monitor does '
+             + 'not run. It resumes at the next session';
+      }
       text = `🟢 Exit monitor: last check ${ageText}, healthy${note}.`;
     }
     el.className = cls;
