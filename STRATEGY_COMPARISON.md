@@ -49,6 +49,6 @@
 
 **D'où vient cet écart-type minuscule ?** De deux effets qui n'ont rien à voir avec la qualité du signal : `vol_strategy` est **à plat ~3 jours sur 4**, et son payoff repose sur `abs(rendement)` — non négatif par construction, et **~25 % moins variable** que le rendement signé. **Son avantage au Sharpe est structurel, pas une supériorité de rendement.**
 
-⚠️ **Et surtout, ne jamais classer les rendements cumulés** : `momentum` est en permanence dans le marché, donc son « +65,83 % » sur GLD est essentiellement du buy-and-hold filtré — GLD seul a fait **+126,96 %** sur la même période.
+⚠️ **Et surtout, ne jamais classer les rendements cumulés** : `momentum` est en permanence dans le marché, donc son « +65,83 % » sur GLD est essentiellement du buy-and-hold filtré — GLD seul a fait **+127,57 %** sur la même période.
 
 **Décision : aucune.** *Basculer la stratégie relève d'une décision humaine explicite. Ce document donne désormais les trois chiffres qui tirent dans des sens différents, plutôt qu'un seul qui tranche à sa place.*

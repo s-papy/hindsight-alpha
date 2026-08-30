@@ -107,8 +107,21 @@ class TestUnPassageManquantEstDIT(BaseBilan):
     def test_zero_passage_dans_une_fenetre_ouverte_est_signale(self):
         """Un agent qui n'a pas tourne n'a rien prouve. Le bilan doit le
         dire, sinon une liste de refus vide se lit comme « rien a
-        signaler »."""
-        hier = (datetime.now(timezone.utc) - timedelta(days=2))
+        signaler ».
+
+        TROUVÉ le 30/08/2026, un dimanche : `days=2` tombait sur vendredi
+        soir, et `_passages_attendus` ne compte QUE les jours de semaine
+        (`weekday() < 5`) -- entre vendredi soir et dimanche soir, aucun
+        jour de semaine ne s'intercale, donc « 0 actual for 0 expected »,
+        et l'assertion « MISSING » tombait. Même famille que le test
+        d'heure corrigé plus tôt dans le sprint (3932e13) : un calcul
+        relatif à `datetime.now()` qui n'avait jamais été rejoué sur un
+        jour de la semaine différent. `days=3` est la marge déjà vérifiée
+        par `TestUneACCUSATIONDitSurQuoiElleRepose` juste au-dessus dans ce
+        même fichier -- n'importe quel « il y a 3 jours » traverse au moins
+        un jour de semaine complet, quel que soit le jour où la suite
+        tourne."""
+        hier = (datetime.now(timezone.utc) - timedelta(days=3))
         d = self._dossier([], kickoff=hier.isoformat())
         try:
             code, sortie = self._lancer(d)
