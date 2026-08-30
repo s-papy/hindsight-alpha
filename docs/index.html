@@ -393,7 +393,7 @@
   </section>
 
   <section>
-    <h2>The scored week</h2>
+    <h2>Since the kickoff</h2>
     <div id="week-container"></div>
   </section>
 
@@ -768,8 +768,17 @@ function renderWeek(week) {
     // LE DENOMINATEUR EST NOMME, comme dans le rapport : les refus se
     // comptent sur TOUS les verdicts, retenus compris. Sans cette phrase un
     // lecteur somme les categories en croyant arriver a 100 %.
-    + '<p class="muted">Out of ' + week.verdicts + ' verdict(s) in the '
-    + 'scoring window. A refusal is a result, not a failure.'
+    // LE TITRE DISAIT « The scored week », ce qui promettait plus de
+    // precision que la donnee n'en a : la fenetre vient de
+    // kickoff_freeze.json, donc du KICKOFF (vendredi 28/08), alors que la
+    // fenetre officielle de P&L d'Alpaca ouvre le lundi 31/08 a 09:30 ET.
+    // Les deux ne se recouvrent pas, et un juge qui ne note que la semaine
+    // officielle aurait lu ces chiffres comme etant les siens. Corrige le
+    // 30/08 : le bloc dit ce qu'il compte, et nomme l'autre fenetre.
+    + '<p class="muted">Out of ' + week.verdicts + ' verdict(s) since the '
+    + '28 Aug kickoff — the window this agent has been running in. Alpaca '
+    + "scores P&amp;L over a narrower one, 31 Aug 09:30 ET to 4 Sep 09:30 ET. "
+    + 'A refusal is a result, not a failure.'
     // DIT MEME A ZERO. Avec un journal entierement illisible ce bloc
     // annoncait « 0 verdict » -- « rien decide » au lieu de « rien lu ».
     + ' Unreadable log lines skipped: ' + (week.unreadable_log_lines || 0)

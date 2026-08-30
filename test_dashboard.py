@@ -287,6 +287,16 @@ class TestLeCompteDeLaSemaineEstAffiche(BaseRendu):
         self.assertIn("Out of 12 verdict(s)", r["texte"],
                       "la base des refus n'est pas nommée dans une phrase : "
                       "%s" % r["texte"])
+        # ET LES DEUX FENÊTRES SONT NOMMÉES. Le bloc s'intitulait « The
+        # scored week » alors qu'il compte depuis le KICKOFF (28/08), pas
+        # depuis l'ouverture de la fenêtre de P&L d'Alpaca (31/08 09:30 ET).
+        # Un juge qui ne note que la fenêtre officielle aurait lu ces
+        # chiffres comme étant les siens.
+        self.assertIn("28 Aug kickoff", r["texte"],
+                      "le bloc ne dit pas depuis quand il compte")
+        self.assertIn("31 Aug 09:30 ET", r["texte"],
+                      "la fenêtre officielle de P&L n'est pas nommée, donc "
+                      "rien ne distingue les deux : %s" % r["texte"])
 
     def test_une_fenetre_ILLISIBLE_ne_s_affiche_pas_en_zeros(self):
         """TÉMOIN, et c'est lui qui compte. Sans `kickoff_freeze.json` on

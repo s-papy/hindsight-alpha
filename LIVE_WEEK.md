@@ -16,9 +16,15 @@ reordered later.
 ## What will be reported, in this order
 
 **1. The refusal mechanism.** How many times the hindsight guard refused a
-symbol, and which. The README already says it: *"The result worth judging is
-not the P&L — it is that the refusal mechanism catches a real disagreement."*
-This stays first whatever the P&L says.
+symbol, and which. The README says it in two places: *"The refusal on the
+left is the result worth judging — not the P&L on the right"*, and *"The
+result worth judging is not the P&L."* This stays first whatever the P&L says.
+
+*Citation repaired 30/08/2026. This document quoted a sentence the README no
+longer contains: shortening the README from 5 948 to 2 525 words cut its second
+half, and the quotation kept asserting it. Nothing about what will be reported
+changed — a quotation that survives its source is still a false statement, and
+a test now checks every sentence this file attributes to the README.*
 
 **2. Execution regularity.** Scheduled runs versus actual runs. An agent that
 did not run proved nothing, in either direction. A short list of refusals
@@ -61,6 +67,18 @@ them all."*
 Unreadable log lines are skipped **and counted in the output** — the count is
 printed on every run, including when it is zero. A report that silently drops
 part of its data is not a report.
+
+**Dry runs are excluded from every figure, and the number excluded is printed
+too.** Written here on 30/08/2026, the day the exclusion was added, because
+this document exists to fix the counting rules *before* the results — and
+changing what counts without saying so is precisely what it is meant to
+prevent. The reason: a single `agent.py --dry-run`, run as a pre-flight check
+before the week opened, DOUBLED every published figure — "2 runs for 1
+expected", 8 verdicts, XLK refused twice — while having submitted no order and
+opened no position. The dashboard's health banner already painted a dry run
+amber for that exact reason; the count did not. The line stays in
+`decision_log.jsonl`, marked `dry_run`: it is a real run, it is not erased,
+it simply does not count as one.
 
 *Added 29/08/2026, and it makes the rule stricter rather than looser: if
 `decision_log.jsonl` cannot be opened **at all**, the script stops too. It used
