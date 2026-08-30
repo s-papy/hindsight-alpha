@@ -259,6 +259,65 @@ class TestLigneParSymbole(BaseRendu):
                          "la ligne par symbole affiche la chaîne machine")
 
 
+class TestLeCompteDeLaSemaineEstAffiche(BaseRendu):
+    """Le tableau de bord listait chaque décision, jamais le TOTAL de la
+    semaine notée. Or c'est le seul chiffre qu'un juge veut en dix secondes :
+    combien de fois le garde anti-rétrospection a refusé.
+
+    Les nombres viennent de `bilan_semaine.compter_la_semaine`, la même
+    fonction que le rapport hebdomadaire — pas un second comptage."""
+
+    def test_les_refus_de_la_semaine_sont_affiches_avec_leur_base(self):
+        r = self.executer("""
+            renderWeek({unreadable_log_lines: 0, runs: 3, runs_expected: 3,
+                        verdicts: 12, tradeable: 4,
+                        refused: {"hindsight guard": 5, "volatility regime": 3},
+                        guard_refused_by_symbol: {XLK: 4, GLD: 1}});
+            _resultats.texte = document.getElementById('week-container').innerHTML;
+        """)
+        self.assertIn("8", r["texte"],
+                      "le total des refus n'est pas affiché : %s" % r["texte"])
+        self.assertIn("XLK", r["texte"],
+                      "les symboles refusés par le garde ne sont pas nommés")
+        # LE DENOMINATEUR, ET DANS SA PHRASE. Première version : `assertIn
+        # ("12")` — qui passait toujours, puisque 12 s'affiche aussi dans la
+        # carte VERDICTS. La mutation qui supprime la phrase survivait. Ce
+        # qu'il faut vérifier, c'est que la base est NOMMÉE : sans elle un
+        # lecteur somme les catégories en croyant arriver à 100 %.
+        self.assertIn("Out of 12 verdict(s)", r["texte"],
+                      "la base des refus n'est pas nommée dans une phrase : "
+                      "%s" % r["texte"])
+
+    def test_une_fenetre_ILLISIBLE_ne_s_affiche_pas_en_zeros(self):
+        """TÉMOIN, et c'est lui qui compte. Sans `kickoff_freeze.json` on
+        ignore quelles entrées comptent. Afficher « 0 refus » se lirait
+        « le garde n'a rien refusé » au lieu de « je n'ai pas su compter » —
+        c'est la distinction que tout ce dossier défend."""
+        r = self.executer("""
+            renderWeek(null);
+            _resultats.texte = document.getElementById('week-container').innerHTML;
+        """)
+        self.assertNotIn("0", r["texte"],
+                         "une fenêtre illisible s'affiche en zéros : %s"
+                         % r["texte"])
+        self.assertIn("not measured", r["texte"],
+                      "la page ne dit pas que rien n'a été compté : %s"
+                      % r["texte"])
+
+    def test_les_lignes_ILLISIBLES_du_journal_sont_dites_meme_a_zero(self):
+        """Avec un journal entièrement illisible, le bloc annonçait
+        « 0 verdict » — « rien décidé » au lieu de « rien lu »."""
+        r = self.executer("""
+            renderWeek({unreadable_log_lines: 7, runs: 0, runs_expected: 3,
+                        verdicts: 0, tradeable: 0, refused: {},
+                        guard_refused_by_symbol: {}});
+            _resultats.texte = document.getElementById('week-container').innerHTML;
+        """)
+        self.assertIn("7", r["texte"],
+                      "les lignes illisibles ne sont pas comptées à l'écran : "
+                      "%s" % r["texte"])
+
+
 class TestBanniereDeSante(BaseRendu):
     """Corrigée le 26/08 : la bannière ne distinguait pas « le moniteur tourne
     mais la page n'a pas été republiée » de « le moniteur est mort », et

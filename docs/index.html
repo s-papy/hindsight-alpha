@@ -393,6 +393,11 @@
   </section>
 
   <section>
+    <h2>The scored week</h2>
+    <div id="week-container"></div>
+  </section>
+
+  <section>
     <h2>Open Positions</h2>
     <div id="positions-container"></div>
   </section>
@@ -452,6 +457,7 @@ async function loadDashboard() {
       // page l'affirmait sans avoir rien lu -- le defaut meme que ce depot
       // traque partout, dans le seul endroit qu'un juge regarde.
       ["account-cards", () => renderAccount(data.account)],
+      ["week-container", () => renderWeek(data.week || null)],
       ["positions-container", () => renderPositions(data.positions || [])],
       ["agent-health-banner", () => renderAgentHealth(data.agent_status || null)],
       ["monitor-health-banner", () => renderMonitorHealth(
@@ -717,6 +723,59 @@ function _symboleAffiche(symbole, maintenantMs) {
                     + esc(suffixe) + '</span>' : '')
        + `<div class="symbole-brut">${brut}</div>`;
 }
+
+function renderWeek(week) {
+  // AJOUTE le 30/08/2026. La page listait chaque decision, jamais le TOTAL
+  // de la semaine notee -- un lecteur devait compter lui-meme combien de
+  // fois le garde anti-retrospection avait refuse. C'est pourtant le seul
+  // fait que ce projet demande qu'on regarde.
+  //
+  // Les nombres viennent de bilan_semaine.compter_la_semaine, via
+  // publish_dashboard : ce sont EXACTEMENT ceux du rapport hebdomadaire,
+  // pas un second comptage.
+  const el = document.getElementById('week-container');
+  if (!el) return;
+  if (!week) {
+    // NI ZERO NI SILENCE. Sans kickoff_freeze.json on ignore quelles
+    // entrees comptent ; afficher « 0 refus » se lirait « le garde n'a rien
+    // refuse » au lieu de « je n'ai pas su compter ».
+    el.innerHTML = '<p class="muted">The scoring window could not be read, '
+                 + 'so nothing here is counted. This is "not measured", '
+                 + 'not "nothing happened".</p>';
+    return;
+  }
+  const refus = week.refused || {};
+  const total = Object.values(refus).reduce((a, b) => a + b, 0);
+  const parSymbole = week.guard_refused_by_symbol || {};
+  const lignes = Object.keys(refus).sort((a, b) => refus[b] - refus[a])
+    .map(k => '<li>' + esc(k) + ': <b>' + refus[k] + '</b></li>').join('');
+  const syms = Object.keys(parSymbole).sort()
+    .map(k => esc(k) + ' (' + parSymbole[k] + ')').join(', ');
+  el.innerHTML =
+      '<div class="cards">'
+    + '<div class="card"><div class="label">RUNS</div><div class="value">'
+    + week.runs + ' / ' + week.runs_expected + '</div></div>'
+    + '<div class="card"><div class="label">VERDICTS</div><div class="value">'
+    + week.verdicts + '</div></div>'
+    + '<div class="card"><div class="label">REFUSED</div><div class="value">'
+    + total + '</div></div>'
+    + '<div class="card"><div class="label">TRADEABLE</div><div class="value">'
+    + week.tradeable + '</div></div>'
+    + '</div>'
+    + (total ? '<ul class="week-reasons">' + lignes + '</ul>' : '')
+    + (syms ? '<p class="muted">Refused by the hindsight guard: ' + syms
+              + '</p>' : '')
+    // LE DENOMINATEUR EST NOMME, comme dans le rapport : les refus se
+    // comptent sur TOUS les verdicts, retenus compris. Sans cette phrase un
+    // lecteur somme les categories en croyant arriver a 100 %.
+    + '<p class="muted">Out of ' + week.verdicts + ' verdict(s) in the '
+    + 'scoring window. A refusal is a result, not a failure.'
+    // DIT MEME A ZERO. Avec un journal entierement illisible ce bloc
+    // annoncait « 0 verdict » -- « rien decide » au lieu de « rien lu ».
+    + ' Unreadable log lines skipped: ' + (week.unreadable_log_lines || 0)
+    + '.</p>';
+}
+
 
 function renderPositions(positions) {
   const el = document.getElementById('positions-container');

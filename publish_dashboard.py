@@ -201,6 +201,40 @@ def _kickoff_publie() -> "str | None":
     return valeur if isinstance(valeur, str) and valeur else None
 
 
+def _semaine_publiable() -> "dict | None":
+    """Le compte de la fenetre notee, ou None si la fenetre est inconnue.
+
+    None plutot que des zeros : sans `kickoff_freeze.json` on ne sait pas
+    quelles entrees comptent, et publier « 0 refus » se lirait comme « le
+    garde n'a rien refuse » au lieu de « je n'ai pas su compter ». La page
+    affiche alors la phrase correspondante -- meme regle que partout
+    ailleurs ici : ce qu'un controle fait quand il ne peut pas conclure
+    compte plus que ce qu'il dit quand tout va bien."""
+    import bilan_semaine
+    fenetre = bilan_semaine._fenetre()
+    if fenetre is None:
+        return None
+    entrees, illisibles = bilan_semaine._lire_journal()
+    if entrees is None:
+        return None
+    c = bilan_semaine.compter_la_semaine(entrees, fenetre)
+    return {
+        # TOUJOURS publie, meme a zero -- comme le rapport hebdomadaire
+        # l'imprime toujours. Trouve en cassant le journal a la main : avec
+        # toutes les lignes illisibles, ce bloc annoncait « 0 verdict », ce
+        # qui se lit « l'agent n'a rien decide » alors que la vraie reponse
+        # est « je n'ai pas su lire ». Un compte qui omet en silence ce
+        # qu'il n'a pas pu lire est le defaut que ce depot traque.
+        "unreadable_log_lines": illisibles,
+        "runs": len(c["passages"]),
+        "runs_expected": c["attendus"],
+        "verdicts": c["retenus"] + sum(c["refus"].values()),
+        "tradeable": c["retenus"],
+        "refused": dict(c["refus"]),
+        "guard_refused_by_symbol": dict(c["refus_par_symbole"]),
+    }
+
+
 def build_snapshot() -> dict:
     config.require_credentials()
     account = alpaca_cli.get_account()
@@ -292,6 +326,13 @@ def build_snapshot() -> dict:
             # celle appliquee aux positions le meme matin : ce qui est
             # publie doit etre lu.
         },
+        # LE COMPTE DE LA SEMAINE, pas seulement les decisions une par une.
+        # AJOUTE le 30/08/2026 : la page listait chaque passage, donc un
+        # lecteur devait compter lui-meme combien de fois le garde a refuse.
+        # C'est pourtant le fait que ce projet existe pour montrer. Calcule
+        # par `bilan_semaine.compter_la_semaine`, PAS reimplemente ici :
+        # deux comptes du meme fait divergent au premier changement.
+        "week": _semaine_publiable(),
         "positions": [_position_publiable(p) for p in positions],
         "recent_decisions": recent,
         "monitor_status": monitor_status,

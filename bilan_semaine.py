@@ -159,6 +159,41 @@ def _categorie(motif: str) -> str:
     return "other"
 
 
+def compter_la_semaine(entrees, fenetre) -> dict:
+    """Ce que la fenetre notee contient : passages, verdicts, refus.
+
+    SORTI EN FONCTION le 30/08/2026 pour que le tableau de bord public
+    publie EXACTEMENT ce que ce rapport compte. Le tableau de bord montrait
+    les decisions une par une, jamais le total de la semaine -- or c'est le
+    total qu'un lecteur veut en dix secondes. L'ecrire une seconde fois dans
+    publish_dashboard.py aurait donne deux comptes du meme fait, qui
+    divergent au premier changement : ce depot l'a deja paye avec deux
+    copies de is_option_position.
+
+    Rend des nombres, jamais de prose : l'appelant decide ce qu'il en dit."""
+    debut, fin = fenetre
+    passages = []
+    for e in entrees or []:
+        if e.get("run_type") not in (None, "", "agent"):
+            continue
+        t = _en_utc(e.get("timestamp"))
+        if t is not None and debut <= t <= fin:
+            passages.append(e)
+    refus, refus_par_symbole, retenus = Counter(), Counter(), 0
+    for e in passages:
+        for v in (e.get("verdicts") or []):
+            if v.get("tradeable"):
+                retenus += 1
+                continue
+            cat = _categorie(v.get("reason") or "")
+            refus[cat] += 1
+            if cat == "hindsight guard":
+                refus_par_symbole[v.get("symbol")] += 1
+    return {"passages": passages, "retenus": retenus, "refus": refus,
+            "refus_par_symbole": refus_par_symbole,
+            "attendus": _passages_attendus(debut, fin)}
+
+
 def main() -> None:
     # `description=__doc__` DEVERSAIT LA DOCSTRING FRANCAISE dans --help,
     # reflowee par argparse -- donc la liste numerotee de l'ordre, qui est
@@ -216,29 +251,12 @@ def main() -> None:
     # ne pouvait pas distinguer « aucune » de « pas verifie ».
     print("  unreadable log lines skipped: %d" % illisibles)
 
-    passages = []
-    for e in entrees:
-        if e.get("run_type") not in (None, "", "agent"):
-            continue
-        t = _en_utc(e.get("timestamp"))
-        if t is None:
-            continue
-        if debut <= t <= fin:
-            passages.append(e)
+    compte = compter_la_semaine(entrees, fenetre)
+    passages = compte["passages"]
+    refus, refus_par_symbole = compte["refus"], compte["refus_par_symbole"]
+    retenus = compte["retenus"]
 
     # ── 1. LE MECANISME DE REFUS ─────────────────────────────────────────
-    refus = Counter()
-    refus_par_symbole = Counter()
-    retenus = 0
-    for e in passages:
-        for v in (e.get("verdicts") or []):
-            if v.get("tradeable"):
-                retenus += 1
-                continue
-            cat = _categorie(v.get("reason") or "")
-            refus[cat] += 1
-            if cat == "hindsight guard":
-                refus_par_symbole[v.get("symbol")] += 1
     print()
     print("  1. THE REFUSAL MECHANISM")
     total_verdicts = retenus + sum(refus.values())
@@ -260,7 +278,7 @@ def main() -> None:
                 print("       %-8s %d" % (sym, n))
 
     # ── 2. LA REGULARITE D'EXECUTION ─────────────────────────────────────
-    attendus = _passages_attendus(debut, fin)
+    attendus = compte["attendus"]
     print()
     print("  2. EXECUTION REGULARITY")
     print("     %d actual run(s) for %d expected" % (len(passages), attendus))
