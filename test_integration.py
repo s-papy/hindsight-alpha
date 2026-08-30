@@ -4466,6 +4466,61 @@ class TestLeTravailAnterieurAuKickoffEstDivulgue(unittest.TestCase):
                              "existe (%d > %d)" % (annonce_total, vrai_total))
 
 
+class TestLeCompteDeCommitsNonSignesEstReel(unittest.TestCase):
+    """PROVENANCE.md annonçait « 177 premiers commits ne sont pas signés ».
+
+    Trouvé le 30/08/2026 avec la même question que pour le décompte de
+    commits avant kickoff (README) et le décompte de tests (garde_fou.py) :
+    « cette promesse publique, qu'est-ce qui la tient ? » Réponse : rien —
+    aucun `controle_*` de garde_fou.py ni aucun test ne recomptait ce
+    chiffre contre le premier tag signé réel.
+
+    Mesuré : le premier tag signé (`travail-2026-08-28`) a 203 ancêtres,
+    pas 177. Le chiffre avait été écrit à la main tôt et jamais recompté.
+
+    Contrairement au total de commits (qui grandit à chaque commit et pour
+    lequel README tolère une dérive du total), CELUI-CI est FIGÉ : ce sont
+    les ancêtres d'un tag déjà créé et déjà signé, qui ne bougera plus
+    jamais. Le test exige donc l'ÉGALITÉ, pas une borne — une dérive future
+    signifierait que quelqu'un a réécrit l'historique, pas que le compteur
+    a simplement continué de tourner."""
+
+    RACINE = Path(__file__).parent
+
+    def _compter(self, *args):
+        r = subprocess.run(["git", "rev-list", "--count"] + list(args),
+                           cwd=str(self.RACINE), capture_output=True, text=True)
+        return int(r.stdout.strip() or 0)
+
+    def _premier_tag(self):
+        r = subprocess.run(
+            ["git", "for-each-ref", "--sort=creatordate",
+             "--format=%(refname:short)", "refs/tags"],
+            cwd=str(self.RACINE), capture_output=True, text=True)
+        tags = [t for t in r.stdout.splitlines() if t.strip()]
+        return tags[0] if tags else None
+
+    def test_le_chiffre_annonce_correspond_au_premier_tag_signe(self):
+        import re
+        tag = self._premier_tag()
+        if not tag:
+            self.skipTest("aucun tag dans ce clone")
+        vrai = self._compter(tag + "^")
+        if vrai == 0:
+            self.skipTest("historique insuffisant pour compter (clone "
+                          "superficiel ?)")
+        texte = (self.RACINE / "PROVENANCE.md").read_text(encoding="utf-8")
+        m = re.search(r"Les (\d+) premiers commits ne sont pas sign", texte)
+        self.assertIsNotNone(m, "PROVENANCE.md n'annonce plus ce décompte "
+                                "sous la forme attendue")
+        annonce = int(m.group(1))
+        self.assertEqual(annonce, vrai,
+                         "PROVENANCE.md annonce %d commits non signés avant "
+                         "le premier tag (%s), le dépôt en compte %d "
+                         "ancêtres — ce chiffre est figé (tag déjà créé), "
+                         "il ne devrait jamais dériver" % (annonce, tag, vrai))
+
+
 class TestLeHookNAnnoncePasUneDureeEcriteALaMain(unittest.TestCase):
     """Le hook annonçait « lancement de la suite (~70 s) ». Ce nombre avait
     été mesuré une fois, sur une suite plus petite, et jamais relu.
@@ -4638,6 +4693,74 @@ class TestHookPreCommitNeSeTaitPas(unittest.TestCase):
         self.assertIn("PAS PU", sortie)
         self.assertNotIn("verdict 🔴 ci-dessus", sortie,
                          "un plantage est annoncé comme un verdict rouge")
+
+
+class TestLeHookAssainitLenvironnementGitAvantDeLancerQuoiQueCeSoit(
+        unittest.TestCase):
+    """TROUVÉ LE 30/08/2026 EN COMMITTANT POUR DE VRAI, pas en test.
+
+    Git fixe `GIT_DIR` (et parfois `GIT_INDEX_FILE`) dans l'ENVIRONNEMENT de
+    tout hook qu'il invoque — documenté (githooks(5)), systématiquement
+    oublié. `python3 -m unittest discover`, lancé par ce hook, hérite cet
+    environnement — et donc tout `subprocess.run(["git", "-C", tempdir,
+    ...])` dans les tests l'hérite aussi. `-C tempdir` ne change QUE le cwd
+    de git : `GIT_DIR` gagne pour la résolution des objets/index, et le
+    work-tree se résout au cwd courant en l'absence de `GIT_WORK_TREE`
+    explicite.
+
+    Résultat mesuré, en committant les corrections de PROVENANCE.md :
+    `git -C tempdir add -A && git -C tempdir commit` a comparé le VRAI
+    index (via `GIT_DIR` = ce dépôt-ci) au contenu du tempdir presque vide,
+    et a committé DIRECTEMENT SUR LA VRAIE BRANCHE — 4 commits parasites
+    ("propre" / "fautif" / "retire" / "base"), `garde_fou.py` et
+    `README.md` rayés du HEAD. Reproduit isolément dans un faux dépôt avant
+    de corriger : `GIT_DIR` hérité + `-C autredossier` déplace bien un
+    commit sur le mauvais dépôt ; retirer ces variables de l'environnement
+    l'empêche, vérifié dans les deux sens.
+
+    Rien n'a été perdu (les fichiers sur disque n'ont jamais bougé, seul
+    HEAD avait dérivé — `git reset --mixed` a tout restauré), mais
+    RETENTER un commit sans ce correctif aurait reproduit l'incident à
+    l'identique, la veille de l'ouverture de la notation.
+
+    Ce test vérifie le correctif directement, pas en le relisant : le hook
+    tourne pour de vrai, avec `GIT_DIR` pollué comme git le ferait, et on
+    observe ce qu'un faux `garde_fou.py` voit dans `os.environ` — c'est le
+    même canal qu'emprunterait `python3 -m unittest discover` juste après."""
+
+    HOOK = Path(__file__).parent / "githooks" / "pre-commit"
+
+    @unittest.skipUnless(shutil.which("git"), "git absent")
+    def test_GIT_DIR_herite_n_atteint_pas_les_sous_processus_du_hook(self):
+        dossier = tempfile.mkdtemp(prefix="hindsight-hook-env-")
+        autre_depot = tempfile.mkdtemp(prefix="hindsight-hook-autre-depot-")
+        try:
+            subprocess.run([*GIT_NEUTRE, "init", "-q", "."], cwd=dossier,
+                           check=True)
+            Path(dossier, "garde_fou.py").write_text(
+                "import os, sys\n"
+                "print('GIT_DIR_VU=' + os.environ.get('GIT_DIR', 'ABSENT'))\n"
+                "sys.exit(0)\n",
+                encoding="utf-8")
+            subprocess.run([*GIT_NEUTRE, "init", "-q", "."], cwd=autre_depot,
+                           check=True)
+            env = dict(os.environ)
+            env.pop("GIT_WORK_TREE", None)
+            env["GIT_DIR"] = str(Path(autre_depot) / ".git")
+            r = subprocess.run(["sh", str(self.HOOK)], cwd=dossier, env=env,
+                               capture_output=True, text=True, timeout=60)
+            sortie = r.stdout + r.stderr
+            self.assertIn(
+                "GIT_DIR_VU=ABSENT", sortie,
+                "le hook laisse GIT_DIR hérité atteindre garde_fou.py (et "
+                "donc la suite de tests qu'il lance ensuite) : tout "
+                "sous-processus git isolé dans un tempdir peut alors "
+                "committer sur le VRAI dépôt désigné par ce GIT_DIR "
+                "hérité — c'est exactement l'incident du 30/08.\n%s"
+                % sortie)
+        finally:
+            shutil.rmtree(dossier, ignore_errors=True)
+            shutil.rmtree(autre_depot, ignore_errors=True)
 
 
 class TestLeJournalNeRendQueDesEnregistrements(unittest.TestCase):
@@ -5357,8 +5480,19 @@ class TestChaqueDependanceTierceEstDECLAREE(unittest.TestCase):
         # question « ce module vit-il dans ce depot ? » se pose sur TOUT le
         # depot. Tout autre sous-dossier de code ajoute demain est couvert
         # sans qu'on y pense.
+        # RELATIF a RACINE, pas ABSOLU : trouve le 30/08/2026 en tournant
+        # depuis une session Claude Code, qui travaille par construction
+        # dans un git worktree (.claude/worktrees/<nom>/). RACINE lui-meme
+        # vit alors sous un ancetre nomme "worktrees", donc CHAQUE fichier
+        # du depot avait "worktrees" dans ses `f.parts` absolus -- `locaux`
+        # se videait entierement, et chaque import de premier niveau
+        # (alpaca_cli, config, risk_gates...) etait alors classe module
+        # TIERS non declare. L'exclusion visait les nested checkouts SOUS
+        # RACINE (`.claude/worktrees/autre-branche/`), pas les ancetres
+        # de RACINE lui-meme -- d'ou le passage a `relative_to`.
         locaux = {f.stem for f in self.RACINE.rglob("*.py")
-                  if ".git" not in f.parts and "worktrees" not in f.parts}
+                  if ".git" not in f.relative_to(self.RACINE).parts
+                  and "worktrees" not in f.relative_to(self.RACINE).parts}
         chemins = sysconfig.get_paths()
         vus = {}
         for f in sorted(self.RACINE.glob("*.py")):
@@ -5409,6 +5543,37 @@ class TestChaqueDependanceTierceEstDECLAREE(unittest.TestCase):
             "dotenv", self._modules_tiers(),
             "le détecteur ne voit plus dotenv : il ne classe plus rien comme "
             "tiers, donc il ne peut plus rien attraper")
+
+    def test_le_detecteur_reste_local_meme_sous_un_ancetre_worktrees(self):
+        """Reproduit le défaut du 30/08 : `_modules_tiers()` tournait ici
+        même — `python3 -m unittest discover` depuis ce clone — et classait
+        `alpaca_cli`, `config`, `risk_gates`... comme modules TIERS non
+        déclarés dans requirements.txt. Cause : ce clone vit sous
+        `.claude/worktrees/hindsight-alpha-week-0830-15f597/`, et le filtre
+        comparait `"worktrees" not in f.parts` sur le chemin ABSOLU — un
+        ancêtre de RACINE, pas seulement ses sous-dossiers, en faisait
+        partie.
+
+        Reproduit ici avec une fausse RACINE placée sous un ancêtre nommé
+        `worktrees`, sans dépendre du chemin réel de ce clone."""
+        import shutil, tempfile
+        base = Path(tempfile.mkdtemp(prefix="test-worktrees-"))
+        faux_racine = base / "worktrees" / "un-clone"
+        faux_racine.mkdir(parents=True)
+        (faux_racine / "module_local.py").write_text("", encoding="utf-8")
+        (faux_racine / "module_appelant.py").write_text(
+            "import module_local\n", encoding="utf-8")
+        try:
+            instance = self.__class__()
+            instance.RACINE = faux_racine
+            tiers = instance._modules_tiers()
+            self.assertNotIn(
+                "module_local", tiers,
+                "un module PUREMENT LOCAL (à la racine du faux dépôt) est "
+                "classé tiers dès que RACINE vit sous un ancêtre nommé "
+                "'worktrees' — locaux se vide silencieusement : %s" % tiers)
+        finally:
+            shutil.rmtree(base, ignore_errors=True)
 
     def test_un_paquet_installe_SOUS_le_prefixe_stdlib_reste_tiers(self):
         """LE CAS QUI A MIS LA CI AU ROUGE, teste sur les deux dispositions
