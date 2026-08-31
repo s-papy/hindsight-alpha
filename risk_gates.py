@@ -1513,27 +1513,40 @@ def check_gates(
             "figure, so nothing is sized until it reads cleanly." % (brut,))
 
     account_id = account.get("id")
-    state = _load_state()
+    # TROUVE le 31/08/2026, jour du kickoff : ce read-modify-write (charger,
+    # eventuellement re-baseliner, eventuellement ecrire) tournait SANS
+    # _state_lock() -- le seul appelant de _record_starting_equity() a ne
+    # pas etre garde, alors que _state_lock() existe precisement pour cette
+    # classe de defaut (voir son docstring : deux ecritures concurrentes de
+    # state.json peuvent effacer un verrou de perte ou un compteur, sans
+    # aucune erreur). Reproduit : deux threads appelant _load_state() puis
+    # _record_starting_equity() en meme temps sur un state.json neuf --
+    # 20/20 essais en FileNotFoundError, les deux ecritures se marchant
+    # dessus sur le meme fichier .tmp. C'est exactement le scenario du jour
+    # meme : premier run reel de la semaine, starting_equity absent, agent.py
+    # relance a la main pendant qu'un passage planifie tourne encore.
+    with _state_lock():
+        state = _load_state()
 
-    # Checked BEFORE _record_starting_equity(): a corrupted state.json (see
-    # _load_state's docstring) would otherwise be treated identically to a
-    # brand-new account and silently re-baselined -- clearing any weekly
-    # loss lock or consecutive-loss count that was in effect before the
-    # corruption happened. Refusing here, without ever calling
-    # _record_starting_equity, means state.json is left untouched on disk
-    # (still corrupted) until a human deliberately intervenes, rather than
-    # this function silently "fixing" it by overwriting it with a fresh,
-    # unlocked state.
-    if state.get("_corrupted"):
-        return RiskDecision(
-            False,
-            f"{STATE_FILE} is corrupted and could not be parsed -- refusing all new "
-            "entries until a human looks (it may be hiding an active weekly loss lock "
-            "or consecutive-loss breaker from before a crash). Delete state.json by hand "
-            "once you've confirmed it's safe to re-baseline. Exits are unaffected.",
-        )
+        # Checked BEFORE _record_starting_equity(): a corrupted state.json (see
+        # _load_state's docstring) would otherwise be treated identically to a
+        # brand-new account and silently re-baselined -- clearing any weekly
+        # loss lock or consecutive-loss count that was in effect before the
+        # corruption happened. Refusing here, without ever calling
+        # _record_starting_equity, means state.json is left untouched on disk
+        # (still corrupted) until a human deliberately intervenes, rather than
+        # this function silently "fixing" it by overwriting it with a fresh,
+        # unlocked state.
+        if state.get("_corrupted"):
+            return RiskDecision(
+                False,
+                f"{STATE_FILE} is corrupted and could not be parsed -- refusing all new "
+                "entries until a human looks (it may be hiding an active weekly loss lock "
+                "or consecutive-loss breaker from before a crash). Delete state.json by hand "
+                "once you've confirmed it's safe to re-baseline. Exits are unaffected.",
+            )
 
-    state = _record_starting_equity(equity, state, account_id)
+        state = _record_starting_equity(equity, state, account_id)
 
     # already_traded_today() reads state["traded_today"], which
     # _record_starting_equity() above has just reset if the account

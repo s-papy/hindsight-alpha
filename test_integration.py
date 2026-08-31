@@ -2825,6 +2825,85 @@ class TestCaviardageDuRepli(unittest.TestCase):
                       "le contenu utile a disparu du repli")
         self.assertIn("outcome", texte)
 
+class TestLaTroncatureNeCoupePasUnSecretEnDeux(unittest.TestCase):
+    """TROUVÉ le 31/08/2026, par une revue de sécurité dédiée. `caviarder()`
+    (juste au-dessus) redige un secret par correspondance EXACTE et
+    COMPLÈTE — documenté comme la DERNIÈRE barrière avant un fichier public.
+    Mais `alpaca_cli.run()`, quand la sortie du CLI n'est pas du JSON,
+    construit son message d'erreur avec `stdout[:500]` — une troncature qui
+    peut couper un secret en deux AVANT que `caviarder()` ne le voie. Le
+    fragment restant ne correspond plus à la valeur complète et traverse le
+    garde : les premiers caractères du secret finiraient dans
+    `decision_log.jsonl`, un fichier committé et republié automatiquement.
+
+    Corrigé en caviardant `stdout` en ENTIER avant de le tronquer, tant que
+    le secret y est encore intact."""
+
+    def _lever_avec(self, secret, stdout_non_json):
+        import types
+        vrais = (alpaca_cli._require_binary, alpaca_cli._check_cli_version,
+                 alpaca_cli.subprocess)
+        import config
+        vrai_creds = config.require_credentials
+        vieux = os.environ.get("ALPACA_API_KEY")
+
+        class Resultat:
+            returncode, stderr = 0, ""
+            stdout = stdout_non_json
+
+        alpaca_cli._require_binary = lambda: None
+        alpaca_cli._check_cli_version = lambda: None
+        config.require_credentials = lambda: None
+        alpaca_cli.subprocess = types.SimpleNamespace(
+            run=lambda *a, **k: Resultat(), TimeoutExpired=Exception)
+        os.environ["ALPACA_API_KEY"] = secret
+        try:
+            with self.assertRaises(alpaca_cli.AlpacaCLIError) as ctx:
+                alpaca_cli.run(["clock"])
+            return str(ctx.exception)
+        finally:
+            (alpaca_cli._require_binary, alpaca_cli._check_cli_version,
+             alpaca_cli.subprocess) = vrais
+            config.require_credentials = vrai_creds
+            if vieux is None:
+                os.environ.pop("ALPACA_API_KEY", None)
+            else:
+                os.environ["ALPACA_API_KEY"] = vieux
+
+    def test_un_secret_a_cheval_sur_la_coupure_des_500_ne_fuit_pas(self):
+        secret = "S3CR" + "ET-DE-TEST-CLE-API-" + "X" * 40
+        # Le secret est place pour que la coupure a 500 caracteres tombe EN
+        # PLEIN DEDANS -- ni avant, ni apres.
+        bourrage = "y" * 480
+        stdout = bourrage + secret + " reste du message, pas du JSON"
+        self.assertLess(480, len(bourrage) + len(secret),
+                        "prerequis du test : le secret doit chevaucher la coupure")
+        message = self._lever_avec(secret, stdout)
+        self.assertNotIn(secret, message,
+                         "le secret complet apparait dans le message (ne "
+                         "devrait jamais arriver, meme sans troncature)")
+        for decoupe in range(12, len(secret) - 12, 8):
+            fragment = secret[:decoupe]
+            self.assertNotIn(
+                fragment, message,
+                "un FRAGMENT du secret (%r) survit a la troncature -- la "
+                "coupure a 500 caracteres a coupe le secret avant que "
+                "caviarder() ne le voie entier" % fragment)
+        # PAS d'assertion "CAVIARDE" ici : le marqueur lui-meme peut tomber
+        # a cheval sur la coupure des 500 caracteres (cosmetique, pas un
+        # defaut de securite -- aucun fragment du SECRET, verifie ci-dessus,
+        # ne survit). Le temoin simple ci-dessous verifie le marqueur
+        # complet dans le cas qui n'aliase pas la coupure.
+
+    def test_un_secret_entierement_dans_les_500_reste_caviarde(self):
+        """TÉMOIN : le cas simple ne doit pas casser."""
+        secret = "S3CR" + "ET-DE-TEST-COURT-0000"
+        stdout = "erreur: " + secret + " -- pas du JSON"
+        message = self._lever_avec(secret, stdout)
+        self.assertNotIn(secret, message)
+        self.assertIn("CAVIARDE", message)
+
+
 class TestSortiesDesAgentsIgnorees(unittest.TestCase):
     """Ajouté le 27/08. Chaque plist déclare un StandardOutPath et un
     StandardErrorPath : c'est là qu'atterrit TOUT ce que le travail programmé

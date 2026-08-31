@@ -855,16 +855,52 @@ function isUsMarketHoursNow() {
   return minutesSinceMidnight >= (9 * 60 + 30) && minutesSinceMidnight < (16 * 60);
 }
 
+function decalageFuseauMinutes(date, timeZone) {
+  // Le decalage LOCAL - UTC (en minutes) pour `timeZone` a l'instant `date`.
+  // Aucune bibliotheque de fuseaux horaires dans un navigateur -- le seul
+  // outil fiable est de demander a Intl comment il afficherait cet instant
+  // dans ce fuseau, puis de comparer au meme instant lu comme s'il etait UTC.
+  const dtf = new Intl.DateTimeFormat('en-US', {
+    timeZone, hourCycle: 'h23',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+  });
+  const p = Object.fromEntries(dtf.formatToParts(date).map(x => [x.type, x.value]));
+  const commeUTC = Date.UTC(+p.year, +p.month - 1, +p.day,
+                            +p.hour === 24 ? 0 : +p.hour, +p.minute, +p.second);
+  return Math.round((commeUTC - date.getTime()) / 60000);
+}
+
 function dernierPassageAttenduDeLAgent() {
-  // L'agent tourne UNE fois par jour OUVRE, a 19:37 UTC (21:37 CEST) --
-  // 15:37 a New York, 23 minutes avant la cloche. Une regle d'age simple
+  // TROUVE le 31/08/2026 : ce calcul figeait « 19:37 UTC » en dur, alors que
+  // le vrai planning (launchagents/com.hindsightalpha.agent-daily.plist) est
+  // en heure LOCALE (21:37 Europe/Zurich) -- gere par macOS/launchd, donc
+  // DST-aware automatiquement. 19:37 UTC n'est exact que pendant l'heure
+  // d'ete (CEST) ; a partir du 25/10/2026 (fin de l'heure d'ete en Europe),
+  // le vrai passage glisse a 20:37 UTC, et cette page aurait accuse l'agent
+  // une heure trop tot chaque soir, sans qu'aucun run n'ait ete manque.
+  // Meme motif deja resolu juste au-dessus dans isUsMarketHoursNow(), qui
+  // avertissait deja contre « un decalage UTC fige a se tromper deux fois
+  // par an » sans que cette fonction-ci le suive.
+  //
+  // L'agent tourne UNE fois par jour OUVRE, a 21:37 Europe/Zurich -- 15:37 a
+  // New York, 23 minutes avant la cloche. Une regle d'age simple
   // (« plus de 26 h ») crierait au loup chaque lundi matin, apres un week-end
   // sans passage : exactement la faute que la banniere du moniteur a evitee le
   // 25/08 en tenant compte des heures de marche. On calcule donc le dernier
   // passage ATTENDU, et on compare a lui.
+  const FUSEAU = 'Europe/Zurich';
   const maintenant = new Date();
-  const cible = new Date(maintenant);
-  cible.setUTCHours(19, 37, 0, 0);
+  const decalage = decalageFuseauMinutes(maintenant, FUSEAU);
+  const construire = (dec) => new Date(Date.UTC(
+    maintenant.getUTCFullYear(), maintenant.getUTCMonth(), maintenant.getUTCDate(),
+    21, 37) - dec * 60000);
+  let cible = construire(decalage);
+  // Reajuste si le decalage a change ENTRE `maintenant` et `cible` -- le cas
+  // pres d'une bascule DST, ou le decalage a l'instant cible differe de
+  // celui a l'instant maintenant.
+  const decalage2 = decalageFuseauMinutes(cible, FUSEAU);
+  if (decalage2 !== decalage) cible = construire(decalage2);
   if (cible > maintenant) cible.setUTCDate(cible.getUTCDate() - 1);
   let garde = 0;
   while ((cible.getUTCDay() === 0 || cible.getUTCDay() === 6) && garde++ < 10) {

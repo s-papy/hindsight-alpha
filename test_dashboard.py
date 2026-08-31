@@ -752,6 +752,88 @@ class TestBanniereDeSante(BaseRendu):
                 self.assertIn(attendu, r["texte"])
 
 
+class TestLePassageAttenduSuitLHeureDEteEtPas(BaseRendu):
+    """TROUVÉ le 31/08/2026 en cherchant d'autres pièges dépendants de
+    l'heure après le test flaky corrigé le même jour dans test_bilan.py.
+
+    `dernierPassageAttenduDeLAgent()` figeait « 19:37 UTC » en dur. Le vrai
+    planning (`launchagents/com.hindsightalpha.agent-daily.plist`) est en
+    heure LOCALE (21:37 Europe/Zurich), géré par macOS/launchd — DST-aware
+    automatiquement. 19:37 UTC n'est exact que pendant l'heure d'été (CEST) ;
+    à partir du 25/10/2026 (fin de l'heure d'été en Europe), le vrai passage
+    glisse à 20:37 UTC.
+
+    Aucun impact sur la semaine jugée (31/08–04/09), mais un lundi de fin
+    octobre, entre 19:37 et 20:37 UTC, l'ANCIEN code aurait dit qu'un passage
+    de 19:37 UTC était déjà dû — et donc accusé l'agent de MISSED une heure
+    avant l'heure réelle, chaque soir, jusqu'à ce que quelqu'un s'en aperçoive
+    sur le tableau de bord public.
+
+    `Date` est ici remplacée par une sous-classe qui fige la valeur de
+    `new Date()` sans argument — même mécanisme de test que geler l'horloge
+    ailleurs dans ce dépôt, appliqué au DOM minimal sous node."""
+
+    def _avec_horloge_figee(self, iso: str, corps: str) -> dict:
+        gel = """
+            const _VraieDate = Date;
+            class _DateFigee extends _VraieDate {
+              constructor(...args) {
+                if (args.length === 0) { super(%r); }
+                else { super(...args); }
+              }
+              static now() { return new _DateFigee().getTime(); }
+            }
+            Date = _DateFigee;
+        """ % iso
+        return self.executer(gel + corps)
+
+    def test_avant_la_bascule_dete_19h37_UTC_reste_juste(self):
+        """TÉMOIN : la période actuelle (CEST) ne doit pas casser."""
+        r = self._avec_horloge_figee("2026-08-31T20:10:00Z", """
+            _resultats.cible = dernierPassageAttenduDeLAgent().toISOString();
+        """)
+        self.assertEqual(r["cible"], "2026-08-31T19:37:00.000Z",
+                         "le passage attendu du jour même a dérivé en CEST")
+
+    def test_apres_la_bascule_dete_19h37_UTC_naccuse_plus_une_heure_trop_tot(self):
+        """Lundi 26/10/2026 (CET, après la bascule), 19h50 UTC : le vrai
+        passage prévu est 20:37 UTC, pas encore atteint. L'ANCIEN code
+        (19:37 UTC figé) aurait déjà considéré ce passage comme dû — et donc
+        DEHORS de la fenêtre « pas encore en retard »."""
+        r = self._avec_horloge_figee("2026-10-26T19:50:00Z", """
+            _resultats.cible = dernierPassageAttenduDeLAgent().toISOString();
+        """)
+        self.assertNotEqual(
+            r["cible"], "2026-10-26T19:37:00.000Z",
+            "le calcul retombe sur l'ancien décalage UTC figé (19:37) au "
+            "lieu de suivre l'heure locale (20:37 UTC en CET)")
+        # Le vrai dernier passage attendu est vendredi 20:37 UTC (23/10) :
+        # lundi 20:37 UTC n'est pas encore atteint a 19:50, et le week-end
+        # est saute en remontant.
+        self.assertEqual(r["cible"], "2026-10-23T20:37:00.000Z",
+                         "le passage attendu après la bascule d'heure ne "
+                         "suit plus 21:37 Europe/Zurich")
+
+    def test_apres_la_bascule_dete_une_banniere_verte_reste_verte(self):
+        """Bout en bout, choisi pour DISCRIMINER l'ancien calcul du nouveau :
+        lundi 26/10 20h10 UTC, le dernier passage RÉEL était vendredi 23/10 à
+        20:37 UTC (23:37 CET puis 20:37 UTC après la bascule) -- exact, pas
+        de retard. L'ANCIEN code (19:37 UTC figé) aurait calculé la cible du
+        jour même à 19:37 UTC (déjà passée à 20:10) et donc vu le passage de
+        vendredi comme ANTÉRIEUR à cette cible du jour -- MISSED à tort, un
+        run avant l'heure réelle où il serait effectivement dû."""
+        r = self._avec_horloge_figee("2026-10-26T20:10:00Z", """
+            renderAgentHealth({last_run_at: "2026-10-23T20:37:30Z",
+                               outcome: "no_trade", dry_run: false,
+                               symbols_evaluated: 4, trades: 0});
+            _resultats.classe = document.getElementById('agent-health-banner').className;
+        """)
+        self.assertNotEqual(
+            r["classe"], "health-red",
+            "le dernier passage reel (vendredi 20:37 UTC, exact) est accuse "
+            "MISSED -- le decalage UTC fige n'a pas suivi la bascule d'heure")
+
+
 class TestGardeAntiDoublonNonArme(BaseRendu):
     """Ajouté le 27/08, trouvé en croisant les champs qu'agent.py écrit sur un
     trade avec ceux que la page lit : `record_order_submitted_failed` était

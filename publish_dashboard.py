@@ -546,8 +546,11 @@ def git_publish() -> None:
             "so without saying why. Local commits keep piling up, and a single "
             "successful `git push` publishes the whole backlog at once. Common "
             "causes: credentials expired, GitHub refusing the commit e-mail "
-            "(GH007), or the remote having moved ahead of this branch. Run "
-            "`git push` by hand to see the exact refusal."
+            "(GH007), or the remote having moved ahead of this branch -- most "
+            "often push-pending.plist (runs every 30 min, 7 days a week) "
+            "winning the same race, confirmed reproducible 31/08 with two real "
+            "concurrent pushes. Self-heals next cycle either way; if it "
+            "persists, run `git push` by hand to see the exact refusal."
             % refus.returncode,
             flush=True,
         )

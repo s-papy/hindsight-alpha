@@ -164,9 +164,20 @@ def run(args: List[str]) -> Any:
     try:
         payload = json.loads(stdout)
     except json.JSONDecodeError as e:
+        # TROUVE le 31/08/2026 : caviarder() (decision_log.py) redige un
+        # secret par correspondance EXACTE et COMPLETE -- documente comme la
+        # derniere barriere avant un fichier public. Tronquer stdout a 500
+        # caracteres AVANT de caviarder peut couper un secret en deux ; le
+        # fragment qui reste ne correspond plus a la valeur complete et
+        # traverse le garde. Verifie : un secret factice place a cheval sur
+        # la coupure laisse passer ses premiers caracteres dans le message
+        # d'exception, qui remonte jusqu'a decision_log.jsonl (commite,
+        # republie automatiquement). Corrige en caviardant AVANT de tronquer,
+        # tant que le secret est encore entier.
+        extrait = decision_log.caviarder(stdout)[:500]
         raise AlpacaCLIError(
             f"could not parse JSON from `alpaca {' '.join(args)}`: {e}\n"
-            f"first 500 chars of output: {stdout[:500]}"
+            f"first 500 chars of output: {extrait}"
         )
 
     # AJOUTE le 26/08/2026. Jusqu'ici, seul le CODE DE SORTIE decidait s'il y

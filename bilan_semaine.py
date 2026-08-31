@@ -61,6 +61,7 @@ import os
 import re
 from collections import Counter
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 import decision_log
 
@@ -69,8 +70,23 @@ JOURNAL = os.path.join(RACINE, "decision_log.jsonl")
 ETAT = os.path.join(RACINE, "state.json")
 GEL = os.path.join(RACINE, "kickoff_freeze.json")
 
-# L'agent est planifie a 19:37 UTC, du lundi au vendredi.
-HEURE_AGENT = (19, 37)
+# TROUVE le 31/08/2026 : « HEURE_AGENT = (19, 37) » etait fige en UTC, alors
+# que launchagents/com.hindsightalpha.agent-daily.plist planifie l'agent en
+# heure LOCALE (21, 37) sans cle TimeZone -- launchd/macOS gere donc le
+# changement d'heure automatiquement, mais ce fichier ne le suivait pas.
+# 19:37 UTC n'est correct que pendant l'heure d'ete (CEST, UTC+2) ; a partir
+# du 25/10/2026 (fin de l'heure d'ete en Europe), le vrai passage glisse a
+# 20:37 UTC et cette constante figee serait fausse d'une heure. Verifie :
+#     2026-08-31 21:37 Europe/Zurich -> 19:37 UTC  (CEST)
+#     2026-10-25 21:37 Europe/Zurich -> 20:37 UTC  (CET)
+# Sans impact sur la semaine jugee (31/08-04/09), mais un chiffre qui
+# derive en silence trois mois plus tard est exactement ce que ce depot
+# existe pour attraper -- corrige des qu'il a ete vu, pas seulement note.
+# Meme motif deja resolu dans docs/index.html::isUsMarketHoursNow(), qui
+# utilise le fuseau IANA plutot qu'un decalage UTC fige "a se tromper deux
+# fois par an".
+FUSEAU_AGENT = ZoneInfo("Europe/Zurich")
+HEURE_AGENT_LOCALE = (21, 37)
 
 
 def _lire_journal() -> "tuple[list | None, int]":
@@ -139,12 +155,18 @@ def _fenetre() -> "tuple[datetime, datetime] | None":
 
 
 def _passages_attendus(debut: datetime, fin: datetime) -> int:
-    """Combien de fois l'agent AURAIT du tourner d'ici a maintenant."""
+    """Combien de fois l'agent AURAIT du tourner d'ici a maintenant.
+
+    L'heure prevue est calculee JOUR PAR JOUR depuis l'heure locale
+    (HEURE_AGENT_LOCALE, Europe/Zurich) plutot que depuis un decalage UTC
+    fige, pour rester juste des deux cotes du changement d'heure."""
     borne = min(fin, datetime.now(timezone.utc))
     n, jour = 0, debut
     while jour <= borne and n < 40:
-        prevu = jour.replace(hour=HEURE_AGENT[0], minute=HEURE_AGENT[1],
-                             second=0, microsecond=0)
+        local = datetime(jour.year, jour.month, jour.day,
+                         HEURE_AGENT_LOCALE[0], HEURE_AGENT_LOCALE[1],
+                         tzinfo=FUSEAU_AGENT)
+        prevu = local.astimezone(timezone.utc)
         if debut <= prevu <= borne and prevu.weekday() < 5:
             n += 1
         jour += timedelta(days=1)
