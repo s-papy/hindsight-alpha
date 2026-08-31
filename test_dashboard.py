@@ -272,10 +272,34 @@ class TestUnVertMALGRE_UN_AGE_DIT_POURQUOI(BaseRendu):
     La note d'origine ne partait que si le DERNIER PASSAGE avait rapporté
     `market_closed`. Le cas courant est l'inverse : celui de vendredi s'est
     terminé normalement, et c'est le temps écoulé DEPUIS qui tombe hors
-    session."""
+    session.
+
+    TROUVÉ le 31/08/2026, en CI, sur `main`, après fusion : ce test utilisait
+    `Date.now()` réel pour à la fois fabriquer « il y a 42 h » ET pour
+    `isUsMarketHoursNow()`. Écrit et vérifié « un dimanche », il tombait donc
+    juste tant que la suite tournait hors séance -- et cassait dès qu'elle
+    tournait en pleine séance de marché (ce lundi, jour même de l'ouverture de
+    la notation, 15h53 UTC = 11h53 ET). Même famille que le test flaky de
+    `test_bilan.py` corrigé plus tôt dans ce même sprint (`timedelta(days=2)`
+    dépendant du jour). Corrigé en figeant `Date` sur un dimanche fixe -- le
+    résultat ne dépend plus de quand la suite tourne."""
 
     PRE_M = """
         const T = 3600000;
+        // Horloge figee sur un DIMANCHE fixe (2026-08-30T14:00:00Z), hors
+        // seance de marche quelle que soit l'heure du jour -- le week-end
+        // suffit a lui seul a le garantir. Sans ce gel, `Date.now()` reel
+        // determine `isUsMarketHoursNow()` autant que « il y a 42 h », et le
+        // resultat depend alors du jour/de l'heure ou la suite tourne.
+        const _VraieDate = Date;
+        class _DateFigee extends _VraieDate {
+          constructor(...args) {
+            if (args.length === 0) { super('2026-08-30T14:00:00Z'); }
+            else { super(...args); }
+          }
+          static now() { return new _DateFigee().getTime(); }
+        }
+        Date = _DateFigee;
         const ilYA = (h) => new Date(Date.now() - h*T).toISOString();
     """
 
