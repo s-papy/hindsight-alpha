@@ -1944,6 +1944,76 @@ class TestEcrituresConcurrentes(unittest.TestCase):
             pass  # doit être obtenable : si on arrive ici, il a bien été relâché
 
 
+class TestLaBaselineDEquiteEstEcriteSousVerrou(HarnaisPlafonds, BaseExit):
+    """TROUVÉ le 31/08/2026, jour du kickoff. `check_gates()` chargeait et
+    éventuellement ré-baselinait `state.json` (via `_record_starting_equity`)
+    SANS `_state_lock()` — le seul appelant de `_record_starting_equity` à ne
+    pas être gardé, alors que `_state_lock()` existe précisément pour cette
+    classe de panne (voir `TestEcrituresConcurrentes` juste au-dessus : deux
+    écritures concurrentes sur le même fichier temporaire fixe se marchent
+    dessus).
+
+    Le scénario est celui du jour même : premier run réel de la semaine,
+    `starting_equity` absent de `state.json`, et `agent.py` relancé à la main
+    pendant qu'un passage planifié tourne encore — deux appels à
+    `check_gates()` entrelacés.
+
+    Mesuré avant correctif, avec la même technique de lecture ralentie que
+    `TestEcrituresConcurrentes` (déterministe, pas un pari sur
+    l'ordonnancement des threads) : `FileNotFoundError` sur
+    `state.json.tmp`, systématiquement — les deux `_save_state()` internes à
+    `_record_starting_equity` se disputent le même nom de fichier
+    temporaire."""
+
+    def setUp(self):
+        super().setUp()
+        self._vrai_load = risk_gates._load_state
+        if risk_gates.STATE_FILE.exists():
+            risk_gates.STATE_FILE.unlink()
+
+    def tearDown(self):
+        risk_gates._load_state = self._vrai_load
+        super().tearDown()
+
+    def _ralentir_la_lecture(self, secondes=0.30):
+        vrai = self._vrai_load
+
+        def load_lent():
+            etat = vrai()
+            time.sleep(secondes)
+            return etat
+
+        risk_gates._load_state = load_lent
+
+    def test_deux_appels_entrelaces_ne_plantent_pas(self):
+        self._ralentir_la_lecture()
+        erreurs = []
+        decisions = []
+
+        def appeler(sous_jacent, option):
+            try:
+                d = risk_gates.check_gates(sous_jacent, option)
+                decisions.append(d)
+            except Exception as err:            # pragma: no cover - diagnostic
+                erreurs.append(err)
+
+        fils = [threading.Thread(target=appeler, args=("SPY", "SPY260911C00500000")),
+                threading.Thread(target=appeler, args=("XLV", "XLV260911C00150000"))]
+        for f in fils:
+            f.start()
+        for f in fils:
+            f.join(timeout=30)
+
+        self.assertEqual(erreurs, [],
+                         "check_gates() a planté sous concurrence, à cause "
+                         "d'une écriture de state.json non gardée par "
+                         "_state_lock() : %r" % erreurs)
+        self.assertEqual(
+            self.etat().get("starting_equity"), self.EQUITE,
+            "la baseline d'équité n'a pas survécu à l'entrelacement — "
+            "mise à jour perdue")
+
+
 class TestCoutIllisible(HarnaisPlafonds, BaseExit):
     """Une position ouverte dont on ne sait pas lire le montant engagé.
 
