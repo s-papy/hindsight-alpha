@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-08-30T14:40:06.946983+00:00",
+  "generated_at": "2026-08-31T13:30:05.764684+00:00",
   "kickoff": "2026-08-28T15:00:00+00:00",
   "team": "Hindsight Alpha",
   "source": "https://github.com/s-papy/hindsight-alpha",
@@ -8,7 +8,7 @@
   "account": {
     "account_number": "PA3K8MP3MF0U",
     "status": "ACTIVE",
-    "equity": "99961.91",
+    "equity": "100137.91",
     "cash": "99221.91",
     "buying_power": "396887.64"
   },
@@ -34,8 +34,8 @@
       "side": "long",
       "asset_class": "us_option",
       "cost_basis": "778",
-      "unrealized_pl": "-38",
-      "unrealized_plpc": "-0.04884"
+      "unrealized_pl": "138",
+      "unrealized_plpc": "0.17738"
     }
   ],
   "recent_decisions": [
@@ -755,7 +755,7 @@
     }
   ],
   "monitor_status": {
-    "last_run_at": "2026-08-28T19:58:06.599506+00:00",
+    "last_run_at": "2026-08-31T13:30:05.727349+00:00",
     "outcome": "checked",
     "market_open": true,
     "dry_run": false
