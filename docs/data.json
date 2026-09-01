@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-09-01T18:30:04.314512+00:00",
+  "generated_at": "2026-09-01T19:00:06.069711+00:00",
   "kickoff": "2026-08-28T15:00:00+00:00",
   "team": "Hindsight Alpha",
   "source": "https://github.com/s-papy/hindsight-alpha",
@@ -727,7 +727,7 @@
     }
   ],
   "monitor_status": {
-    "last_run_at": "2026-09-01T18:30:04.309745+00:00",
+    "last_run_at": "2026-09-01T19:00:06.063852+00:00",
     "outcome": "checked",
     "market_open": true,
     "dry_run": false
