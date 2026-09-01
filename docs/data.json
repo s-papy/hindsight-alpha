@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-09-01T13:30:05.923945+00:00",
+  "generated_at": "2026-09-01T14:00:04.921741+00:00",
   "kickoff": "2026-08-28T15:00:00+00:00",
   "team": "Hindsight Alpha",
   "source": "https://github.com/s-papy/hindsight-alpha",
@@ -8,9 +8,9 @@
   "account": {
     "account_number": "PA3K8MP3MF0U",
     "status": "ACTIVE",
-    "equity": "100797.91",
-    "cash": "99221.91",
-    "buying_power": "396887.64"
+    "equity": "100797.86",
+    "cash": "100797.86",
+    "buying_power": "403191.44"
   },
   "week": {
     "unreadable_log_lines": 0,
@@ -27,18 +27,24 @@
       "XLK": 2
     }
   },
-  "positions": [
-    {
-      "symbol": "SPY260904P00769000",
-      "qty": "2",
-      "side": "long",
-      "asset_class": "us_option",
-      "cost_basis": "778",
-      "unrealized_pl": "794",
-      "unrealized_plpc": "1.02057"
-    }
-  ],
+  "positions": [],
   "recent_decisions": [
+    {
+      "timestamp": "2026-09-01T13:30:07.008779+00:00",
+      "run_type": "exit_monitor",
+      "dry_run": false,
+      "outcome": "checked",
+      "market_open": true,
+      "exit_actions": [
+        {
+          "symbol": "SPY260904P00769000",
+          "kind": "closed",
+          "text": "SPY260904P00769000: CLOSED \u2014 take-profit hit (+102.1%)",
+          "pnl_pct": 1.0206,
+          "label": "take-profit"
+        }
+      ]
+    },
     {
       "timestamp": "2026-08-31T19:37:12.893704+00:00",
       "run_type": "agent",
@@ -723,54 +729,10 @@
       ],
       "outcome": "market_closed",
       "market_open": false
-    },
-    {
-      "timestamp": "2026-08-24T19:53:50.558716+00:00",
-      "dry_run": true,
-      "symbols": [
-        "SPY",
-        "GLD",
-        "XLK",
-        "XLV"
-      ],
-      "outcome": "dry_run_tradeable",
-      "market_open": true,
-      "exit_actions": [
-        "SPY260831P00764000: holding (+4.7%, thresholds are +50%/-50%)"
-      ],
-      "verdicts": [
-        {
-          "symbol": "SPY",
-          "tradeable": true,
-          "reason": "cheap-vol regime confirmed, hindsight_guard clean",
-          "direction": -1
-        },
-        {
-          "symbol": "GLD",
-          "tradeable": false,
-          "reason": "volatility not cheap today (HV rank 57.9)",
-          "direction": null
-        },
-        {
-          "symbol": "XLK",
-          "tradeable": false,
-          "reason": "hindsight_guard: winning HV window doesn't hold up in-sample",
-          "direction": null
-        },
-        {
-          "symbol": "XLV",
-          "tradeable": false,
-          "reason": "volatility not cheap today (HV rank 98.4)",
-          "direction": null
-        }
-      ],
-      "tradeable_symbols": [
-        "SPY"
-      ]
     }
   ],
   "monitor_status": {
-    "last_run_at": "2026-08-31T19:58:06.196011+00:00",
+    "last_run_at": "2026-09-01T14:00:04.841822+00:00",
     "outcome": "checked",
     "market_open": true,
     "dry_run": false
