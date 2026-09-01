@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-09-01T19:30:06.215873+00:00",
+  "generated_at": "2026-09-01T20:00:06.014232+00:00",
   "kickoff": "2026-08-28T15:00:00+00:00",
   "team": "Hindsight Alpha",
   "source": "https://github.com/s-papy/hindsight-alpha",
@@ -8,27 +8,91 @@
   "account": {
     "account_number": "PA3K8MP3MF0U",
     "status": "ACTIVE",
-    "equity": "100797.86",
-    "cash": "100797.86",
-    "buying_power": "403191.44"
+    "equity": "100707.81",
+    "cash": "99895.81",
+    "buying_power": "399583.24"
   },
   "week": {
     "unreadable_log_lines": 0,
     "dry_runs_excluded": 1,
-    "runs": 2,
-    "runs_expected": 2,
-    "verdicts": 8,
-    "tradeable": 2,
+    "runs": 3,
+    "runs_expected": 3,
+    "verdicts": 12,
+    "tradeable": 3,
     "refused": {
-      "volatility regime": 4,
-      "hindsight guard": 2
+      "volatility regime": 6,
+      "hindsight guard": 3
     },
     "guard_refused_by_symbol": {
-      "XLK": 2
+      "XLK": 3
     }
   },
-  "positions": [],
+  "positions": [
+    {
+      "symbol": "SPY260908P00761000",
+      "qty": "2",
+      "side": "long",
+      "asset_class": "us_option",
+      "cost_basis": "902",
+      "unrealized_pl": "-90",
+      "unrealized_plpc": "-0.09978"
+    }
+  ],
   "recent_decisions": [
+    {
+      "timestamp": "2026-09-01T19:37:13.380135+00:00",
+      "run_type": "agent",
+      "dry_run": false,
+      "symbols": [
+        "SPY",
+        "GLD",
+        "XLK",
+        "XLV"
+      ],
+      "outcome": "order_submitted",
+      "market_open": true,
+      "next_close": "2026-09-01T16:00:00-04:00",
+      "minutes_before_close": 22,
+      "exit_actions": [],
+      "verdicts": [
+        {
+          "symbol": "SPY",
+          "tradeable": true,
+          "reason": "cheap-vol regime confirmed, hindsight_guard clean",
+          "direction": -1
+        },
+        {
+          "symbol": "GLD",
+          "tradeable": false,
+          "reason": "volatility not cheap today (HV rank 47.2)",
+          "direction": null
+        },
+        {
+          "symbol": "XLK",
+          "tradeable": false,
+          "reason": "hindsight_guard: full-window winner (90) and in-sample winner (10) disagree",
+          "direction": null
+        },
+        {
+          "symbol": "XLV",
+          "tradeable": false,
+          "reason": "volatility not cheap today (HV rank 98.8)",
+          "direction": null
+        }
+      ],
+      "trades": [
+        {
+          "symbol": "SPY",
+          "direction": "bearish (put)",
+          "contract": "SPY260908P00761000",
+          "risk_gate_reason": "cleared all gates: sizing 2 contract(s) at ~$460.00 each",
+          "outcome": "order_submitted",
+          "order_id": "3dca28a4-25bf-412a-b5a2-ee89ed1e7ed9",
+          "qty": 2
+        }
+      ],
+      "orders_submitted": 1
+    },
     {
       "timestamp": "2026-09-01T17:37:41.232131+00:00",
       "run_type": "exit_monitor",
@@ -712,29 +776,17 @@
       "tradeable_symbols": [
         "SPY"
       ]
-    },
-    {
-      "timestamp": "2026-08-24T20:32:03.887854+00:00",
-      "dry_run": true,
-      "symbols": [
-        "SPY",
-        "GLD",
-        "XLK",
-        "XLV"
-      ],
-      "outcome": "market_closed",
-      "market_open": false
     }
   ],
   "monitor_status": {
-    "last_run_at": "2026-09-01T19:15:02.289203+00:00",
+    "last_run_at": "2026-09-01T19:58:06.209317+00:00",
     "outcome": "checked",
     "market_open": true,
     "dry_run": false
   },
   "agent_status": {
-    "last_run_at": "2026-08-31T19:37:12.893704+00:00",
-    "outcome": "risk_gate_blocked",
+    "last_run_at": "2026-09-01T19:37:13.380135+00:00",
+    "outcome": "order_submitted",
     "dry_run": false,
     "symbols_evaluated": 4,
     "trades": 1
