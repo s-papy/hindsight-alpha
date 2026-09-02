@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-09-01T20:05:03.826329+00:00",
+  "generated_at": "2026-09-02T09:36:10.082502+00:00",
   "kickoff": "2026-08-28T15:00:00+00:00",
   "team": "Hindsight Alpha",
   "source": "https://github.com/s-papy/hindsight-alpha",
@@ -8,9 +8,9 @@
   "account": {
     "account_number": "PA3K8MP3MF0U",
     "status": "ACTIVE",
-    "equity": "100707.81",
-    "cash": "99895.81",
-    "buying_power": "399583.24"
+    "equity": "100707.69",
+    "cash": "99895.69",
+    "buying_power": "399582.76"
   },
   "week": {
     "unreadable_log_lines": 0,
