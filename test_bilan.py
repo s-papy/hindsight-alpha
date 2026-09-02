@@ -431,8 +431,26 @@ class TestUneACCUSATIONDitSurQuoiElleRepose(BaseBilan):
 
     def test_TEMOIN_sans_accusation_pas_de_mise_en_garde(self):
         """Une réserve collée à chaque rapport, y compris quand rien n'est
-        reproché, devient du bruit qu'on apprend à sauter."""
-        d = self._dossier([self._passage("2026-08-28T19:37:00+00:00")])
+        reproché, devient du bruit qu'on apprend à sauter.
+
+        TROISIÈME CAS DE LA FAMILLE « horloge réelle » en quatre jours, après
+        test_bilan.py (3932e13) et test_dashboard.py (25f64e6). Écrit le 30/08
+        avec un kickoff FIGÉ au 28/08 et un seul passage le 28/08 : juste
+        tant qu'un seul passage était attendu. `_passages_attendus` compte
+        les jours de semaine jusqu'à MAINTENANT (réel), donc dès le mardi
+        01/09 le rapport accusait deux passages manqués -- à raison -- et la
+        mise en garde s'affichait -- à raison aussi. Tombé le 02/09 dans la
+        suite complète, sur du code que le commit du jour ne touchait pas.
+
+        Le témoin veut « aucun passage reproché » : on le fabrique par
+        rapport à l'horloge réelle -- fenêtre ouverte il y a trente minutes,
+        passage il y a dix -- ce qui donne zéro ou un passage attendu, et un
+        passage réel, quel que soit le jour et l'heure où la suite tourne."""
+        from datetime import datetime, timedelta, timezone
+        maintenant = datetime.now(timezone.utc)
+        d = self._dossier(
+            [self._passage((maintenant - timedelta(minutes=10)).isoformat())],
+            kickoff=(maintenant - timedelta(minutes=30)).isoformat())
         try:
             _code, sortie = self._lancer(d)
             self.assertNotIn("market holidays are not", sortie,
