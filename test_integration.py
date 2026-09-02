@@ -8149,6 +8149,12 @@ class TestLesNouveauxChampsDuTableauDeBordSontBestEffort(unittest.TestCase):
                  {"symbol": "SPY260904P00769000", "side": "sell", "price": "7.88", "qty": "2"}]
         r = self.pd._trades_fermes_publiables(entrees, fenetre, fills)
         self.assertEqual([t["symbol"] for t in r], ["SPY260904P00769000"])
+        # Un contrat ferme DANS la fenetre mais sans aucun fill sur ce compte
+        # (journal partage avec le compte de developpement) est ecarte ; sans
+        # fills du tout on ne tranche pas.
+        autre = dict(entrees[1]); autre["exit_actions"] = [{"symbol": "SPY260903P00770000", "kind": "closed", "pnl_pct": -0.5, "label": "stop-loss"}]
+        self.assertEqual(self.pd._trades_fermes_publiables([autre], fenetre, fills), [])
+        self.assertEqual(len(self.pd._trades_fermes_publiables([autre], fenetre, [])), 1)
         self.assertEqual(r[0]["realized"], 798.0)
         self.assertEqual(r[0]["label"], "take-profit")
         self.assertEqual(self.pd._trades_fermes_publiables(entrees, None, fills), [],

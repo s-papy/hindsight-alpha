@@ -370,6 +370,16 @@ def _trades_fermes_publiables(entrees, fenetre, fills) -> list:
         for a in e.get("exit_actions") or []:
             if not isinstance(a, dict) or a.get("kind") != "closed":
                 continue
+            # UN CONTRAT SANS AUCUN FILL SUR CE COMPTE N'EST PAS UN TRADE DE
+            # CE COMPTE. Vu sur le premier instantane du 02/09 : le journal
+            # est partage avec le compte de developpement, et une position
+            # de celui-ci a ete fermee six secondes apres le kickoff. Elle
+            # apparaissait ici comme un stop-loss du compte de competition.
+            # Quand les fills ont pu etre lus, un symbole qui n'y figure
+            # jamais est ecarte ; sans fills (CLI muet) on ne peut pas
+            # trancher et on garde tout, realise a None.
+            if fills and not any(f.get("symbol") == a.get("symbol") for f in fills):
+                continue
             fermes.append({
                 "timestamp": e.get("timestamp"),
                 "symbol": a.get("symbol"),

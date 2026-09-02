@@ -18,10 +18,23 @@
 <meta property="og:description" content="An options-trading agent that refuses to trade on a parameter it cannot justify without hindsight.">
 <meta property="og:url" content="https://s-papy.github.io/hindsight-alpha/">
 <meta property="og:type" content="website">
+<!-- Polices : une seule requete vers Google Fonts, sans cle ni cookie. Si
+     elle echoue, les piles systeme prennent le relais et rien ne casse. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;700;800&family=JetBrains+Mono:wght@400;600&display=swap">
 <style>
+  /* ---- REFONTE du 02/09/2026 -------------------------------------------
+     Une page classee par familles -- Performance, The guard, Positions,
+     Operations, Log -- et beaucoup moins de prose : le texte long est
+     replie dans des <details>, rien n'est retire. Les identifiants que le
+     script remplit sont tous conserves ; seule la mise en scene change.
+     Palette : la meme, plus profonde ; chiffres en chasse fixe. */
   :root {
     --bg: #0b0d12;
+    --bg2: #0f1219;
     --card: #151822;
+    --card2: #191d29;
     --border: #262b38;
     --text: #e8eaf0;
     --muted: #8b92a5;
@@ -29,437 +42,238 @@
     --red: #f87171;
     --yellow: #fbbf24;
     --accent: #818cf8;
+    --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    --sans: "Manrope", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
   }
   * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
   body {
     background: var(--bg);
+    background-image:
+      radial-gradient(900px 420px at 12% -10%, rgba(129,140,248,0.16), transparent 60%),
+      radial-gradient(700px 360px at 95% 0%, rgba(52,211,153,0.10), transparent 60%);
+    background-repeat: no-repeat;
     color: var(--text);
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    font-family: var(--sans);
     margin: 0;
     padding: 0 0 60px 0;
+    -webkit-font-smoothing: antialiased;
   }
-  header {
-    padding: 32px 24px 20px;
-    max-width: 960px;
-    margin: 0 auto;
-  }
-  header h1 {
-    margin: 0 0 4px 0;
-    font-size: 28px;
-  }
-  header p {
-    color: var(--muted);
-    margin: 0;
-    font-size: 14px;
-    line-height: 1.5;
-  }
-  main {
-    max-width: 960px;
-    margin: 0 auto;
-    padding: 0 24px;
-  }
-  .cards {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-    gap: 12px;
-    margin: 20px 0;
-  }
-  .card {
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 16px;
-  }
-  .card .label {
-    color: var(--muted);
-    font-size: 12px;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-  }
-  .card .value {
-    font-size: 22px;
-    font-weight: 600;
-    margin-top: 6px;
-    font-variant-numeric: tabular-nums;
-    /* MESURE le 29/08/2026 dans un navigateur, a 1280 px : la valeur de la
-       carte « Account ID » occupait 177 px dans une boite de 139 px. Le
-       debordement etait `visible`, donc le texte ne s'arretait pas -- il
-       passait SOUS la carte suivante, dont le fond est opaque et peint
-       apres. Le douzieme et dernier caractere du numero disparaissait
-       ainsi derriere « Equity », sans une ellipse pour prevenir que quelque
-       chose manquait. Un numero de compte tronque en silence est precisement le
-       champ qu'il ne fallait pas tronquer : c'est celui qu'on compare a
-       celui declare. La regle vaut pour toutes les cartes, pas seulement
-       celle-la -- une equite a sept chiffres deborderait pareil. */
-    overflow-wrap: anywhere;
-  }
-  .echeance { color: var(--muted); }
-  .echeance-proche {
-    /* La veille et le jour meme : une option laissee ouverte cesse d'etre
-       une position et devient un exercice automatique. */
-    color: var(--yellow);
-    font-weight: 600;
-  }
-  .symbole-brut {
-    /* Le symbole OCC reste affiche sous sa traduction : c'est lui qu'on
-       recopie pour verifier la position chez Alpaca. Discret, mais present
-       et selectionnable -- traduire ne doit pas faire disparaitre la
-       reference. */
-    color: var(--muted);
-    font-size: 11px;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    margin-top: 2px;
-  }
-  .card .value.identifiant {
-    /* Un identifiant n'est pas un nombre : on le lit caractere par
-       caractere pour le comparer. Chasse fixe, et assez petit pour tenir
-       en entier plutot que de se couper en deux lignes. */
-    font-size: 15px;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    letter-spacing: 0.03em;
-  }
-  section {
-    margin: 28px 0;
-  }
-  section h2 {
-    font-size: 16px;
-    color: var(--muted);
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    margin-bottom: 10px;
-  }
-  table {
-    width: 100%;
-    border-collapse: collapse;
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    overflow: hidden;
-    font-size: 13px;
-  }
-  th, td {
-    text-align: left;
-    padding: 10px 12px;
-    border-bottom: 1px solid var(--border);
-  }
-  th {
-    color: var(--muted);
-    font-weight: 500;
-    text-transform: uppercase;
-    font-size: 11px;
-    letter-spacing: 0.04em;
-  }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 0 28px; }
+  a { color: var(--accent); }
+
+  /* ---- top bar ---- */
+  .topbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 22px 0 8px; flex-wrap: wrap; }
+  .brand { display: flex; align-items: center; gap: 12px; }
+  .brand .mark { width: 34px; height: 34px; border-radius: 10px; background: linear-gradient(135deg, var(--accent), #5b64d6); display: grid; place-items: center; font-weight: 800; color: #0b0d12; font-size: 15px; letter-spacing: -.02em; }
+  .brand h1 { margin: 0; font-size: 22px; font-weight: 800; letter-spacing: -0.01em; }
+  .brand .tag { display: block; color: var(--muted); font-size: 12px; margin-top: 1px; }
+  .pills { display: flex; gap: 8px; flex-wrap: wrap; }
+  .pill { display: inline-flex; align-items: center; gap: 6px; padding: 6px 11px; border-radius: 999px; border: 1px solid var(--border); background: rgba(21,24,34,0.8); color: var(--muted); font-size: 12px; font-weight: 600; text-decoration: none; }
+  .pill b { color: var(--text); font-weight: 700; }
+  .pill.paper { color: var(--green); border-color: rgba(52,211,153,0.35); }
+
+  /* ---- hero ---- */
+  .lede { margin: 6px 0 18px; color: var(--muted); font-size: 14px; max-width: 760px; line-height: 1.5; }
+  .lede b { color: var(--text); }
+  .hero { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; margin: 0 0 12px; }
+  .card { background: linear-gradient(180deg, var(--card2), var(--card)); border: 1px solid var(--border); border-radius: 14px; padding: 16px 18px; }
+  .card .label { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; font-weight: 700; }
+  .card .value { font-family: var(--mono); font-size: 24px; font-weight: 600; margin-top: 8px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; letter-spacing: -0.01em; }
+  .hero .card .value { font-size: 26px; white-space: nowrap; }
+  .hero .card .sub { color: var(--muted); font-size: 12px; margin-top: 6px; }
+  .pos { color: var(--green); }
+  .neg { color: var(--red); }
+  .muted { color: var(--muted); font-size: 13px; }
+
+  /* ---- families ---- */
+  .family { margin: 30px 0 0; }
+  .family > h2 { display: flex; align-items: baseline; gap: 12px; margin: 0 0 12px; font-size: 13px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); font-weight: 800; }
+  .family > h2 .num { font-family: var(--mono); color: var(--accent); font-size: 12px; }
+  .family > h2 .line { flex: 1; height: 1px; background: var(--border); }
+  .grid2 { display: grid; grid-template-columns: 1.35fr 1fr; gap: 12px; }
+  .grid2.even { grid-template-columns: 1fr 1fr; }
+  @media (max-width: 860px) { .grid2, .grid2.even { grid-template-columns: 1fr; } }
+  .panel { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 16px 18px; }
+  .panel h3 { margin: 0 0 10px; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; font-weight: 700; }
+  section h2.sub { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; margin: 0 0 10px; font-weight: 700; }
+
+  /* curve */
+  .curve svg { width: 100%; height: 210px; display: block; }
+  .curve .legende { display: flex; justify-content: space-between; color: var(--muted); font-size: 11px; margin-top: 6px; font-family: var(--mono); }
+
+  /* latest cycle */
+  .cycle-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+  .sym-card { border: 1px solid var(--border); border-radius: 12px; padding: 12px; background: rgba(255,255,255,0.025); }
+  .sym-card .sym { font-weight: 800; font-size: 17px; letter-spacing: -0.01em; }
+  .sym-card .badge { display: inline-block; margin-top: 7px; }
+  .sym-card .detail { color: var(--muted); font-size: 11.5px; margin-top: 8px; line-height: 1.45; }
+  .sym-card .detail b { color: var(--text); }
+  .hv-bar { position: relative; height: 7px; background: rgba(139,146,165,0.18); border-radius: 4px; margin-top: 9px; overflow: hidden; }
+  .hv-bar .fill { position: absolute; left: 0; top: 0; bottom: 0; background: var(--yellow); border-radius: 4px; }
+  .hv-bar .fill.cheap { background: var(--green); }
+  .hv-bar .seuil { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--text); opacity: 0.7; }
+
+  /* funnel */
+  .funnel .row { display: grid; grid-template-columns: 250px 1fr 52px; gap: 12px; align-items: center; margin: 9px 0; font-size: 13px; }
+  .funnel .row .bar { height: 14px; background: rgba(129,140,248,0.16); border-radius: 7px; overflow: hidden; }
+  .funnel .row .bar i { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), #a5b4fc); border-radius: 7px; }
+  .funnel .row .n { text-align: right; font-family: var(--mono); font-weight: 600; }
+  .funnel .row .lib { color: var(--muted); }
+  .funnel .row .lib span { font-size: 11px; }
+  @media (max-width: 560px) { .funnel .row { grid-template-columns: 140px 1fr 44px; font-size: 12px; } }
+
+  /* banners : compacts, une ligne, texte integral au survol */
+  .ops-lines { display: grid; gap: 8px; }
+  #error-banner { display: none; padding: 10px 14px; background: rgba(248,113,113,0.1); border: 1px solid var(--red); border-radius: 10px; color: var(--red); font-size: 13px; }
+  #monitor-health-banner, #agent-health-banner { display: none; padding: 9px 14px; border-radius: 10px; font-size: 12.5px; line-height: 1.45; }
+  #monitor-health-banner.health-red, #agent-health-banner.health-red { display: block; background: rgba(248,113,113,0.1); border: 1px solid var(--red); color: var(--red); }
+  #monitor-health-banner.health-yellow, #agent-health-banner.health-yellow { display: block; background: rgba(251,191,36,0.1); border: 1px solid var(--yellow); color: var(--yellow); }
+  #monitor-health-banner.health-green, #agent-health-banner.health-green { display: block; background: rgba(52,211,153,0.08); border: 1px solid rgba(52,211,153,0.45); color: var(--green); }
+  #monitor-health-banner.health-muted, #agent-health-banner.health-muted { display: block; background: rgba(139,146,165,0.08); border: 1px solid var(--border); color: var(--muted); }
+  .leak-stat { display: none; padding: 12px 16px; background: linear-gradient(90deg, rgba(129,140,248,0.16), rgba(129,140,248,0.05)); border: 1px solid rgba(129,140,248,0.5); border-radius: 12px; color: #c7ccff; font-size: 13.5px; line-height: 1.45; margin-bottom: 12px; }
+  .verdict-leak { color: var(--accent); }
+
+  /* how it works : trois pas, presque sans texte */
+  .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+  @media (max-width: 760px) { .steps { grid-template-columns: 1fr; } }
+  .step { position: relative; border: 1px solid var(--border); border-radius: 14px; padding: 16px 16px 14px 18px; background: var(--card); font-size: 13px; line-height: 1.5; color: var(--muted); }
+  .step .k { font-family: var(--mono); color: var(--accent); font-size: 12px; font-weight: 600; }
+  .step .t { display: block; color: var(--text); font-weight: 700; font-size: 14px; margin: 4px 0 4px; }
+  .lecture .cle { color: var(--text); font-weight: 700; }
+  details.more { margin-top: 10px; }
+  details.more summary { cursor: pointer; color: var(--muted); font-size: 12.5px; list-style: none; }
+  details.more summary::before { content: "▸ "; color: var(--accent); }
+  details.more[open] summary::before { content: "▾ "; }
+  details.more .note { margin: 8px 0 0; color: var(--muted); font-size: 13px; line-height: 1.55; }
+
+  /* tables */
+  table { width: 100%; border-collapse: collapse; background: var(--card); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; font-size: 13px; }
+  th, td { text-align: left; padding: 11px 14px; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 700; text-transform: uppercase; font-size: 10.5px; letter-spacing: 0.08em; }
   tr:last-child td { border-bottom: none; }
-  .badge {
-    display: inline-block;
-    padding: 2px 8px;
-    border-radius: 999px;
-    font-size: 11px;
-    font-weight: 600;
-  }
+  tbody tr:hover td { background: rgba(255,255,255,0.02); }
+  .badge { display: inline-block; padding: 3px 9px; border-radius: 999px; font-size: 11px; font-weight: 700; letter-spacing: 0.01em; }
   .badge-green { background: rgba(52,211,153,0.15); color: var(--green); }
   .badge-red { background: rgba(248,113,113,0.15); color: var(--red); }
   .badge-yellow { background: rgba(251,191,36,0.15); color: var(--yellow); }
   .badge-muted { background: rgba(139,146,165,0.15); color: var(--muted); }
-  .empty {
-    color: var(--muted);
-    font-size: 13px;
-    padding: 20px;
-    text-align: center;
-  }
-  .verdict-list {
-    margin: 4px 0 0 0;
-    padding: 0;
-    list-style: none;
-    font-size: 12px;
-    color: var(--muted);
-  }
+  .badge-accent { background: rgba(129,140,248,0.18); color: var(--accent); }
+  .empty { color: var(--muted); font-size: 13px; padding: 22px; text-align: center; background: var(--card); border: 1px dashed var(--border); border-radius: 12px; }
+  .verdict-list { margin: 4px 0 0 0; padding: 0; list-style: none; font-size: 12px; color: var(--muted); }
   .verdict-list li { margin: 2px 0; }
-  footer {
-    max-width: 960px;
-    margin: 40px auto 0;
-    padding: 0 24px;
-    color: var(--muted);
-    font-size: 12px;
+  .symbole-brut { color: var(--muted); font-size: 11px; font-family: var(--mono); margin-top: 2px; }
+  .echeance { color: var(--muted); }
+  .echeance-proche { color: var(--yellow); font-weight: 700; }
+  .card .value.identifiant { font-size: 15px; font-family: var(--mono); letter-spacing: 0.03em; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin: 0 0 12px; }
+  .week-reasons { margin: 8px 0 0; padding-left: 18px; color: var(--muted); font-size: 13px; }
+  .kickoff-divider td { background: rgba(139,146,165,0.10); color: var(--muted); font-size: 0.85em; font-style: italic; text-align: center; padding: 10px 12px; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+  tr.avant-kickoff td { opacity: 0.62; }
+  @media (max-width: 700px) {
+    #decisions-container thead { display: none; }
+    #decisions-container table, #decisions-container tbody, #decisions-container tr, #decisions-container td { display: block; width: auto; }
+    #decisions-container tr { border-bottom: 1px solid var(--border); padding: 10px 0; }
+    #decisions-container td { border-bottom: none; padding: 2px 12px; }
+    #decisions-container td:empty { display: none; }
+    #decisions-container tr.kickoff-divider td { padding: 10px 12px; }
+    #positions-container thead { display: none; }
+    #closed-container thead { display: none; }
+    #positions-container table, #positions-container tbody, #positions-container tr, #positions-container td,
+    #closed-container table, #closed-container tbody, #closed-container tr, #closed-container td { display: block; width: auto; }
+    #positions-container tr, #closed-container tr { border-bottom: 1px solid var(--border); padding: 10px 0; }
+    #positions-container td, #closed-container td { border-bottom: none; padding: 2px 12px; }
+    #positions-container td .symbole-brut, #closed-container td .symbole-brut { padding-left: 108px; }
+    #positions-container td::before, #closed-container td::before { content: attr(data-colonne); color: var(--muted); text-transform: uppercase; font-size: 11px; letter-spacing: 0.04em; display: inline-block; min-width: 108px; }
   }
+  @media (max-width: 480px) { table { font-size: 12px; } th, td { padding: 8px 8px; } .wrap { padding: 0 16px; } }
+
+  footer { color: var(--muted); font-size: 12px; margin-top: 44px; border-top: 1px solid var(--border); padding-top: 18px; }
   footer p { margin: 0 0 6px; }
   footer p:last-child { margin-bottom: 0; }
-  a { color: var(--accent); }
-  #error-banner {
-    display: none;
-    max-width: 960px;
-    margin: 0 auto 20px;
-    padding: 12px 16px;
-    background: rgba(248,113,113,0.1);
-    border: 1px solid var(--red);
-    border-radius: 8px;
-    color: var(--red);
-    font-size: 13px;
-  }
-  #monitor-health-banner,
-  #agent-health-banner {
-    display: none;
-    max-width: 960px;
-    margin: 0 auto 20px;
-    padding: 12px 16px;
-    border-radius: 8px;
-    font-size: 13px;
-  }
-  #monitor-health-banner.health-red,
-  #agent-health-banner.health-red {
-    background: rgba(248,113,113,0.1);
-    border: 1px solid var(--red);
-    color: var(--red);
-  }
-  #monitor-health-banner.health-yellow,
-  #agent-health-banner.health-yellow {
-    background: rgba(251,191,36,0.1);
-    border: 1px solid var(--yellow);
-    color: var(--yellow);
-  }
-    /* Ligne de separation du kickoff, ajoutee le 27/08. Volontairement
-       discrete : elle EXPLIQUE, elle n'accuse pas. Rien n'est masque en
-       dessous, tout y est date et dans l'ordre. */
-    /* COULEURS DU THEME, pas des valeurs claires codees en dur. Corrige le
-       28/08/2026 au soir : cette page est SOMBRE uniquement (--bg: #0b0d12,
-       aucun prefers-color-scheme), et le separateur posait une bande blanche
-       en plein milieu du tableau. */
-    .kickoff-divider td { background: rgba(139,146,165,0.10); color: var(--muted);
-      font-size: 0.85em; font-style: italic; text-align: center;
-      padding: 10px 12px;
-      border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
-
-    /* LES LIGNES D'AVANT LE KICKOFF sont ATTENUEES, jamais retirees. Au 28/08
-       la fenetre de 30 enregistrements contient 11 erreurs reseau du 25/08 --
-       43 % de bruit anterieur a l'evenement juge. Les filtrer serait la
-       curation de preuves que ce projet denonce ailleurs ; les laisser au meme
-       contraste noie la semaine live. On baisse le contraste : le texte reste
-       lisible et selectionnable, et le separateur juste au-dessus dit pourquoi. */
-    tr.avant-kickoff td { opacity: 0.62; }
-
-    /* SUR UN TELEPHONE, LES TABLEAUX NE TIENNENT PAS -- et c'est la colonne
-       qui porte la these qui sortait de l'ecran.
-
-       Mesure le 29/08/2026 a 375 px de large : le tableau des decisions fait
-       427 px dans un conteneur de 327. Le conteneur defile bien
-       horizontalement (overflow-x: auto), donc rien n'etait perdu -- mais
-       « Symbol verdicts » n'etait visible que sur 37 de ses 112 px, derriere
-       une barre de defilement qui n'apparait, sur iOS, que pendant qu'on
-       defile. Or le bloc « How to read this page », trois ecrans plus haut,
-       dit noir sur blanc : « Look for [refus] in the verdicts below ». La
-       page envoyait donc le juge vers ce qu'elle avait mis hors-champ.
-
-       On empile au lieu de comprimer : chaque decision devient un bloc --
-       date, verdict, ordre, puis les symboles ligne a ligne. Mesure apres :
-       327 px de large (plus aucun defilement lateral), et 4020 px de haut
-       contre 4085 avant, car les cellules cessent de s'etrangler. Rien n'est
-       retire ni replie : c'est la meme table, dans le meme ordre.
-
-       Le seuil de 700 px vise la largeur, pas l'appareil : une fenetre
-       etroite sur un portable a exactement le meme probleme. */
-    @media (max-width: 700px) {
-      #decisions-container thead { display: none; }
-      #decisions-container table,
-      #decisions-container tbody,
-      #decisions-container tr,
-      #decisions-container td { display: block; width: auto; }
-      #decisions-container tr {
-        border-bottom: 1px solid var(--border);
-        padding: 10px 0;
-      }
-      #decisions-container td { border-bottom: none; padding: 2px 12px; }
-      /* Une cellule vide occuperait une ligne blanche sans rien dire. */
-      #decisions-container td:empty { display: none; }
-      #decisions-container tr.kickoff-divider td { padding: 10px 12px; }
-
-      /* Les positions gardent leurs etiquettes : « us_option », « 2 »,
-         « $778,00 » empiles sans en-tete ne veulent plus rien dire, alors
-         qu'une decision se lit toute seule. */
-      #positions-container thead { display: none; }
-      #positions-container table,
-      #positions-container tbody,
-      #positions-container tr,
-      #positions-container td { display: block; width: auto; }
-      #positions-container tr {
-        border-bottom: 1px solid var(--border);
-        padding: 10px 0;
-      }
-      #positions-container td { border-bottom: none; padding: 2px 12px; }
-      /* Le symbole OCC brut est un bloc : sans ce retrait il repart a la
-         marge gauche, sous l'ETIQUETTE, au lieu de s'aligner sous la
-         valeur qu'il precise. Meme largeur que l'etiquette ci-dessous. */
-      #positions-container td .symbole-brut { padding-left: 108px; }
-      #positions-container td::before {
-        content: attr(data-colonne);
-        color: var(--muted);
-        text-transform: uppercase;
-        font-size: 11px;
-        letter-spacing: 0.04em;
-        display: inline-block;
-        min-width: 108px;
-      }
-    }
-  #monitor-health-banner.health-green,
-  #agent-health-banner.health-green {
-    background: rgba(52,211,153,0.1);
-    border: 1px solid var(--green);
-    color: var(--green);
-  }
-  #monitor-health-banner.health-muted,
-  #agent-health-banner.health-muted {
-    background: rgba(139,146,165,0.1);
-    border: 1px solid var(--border);
-    color: var(--muted);
-  }
-  /* COMMENT LIRE CETTE PAGE. Ajoute le 28/08/2026 au soir : la page passait
-     des bandeaux aux chiffres du compte, sans jamais dire ce que « hindsight
-     guard » veut dire. Un juge qui n'a pas lu le README voyait des nombres
-     sans mecanisme. Trois etapes, une ligne chacune. */
-  .lecture {
-    max-width: 960px;
-    margin: 0 auto 20px;
-    padding: 14px 18px;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    background: rgba(139,146,165,0.06);
-    font-size: 13px;
-    line-height: 1.55;
-  }
-  .lecture h2 {
-    margin: 0 0 8px;
-    font-size: 12px;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: var(--muted);
-  }
-  .lecture ol { margin: 0; padding-left: 20px; }
-  .lecture li { margin: 3px 0; }
-  .lecture .cle { color: var(--text); font-weight: 600; }
-  .lecture .note { margin: 9px 0 0; color: var(--muted); }
-
-  .leak-stat {
-    display: none;
-    max-width: 960px;
-    margin: 0 auto 20px;
-    padding: 10px 16px;
-    background: rgba(129,140,248,0.1);
-    border: 1px solid var(--accent);
-    border-radius: 8px;
-    color: var(--accent);
-    font-size: 13px;
-  }
-  .verdict-leak { color: var(--accent); }
-  @media (max-width: 480px) {
-    table { font-size: 12px; }
-    th, td { padding: 8px 8px; }
-  }
-
-  /* ---- Refonte du 02/09/2026 : ce qu'un juge voit en dix secondes ----
-     Comparee aux 65 autres soumissions, cette page enterrait son seul trade
-     ferme et sa courbe d'equite sous du texte. Les blocs ci-dessous rendent
-     les MEMES donnees, en tete : equite, P&L, trades fermes, entonnoir,
-     dernier cycle symbole par symbole. Aucune bibliotheque, aucun reseau :
-     la courbe est un SVG construit a partir de data.json. */
-  .hero { display: grid; grid-template-columns: repeat(auto-fit, minmax(185px, 1fr)); gap: 12px; margin: 18px 0 8px; }
-  .hero .card .value { font-size: 24px; white-space: nowrap; }
-  .muted { color: var(--muted); font-size: 13px; }
-  .hero .card .sub { color: var(--muted); font-size: 12px; margin-top: 4px; }
-  .pos { color: var(--green); }
-  .neg { color: var(--red); }
-  .duo { display: grid; grid-template-columns: 1.2fr 1fr; gap: 12px; margin: 12px 0; }
-  @media (max-width: 800px) { .duo { grid-template-columns: 1fr; } }
-  .panel { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; }
-  .panel h3 { margin: 0 0 8px; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600; }
-  .curve svg { width: 100%; height: 170px; display: block; }
-  .curve .legende { display: flex; justify-content: space-between; color: var(--muted); font-size: 11px; margin-top: 4px; font-variant-numeric: tabular-nums; }
-  .cycle-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; }
-  .sym-card { border: 1px solid var(--border); border-radius: 8px; padding: 10px; background: rgba(255,255,255,0.02); }
-  .sym-card .sym { font-weight: 700; font-size: 16px; }
-  .sym-card .badge { display: inline-block; margin-top: 6px; }
-  .sym-card .detail { color: var(--muted); font-size: 11px; margin-top: 8px; line-height: 1.4; }
-  .hv-bar { position: relative; height: 6px; background: rgba(139,146,165,0.18); border-radius: 3px; margin-top: 8px; overflow: hidden; }
-  .hv-bar .fill { position: absolute; left: 0; top: 0; bottom: 0; background: var(--yellow); border-radius: 3px; }
-  .hv-bar .fill.cheap { background: var(--green); }
-  .hv-bar .seuil { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--text); opacity: 0.7; }
-  .funnel .row { display: grid; grid-template-columns: 210px 1fr 48px; gap: 10px; align-items: center; margin: 7px 0; font-size: 13px; }
-  .funnel .row .bar { height: 12px; background: rgba(129,140,248,0.22); border-radius: 6px; overflow: hidden; }
-  .funnel .row .bar i { display: block; height: 100%; background: var(--accent); border-radius: 6px; }
-  .funnel .row .n { text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; }
-  .funnel .row .lib { color: var(--muted); }
-  @media (max-width: 480px) { .funnel .row { grid-template-columns: 130px 1fr 40px; font-size: 12px; } }
-  .badge-accent { background: rgba(129,140,248,0.18); color: var(--accent); }
+  .lecture { font-size: 13px; }
 </style>
 </head>
 <body>
+<div class="wrap">
 
-<header>
-  <h1>Hindsight Alpha</h1>
-  <p>
-    An options-trading agent that refuses to trust its own parameter selection until it's checked for hindsight leakage.
-    Built for the <a href="https://lablab.ai/ai-hackathons/alpaca-ai-trading-agents-hackathon" target="_blank" rel="noopener">Alpaca AI Trading Agents Hackathon</a>.
-    Paper trading only — zero real funds at risk.
-  </p>
-</header>
-
-<main class="hero-wrap">
-  <div class="hero" id="hero-cards"></div>
-  <div class="duo">
-    <div class="panel curve" id="equity-curve"></div>
-    <div class="panel" id="latest-cycle"></div>
+<div class="topbar">
+  <div class="brand">
+    <div class="mark">HA</div>
+    <div>
+      <h1>Hindsight Alpha</h1>
+      <span class="tag">options agent · refuses what it cannot justify without hindsight</span>
+    </div>
   </div>
-</main>
+  <div class="pills">
+    <span class="pill paper">● paper trading only</span>
+    <a class="pill" href="https://github.com/s-papy/hindsight-alpha" target="_blank" rel="noopener">source · MIT</a>
+    <a class="pill" href="https://lablab.ai/ai-hackathons/alpaca-ai-trading-agents-hackathon" target="_blank" rel="noopener">Alpaca AI Trading Agents Hackathon</a>
+  </div>
+</div>
+<p class="lede">Every candidate parameter is scored <b>twice</b> — on the full history and on only what was knowable — and the agent <b>refuses to trade</b> when the two winners disagree. Every run and every refusal is on this page.</p>
 
-<section class="lecture">
-  <h2>How to read this page</h2>
-  <ol>
-    <li>For each symbol, the agent scores 5 volatility windows <span class="cle">twice</span> — once on the full price history, once on only what was knowable <em>yesterday</em>.</li>
-    <li>If the two winners <span class="cle">disagree</span>, the choice depended on data the agent could not have had, so it <span class="cle">refuses that symbol</span>. Look for 🛡️ in the verdicts below — XLK earns it on every run.</li>
-    <li>Only symbols that pass reach the risk gates, and only then can an order be placed.</li>
-  </ol>
-  <p class="note">Every run is here, refusals included — this is the log, not a highlight reel.
-  The result worth judging is the refusal, not the P&amp;L: five sessions and a handful of trades
-  cannot separate a strategy from a coin flip, and <a href="https://github.com/s-papy/hindsight-alpha/blob/main/LIVE_WEEK.md" target="_blank" rel="noopener">LIVE_WEEK.md</a>
-  said so before the results were known.</p>
+<div id="error-banner"></div>
+
+<section class="family">
+  <h2><span class="num">01</span> Performance <span class="line"></span></h2>
+  <div class="hero" id="hero-cards"></div>
+  <div class="grid2">
+    <div class="panel curve" id="equity-curve"></div>
+    <div>
+      <section>
+        <h2 class="sub">Closed trades</h2>
+        <div id="closed-container"></div>
+      </section>
+    </div>
+  </div>
 </section>
 
-<div id="leak-stat" class="leak-stat"></div>
-<div id="error-banner"></div>
-<div id="agent-health-banner"></div>
-<div id="monitor-health-banner"></div>
-
-<main>
-  <section>
-    <h2>Decision funnel, since the kickoff</h2>
+<section class="family lecture">
+  <h2><span class="num">02</span> The guard <span class="line"></span></h2>
+  <div id="leak-stat" class="leak-stat"></div>
+  <div class="grid2">
+    <div class="panel" id="latest-cycle"></div>
     <div class="panel funnel" id="funnel"></div>
-  </section>
-
-  <section>
-    <h2>Closed Trades</h2>
-    <div id="closed-container"></div>
-  </section>
-
-  <section>
-    <h2>Account</h2>
-    <div class="cards" id="account-cards">
-      <div class="card"><div class="label">Loading…</div></div>
-    </div>
-  </section>
-
-  <section>
-    <h2>Since the kickoff</h2>
+  </div>
+  <div class="steps" style="margin-top:12px">
+    <div class="step"><span class="k">01</span><span class="t">Score twice</span>For each symbol, 5 volatility windows are scored <span class="cle">twice</span> — on the full price history, and on only what was knowable <em>yesterday</em>.</div>
+    <div class="step"><span class="k">02</span><span class="t">Refuse on disagreement</span>If the two winners <span class="cle">disagree</span>, the choice depended on data the agent could not have had, so it <span class="cle">refuses that symbol</span>. Look for 🛡️ in the verdicts below — XLK earns it on every run.</div>
+    <div class="step"><span class="k">03</span><span class="t">Then the risk gates</span>Only symbols that pass reach the risk gates, and only then can an order be placed.</div>
+  </div>
+  <details class="more">
+    <summary>Why the refusal is the result worth judging</summary>
+    <p class="note">Every run is here, refusals included — this is the log, not a highlight reel.
+    The result worth judging is the refusal, not the P&amp;L: five sessions and a handful of trades
+    cannot separate a strategy from a coin flip, and <a href="https://github.com/s-papy/hindsight-alpha/blob/main/LIVE_WEEK.md" target="_blank" rel="noopener">LIVE_WEEK.md</a>
+    said so before the results were known.</p>
+  </details>
+  <section style="margin-top:14px">
+    <h2 class="sub">Since the kickoff</h2>
     <div id="week-container"></div>
   </section>
+</section>
 
-  <section>
-    <h2>Open Positions</h2>
-    <div id="positions-container"></div>
-  </section>
+<section class="family">
+  <h2><span class="num">03</span> Positions <span class="line"></span></h2>
+  <div id="positions-container"></div>
+</section>
 
-  <section>
-    <h2>Recent Decisions</h2>
-    <div id="decisions-container"></div>
-  </section>
-</main>
+<section class="family">
+  <h2><span class="num">04</span> Operations <span class="line"></span></h2>
+  <div class="ops-lines">
+    <div id="agent-health-banner"></div>
+    <div id="monitor-health-banner"></div>
+  </div>
+  <div class="cards" id="account-cards" style="margin-top:12px">
+    <div class="card"><div class="label">Loading…</div></div>
+  </div>
+</section>
+
+<section class="family">
+  <h2><span class="num">05</span> Decision log <span class="line"></span></h2>
+  <div id="decisions-container"></div>
+</section>
 
 <!-- CINQ AFFIRMATIONS DISTINCTES, une par ligne. Le 29/08 elles etaient
      collees en un seul paragraphe gris, alors que ce sont exactement les
@@ -476,6 +290,7 @@
   <p><span id="generated-at"></span></p>
 </footer>
 
+</div>
 <script>
 async function loadDashboard() {
   try {
