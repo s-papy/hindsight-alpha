@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-09-02T20:00:07.188052+00:00",
+  "generated_at": "2026-09-02T20:05:06.701262+00:00",
   "starting_equity": 100000.0,
   "equity_curve": {
     "timeframe": "15Min",
@@ -432,7 +432,7 @@
     }
   ],
   "underlying_prices": {
-    "SPY": 765.1
+    "SPY": 765.2
   },
   "kickoff": "2026-08-28T15:00:00+00:00",
   "team": "Hindsight Alpha",
