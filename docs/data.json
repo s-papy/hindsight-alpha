@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-09-02T18:30:07.507450+00:00",
+  "generated_at": "2026-09-02T19:00:07.457181+00:00",
   "starting_equity": 100000.0,
   "equity_curve": {
     "timeframe": "15Min",
@@ -387,6 +387,14 @@
       ],
       [
         1788373800,
+        100333.69
+      ],
+      [
+        1788374700,
+        100333.69
+      ],
+      [
+        1788375600,
         100333.69
       ]
     ]
@@ -1146,12 +1154,7 @@
       ]
     }
   ],
-  "monitor_status": {
-    "last_run_at": "2026-09-02T18:30:06.179770+00:00",
-    "outcome": "checked",
-    "market_open": true,
-    "dry_run": false
-  },
+  "monitor_status": null,
   "agent_status": {
     "last_run_at": "2026-09-01T19:37:13.380135+00:00",
     "outcome": "order_submitted",
