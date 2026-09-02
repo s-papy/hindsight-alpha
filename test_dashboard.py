@@ -1839,3 +1839,116 @@ class TestLEcheanceEstVISIBLE(BaseRendu):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class TestLaTeteDePageDuDeuxSeptembre(BaseRendu):
+    """REFONTE du 02/09/2026, après comparaison avec les 65 autres soumissions
+    du hackathon : la page enterrait son seul trade fermé, n'avait ni courbe
+    d'équité ni entonnoir, et le dernier cycle se lisait ligne par ligne dans
+    un tableau. Les cinq rendus ajoutés ce jour-là lisent des champs nouveaux
+    de data.json (starting_equity, equity_curve, closed_trades,
+    week.orders_submitted, week.gate_blocked) et des champs existants.
+
+    Règle commune, la même que partout sur la page : un champ absent se DIT,
+    il ne devient jamais un zéro qui aurait l'air d'une mesure."""
+
+    def _hero(self, data_js):
+        return self.executer("""
+            renderHero(%s);
+            _resultats.html = document.getElementById('hero-cards').innerHTML;
+        """ % data_js)
+
+    def test_le_pnl_depuis_le_depart_est_signe_et_en_pourcentage(self):
+        r = self._hero("""{account:{equity:"100707.69"}, starting_equity:100000,
+                          closed_trades:[], week:{verdicts:12, refused:{"hindsight guard":3,
+                          "volatility regime":6}, tradeable:3, orders_submitted:1, gate_blocked:1}}""")
+        self.assertIn("+707.69", r["html"])
+        self.assertIn("+0.71%", r["html"])
+        self.assertIn("pos", r["html"], "un gain doit être peint en vert")
+        self.assertIn("9", r["html"]); self.assertIn("75% of verdicts", r["html"])
+        self.assertIn("3 hindsight leaks caught", r["html"])
+        self.assertIn("1 blocked by the risk gates", r["html"])
+
+    def test_une_perte_est_peinte_en_rouge_avec_son_signe(self):
+        r = self._hero("""{account:{equity:"99500"}, starting_equity:100000, closed_trades:[], week:null}""")
+        self.assertIn("−500.00", r["html"])
+        self.assertIn("neg", r["html"])
+
+    def test_sans_equite_de_depart_on_le_DIT_au_lieu_d_inventer_un_zero(self):
+        r = self._hero("""{account:{equity:"100707.69"}, closed_trades:[], week:null}""")
+        self.assertIn("starting equity not available", r["html"])
+        self.assertNotIn("+0.00%", r["html"])
+
+    def test_le_realise_somme_les_trades_fermes_et_compte_les_gagnes(self):
+        r = self._hero("""{account:{}, closed_trades:[{pnl_pct:1.02, realized:798},
+                          {pnl_pct:-0.5, realized:-200}], week:null}""")
+        self.assertIn("+598.00", r["html"])
+        self.assertIn("2 closed trades · 1 won", r["html"])
+
+    def test_la_courbe_est_un_svg_avec_la_ligne_de_depart(self):
+        r = self.executer("""
+            renderEquityCurve({timeframe:"15Min", points:[[1000,100000],[1900,100200],[2800,100100]]}, 100000);
+            _resultats.html = document.getElementById('equity-curve').innerHTML;
+        """)
+        self.assertIn("<svg", r["html"])
+        self.assertIn("stroke-dasharray", r["html"], "la ligne de l'équité de départ manque")
+        self.assertIn("high $100,200.00", r["html"])
+        self.assertIn("var(--green)", r["html"], "au-dessus du départ, la courbe est verte")
+
+    def test_une_courbe_absente_ou_trop_courte_se_DIT(self):
+        r = self.executer("""
+            renderEquityCurve(null, 100000);
+            _resultats.nul = document.getElementById('equity-curve').innerHTML;
+            renderEquityCurve({points:[[1,100000]]}, 100000);
+            _resultats.court = document.getElementById('equity-curve').innerHTML;
+        """)
+        for k in ("nul", "court"):
+            self.assertIn("Not available in this snapshot", r[k])
+            self.assertNotIn("<svg", r[k])
+
+    def test_le_dernier_cycle_lit_le_rang_de_volatilite_et_la_fuite(self):
+        r = self.executer("""
+            renderLatestCycle([
+              {timestamp:"2026-09-01T19:37:13+00:00", run_type:"agent", dry_run:false, verdicts:[
+                {symbol:"SPY", tradeable:true, reason:"cheap-vol regime confirmed, hindsight_guard clean", direction:-1},
+                {symbol:"GLD", tradeable:false, reason:"volatility not cheap today (HV rank 47.2)"},
+                {symbol:"XLK", tradeable:false, reason:"hindsight_guard: full-window winner (90) and in-sample winner (10) disagree"}]},
+              {timestamp:"2026-09-02T10:00:00+00:00", run_type:"agent", dry_run:true, verdicts:[{symbol:"ZZZ", tradeable:true, reason:"x"}]},
+              {timestamp:"2026-09-02T11:00:00+00:00", run_type:"exit_monitor", outcome:"checked"}]);
+            _resultats.html = document.getElementById('latest-cycle').innerHTML;
+        """)
+        h = r["html"]
+        self.assertIn("2026-09-01 19:37 UTC", h, "le dernier VRAI passage est celui du 01/09, pas l'essai à blanc")
+        self.assertNotIn("ZZZ", h, "un essai à blanc ne doit pas passer pour le dernier cycle")
+        self.assertIn("TRADEABLE", h); self.assertIn("bearish → put", h)
+        self.assertIn("HV rank <b>47.2</b>", h); self.assertIn("width:47%", h)
+        self.assertIn("picks <b>90d</b>", h); self.assertIn("picks <b>10d</b>", h)
+        self.assertIn("REFUSED · leak", h)
+
+    def test_l_entonnoir_derive_chaque_etape_des_memes_comptes(self):
+        r = self.executer("""
+            renderFunnel({verdicts:12, refused:{"hindsight guard":3, "volatility regime":6}, tradeable:3,
+                          orders_submitted:1, gate_blocked:1});
+            _resultats.html = document.getElementById('funnel').innerHTML;
+            renderFunnel(null);
+            _resultats.nul = document.getElementById('funnel').innerHTML;
+        """)
+        h = r["html"]
+        self.assertIn("3 refused as leaks", h)
+        self.assertIn("6 skipped, volatility not cheap", h)
+        self.assertIn("1 blocked by a gate", h)
+        self.assertIn("could not be read", r["nul"])
+
+    def test_un_trade_ferme_n_affiche_pas_de_compte_a_rebours(self):
+        r = self.executer("""
+            renderClosedTrades([{timestamp:"2026-09-01T13:30:07+00:00", symbol:"SPY260904P00769000",
+                                 pnl_pct:1.0206, label:"take-profit", realized:798}]);
+            _resultats.html = document.getElementById('closed-container').innerHTML;
+            renderClosedTrades([]);
+            _resultats.vide = document.getElementById('closed-container').innerHTML;
+        """)
+        h = r["html"]
+        self.assertIn("SPY 769 put", h)
+        self.assertNotIn("days left", h, "un contrat fermé n'a plus d'échéance à compter")
+        self.assertIn("+102.1%", h); self.assertIn("+798.00", h); self.assertIn("take-profit", h)
+        self.assertIn("No position closed", r["vide"])

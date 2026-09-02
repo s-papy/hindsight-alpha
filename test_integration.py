@@ -8084,3 +8084,88 @@ class TestAucunTestNeTouchePasLEtatDeProduction(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class TestLesNouveauxChampsDuTableauDeBordSontBestEffort(unittest.TestCase):
+    """REFONTE du 02/09/2026 : trois champs ajoutés à data.json (equity_curve,
+    closed_trades, starting_equity) et deux à `week`. Chacun vient d'un appel
+    CLI en lecture seule ou du journal ; aucun ne doit pouvoir faire échouer
+    la publication, et aucun ne doit publier un zéro à la place d'un
+    « pas mesuré »."""
+
+    def setUp(self):
+        import importlib, publish_dashboard as pd
+        from unittest import mock
+        self.pd = importlib.reload(pd)
+        self.mock = mock
+
+    def test_une_courbe_dont_le_cli_ne_repond_pas_rend_None_sans_lever(self):
+        mock = self.mock
+        import io, contextlib
+        def casse(args):
+            raise RuntimeError("cli down")
+        with mock.patch.object(self.pd.alpaca_cli, "run", casse):
+            tampon = io.StringIO()
+            with contextlib.redirect_stdout(tampon):
+                r = self.pd._courbe_d_equite("2026-08-28T15:00:00+00:00")
+        self.assertIsNone(r)
+        self.assertIn("equity curve is skipped", tampon.getvalue())
+
+    def test_la_courbe_est_filtree_au_kickoff_et_bornee_en_points(self):
+        mock = self.mock
+        kick = 1787000000
+        brut = {"timeframe": "15Min", "base_value": 100000,
+                "timestamp": [kick - 900 * i for i in range(5, 0, -1)] + [kick + 900 * i for i in range(600)],
+                "equity": [100000.0] * 605}
+        with mock.patch.object(self.pd.alpaca_cli, "run", lambda args: brut):
+            r = self.pd._courbe_d_equite(
+                __import__("datetime").datetime.fromtimestamp(kick, __import__("datetime").timezone.utc).isoformat())
+        self.assertTrue(all(p[0] >= kick for p in r["points"]), "un point d'avant le kickoff a été publié")
+        self.assertLessEqual(len(r["points"]), self.pd._POINTS_MAX_COURBE + 1)
+        self.assertEqual(r["points"][-1][0], kick + 900 * 599, "le dernier point doit être conservé")
+
+    def test_le_pnl_realise_veut_les_deux_cotes_et_le_multiplicateur_option(self):
+        fills = [{"symbol": "SPY260904P00769000", "side": "buy", "price": "3.89", "qty": "2"},
+                 {"symbol": "SPY260904P00769000", "side": "sell", "price": "7.88", "qty": "2"},
+                 {"symbol": "SPY260908P00761000", "side": "buy", "price": "4.51", "qty": "2"}]
+        self.assertEqual(self.pd._pnl_realise(fills, "SPY260904P00769000"), 798.0)
+        self.assertIsNone(self.pd._pnl_realise(fills, "SPY260908P00761000"),
+                          "une position encore ouverte n'a pas de P&L réalisé")
+        self.assertIsNone(self.pd._pnl_realise(fills, "GLD260904P00300000"))
+
+    def test_les_trades_fermes_viennent_de_la_fenetre_et_excluent_les_essais_a_blanc(self):
+        from datetime import datetime, timezone
+        fenetre = (datetime(2026, 8, 28, 15, tzinfo=timezone.utc), datetime(2026, 9, 4, 15, tzinfo=timezone.utc))
+        entrees = [
+            {"timestamp": "2026-08-27T13:30:07+00:00", "run_type": "exit_monitor",
+             "exit_actions": [{"symbol": "AVANT", "kind": "closed", "pnl_pct": -0.5, "label": "stop-loss"}]},
+            {"timestamp": "2026-09-01T13:30:07+00:00", "run_type": "exit_monitor",
+             "exit_actions": [{"symbol": "SPY260904P00769000", "kind": "closed", "pnl_pct": 1.0206, "label": "take-profit"},
+                              {"symbol": "SPY260908P00761000", "kind": "holding", "text": "holding"}]},
+            {"timestamp": "2026-09-02T13:30:07+00:00", "run_type": "exit_monitor", "dry_run": True,
+             "exit_actions": [{"symbol": "BLANC", "kind": "closed", "pnl_pct": 9.9}]},
+        ]
+        fills = [{"symbol": "SPY260904P00769000", "side": "buy", "price": "3.89", "qty": "2"},
+                 {"symbol": "SPY260904P00769000", "side": "sell", "price": "7.88", "qty": "2"}]
+        r = self.pd._trades_fermes_publiables(entrees, fenetre, fills)
+        self.assertEqual([t["symbol"] for t in r], ["SPY260904P00769000"])
+        self.assertEqual(r[0]["realized"], 798.0)
+        self.assertEqual(r[0]["label"], "take-profit")
+        self.assertEqual(self.pd._trades_fermes_publiables(entrees, None, fills), [],
+                         "sans fenêtre on ne compte rien, on ne devine pas")
+
+    def test_chaque_nouveau_champ_publie_est_lu_par_la_page(self):
+        page = (Path(__file__).parent / "docs" / "index.html").read_text(encoding="utf-8")
+        for champ in ("starting_equity", "equity_curve", "closed_trades", "orders_submitted", "gate_blocked"):
+            self.assertIn(champ, page, "champ publié que la page n'utilise pas : %s" % champ)
+
+    def test_l_equite_de_depart_vient_de_l_historique_et_jamais_de_risk_gates(self):
+        """Le publieur ne doit PAS importer risk_gates : il partage 13
+        minutes de démarrage par jour avec monitor-exits, et le test de
+        collision d'état l'attraperait. base_value est la valeur de départ
+        qu'Alpaca tient pour ce compte."""
+        src = (Path(__file__).parent / "publish_dashboard.py").read_text(encoding="utf-8")
+        self.assertIsNone(__import__("re").search(r"^\s*(from|import) risk_gates", src, __import__("re").M))
+        self.assertEqual(self.pd._equite_de_depart({"base_value": 100000}), 100000.0)
+        self.assertIsNone(self.pd._equite_de_depart(None))
+        self.assertIsNone(self.pd._equite_de_depart({"base_value": "n/a"}))

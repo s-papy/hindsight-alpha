@@ -235,7 +235,150 @@ def _semaine_publiable() -> "dict | None":
         "tradeable": c["retenus"],
         "refused": dict(c["refus"]),
         "guard_refused_by_symbol": dict(c["refus_par_symbole"]),
+        # L'ENTONNOIR, ajoute le 02/09/2026 : combien de symboles retenus
+        # ont franchi les portes de risque et donne un ordre. Compte sur les
+        # MEMES passages que le reste du bloc.
+        "orders_submitted": sum(
+            1 for e in c["passages"] for t in (e.get("trades") or [])
+            if isinstance(t, dict) and t.get("outcome") == "order_submitted"),
+        "gate_blocked": sum(
+            1 for e in c["passages"] for t in (e.get("trades") or [])
+            if isinstance(t, dict) and t.get("outcome") == "risk_gate_blocked"),
     }
+
+
+# ---------------------------------------------------------------------------
+# AJOUTE le 02/09/2026, apres avoir compare la page aux 65 autres soumissions
+# du hackathon. Les tableaux de bord les mieux notes (Vetoed, optionwright)
+# montrent en dix secondes ce que la page d'ici enterrait sous du texte : la
+# courbe d'equite, le P&L realise, les trades fermes, l'entonnoir verdicts ->
+# ordres. Tout cela EXISTAIT deja dans les donnees de ce depot ou a un appel
+# CLI en lecture seule ; rien n'est invente, rien n'est estime.
+#
+# Chaque bloc est BEST-EFFORT, comme le reste de ce fichier : une panne du
+# CLI sur l'historique de portefeuille rend None, la page le dit, et la
+# publication continue. Un tableau de bord qui meurt parce qu'une courbe
+# decorative a echoue serait l'inverse de ce que ce depot pratique.
+# ---------------------------------------------------------------------------
+_POINTS_MAX_COURBE = 240
+
+
+def _equite_de_depart(courbe: "dict | None") -> "float | None":
+    """L'equite de reference du compte, ou None.
+
+    LUE DANS L'HISTORIQUE DE PORTEFEUILLE (base_value, la valeur de depart
+    qu'Alpaca tient lui-meme pour ce compte), PAS dans state.json. Premiere
+    version du 02/09 : un import de STATE_FILE depuis le module des portes de
+    risque -- et le test test_deux_travaux_ne_se_disputent_pas_l_etat_a_la_
+    meme_minute a refuse le commit : tout script qui importe ce module entre
+    dans le perimetre des travaux qui touchent l'etat, et publish-dashboard
+    demarre 13 fois par jour a la MEME minute que monitor-exits. Un simple
+    import, meme pour une lecture, aurait fait crier ce controle a chaque
+    commit, ou pire, l'aurait fait taire par habitude. Le compte de
+    competition part de 100 000 $ et n'a rien trade avant le kickoff : les
+    deux valeurs sont egales aujourd'hui, et celle-ci vient de la source qui
+    ne pose pas de verrou."""
+    if not isinstance(courbe, dict):
+        return None
+    try:
+        valeur = float(courbe.get("base_value"))
+    except (TypeError, ValueError):
+        return None
+    return valeur if valeur > 0 else None
+
+
+def _courbe_d_equite(kickoff: "str | None") -> "dict | None":
+    """Historique d'equite du compte, par pas de 15 minutes, depuis le
+    kickoff quand il est connu. None si le CLI ne repond pas."""
+    try:
+        d = alpaca_cli.run(["account", "portfolio", "--period", "1W",
+                            "--timeframe", "15Min"])
+    except Exception as e:  # noqa: BLE001 -- best-effort, dit et non fatal
+        print("  WARNING: portfolio history unavailable (%s: %s) -- the "
+              "equity curve is skipped in this snapshot." % (type(e).__name__, e),
+              flush=True)
+        return None
+    if not isinstance(d, dict):
+        return None
+    horodatages, equites = d.get("timestamp") or [], d.get("equity") or []
+    points = [[int(t), float(e)] for t, e in zip(horodatages, equites)
+              if isinstance(t, (int, float)) and isinstance(e, (int, float))]
+    import bilan_semaine
+    debut = bilan_semaine._en_utc(kickoff) if kickoff else None
+    if debut is not None:
+        seuil = debut.timestamp()
+        points = [pt for pt in points if pt[0] >= seuil]
+    if len(points) > _POINTS_MAX_COURBE:
+        pas = len(points) / float(_POINTS_MAX_COURBE)
+        points = [points[int(i * pas)] for i in range(_POINTS_MAX_COURBE)] + [points[-1]]
+    return {"timeframe": d.get("timeframe"), "base_value": d.get("base_value"),
+            "points": points}
+
+
+def _fills_du_compte() -> list:
+    """Les executions (FILL) du compte, ou [] si le CLI ne repond pas."""
+    try:
+        d = alpaca_cli.run(["account", "activity", "list",
+                            "--activity-types", "FILL", "--page-size", "100"])
+    except Exception as e:  # noqa: BLE001
+        print("  WARNING: account activity unavailable (%s: %s) -- realized "
+              "P&L per closed trade is left blank." % (type(e).__name__, e),
+              flush=True)
+        return []
+    if isinstance(d, dict):
+        d = d.get("activities") or []
+    return [f for f in d if isinstance(f, dict)] if isinstance(d, list) else []
+
+
+def _pnl_realise(fills: list, symbole: str) -> "float | None":
+    """Ventes moins achats sur `symbole`, en dollars, multiplicateur 100 pour
+    un contrat d'options (format OCC). None s'il manque un cote."""
+    achats = ventes = 0.0
+    vu_achat = vu_vente = False
+    for f in fills:
+        if f.get("symbol") != symbole:
+            continue
+        try:
+            montant = float(f.get("price")) * float(f.get("qty"))
+        except (TypeError, ValueError):
+            continue
+        if f.get("side") == "buy":
+            achats += montant; vu_achat = True
+        elif f.get("side") == "sell":
+            ventes += montant; vu_vente = True
+    if not (vu_achat and vu_vente):
+        return None
+    multiplicateur = 100 if alpaca_cli.is_option_position({"symbol": symbole}) else 1
+    return round((ventes - achats) * multiplicateur, 2)
+
+
+def _trades_fermes_publiables(entrees, fenetre, fills) -> list:
+    """Les positions FERMEES par le moniteur de sorties dans la fenetre notee,
+    du plus recent au plus ancien, avec le P&L realise quand les fills le
+    permettent."""
+    import bilan_semaine
+    if fenetre is None:
+        return []
+    debut, fin = fenetre
+    fermes = []
+    for e in entrees or []:
+        if not isinstance(e, dict) or e.get("dry_run"):
+            continue
+        t = bilan_semaine._en_utc(e.get("timestamp"))
+        if t is None or not (debut <= t <= fin):
+            continue
+        for a in e.get("exit_actions") or []:
+            if not isinstance(a, dict) or a.get("kind") != "closed":
+                continue
+            fermes.append({
+                "timestamp": e.get("timestamp"),
+                "symbol": a.get("symbol"),
+                "pnl_pct": a.get("pnl_pct"),
+                "label": a.get("label"),
+                "realized": _pnl_realise(fills, a.get("symbol")),
+            })
+    fermes.sort(key=lambda x: x["timestamp"] or "", reverse=True)
+    return fermes
 
 
 def build_snapshot() -> dict:
@@ -271,15 +414,28 @@ def build_snapshot() -> dict:
     positions = alpaca_cli.list_positions()
     recent = decision_log.read_log(limit=30)
     monitor_status = _read_monitor_status()
-    agent_status = _dernier_passage_de_l_agent(decision_log.read_log(limit=200))
+    historique = decision_log.read_log(limit=200)
+    agent_status = _dernier_passage_de_l_agent(historique)
+    kickoff = _kickoff_publie()
+    import bilan_semaine
+    fenetre = bilan_semaine._fenetre()
+    fills = _fills_du_compte()
+    courbe = _courbe_d_equite(kickoff)
 
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
+        # AJOUTES le 02/09/2026 -- voir le bloc de commentaires au-dessus de
+        # _equite_de_depart(). Chacun a son rendu dans docs/index.html ; un
+        # champ publie que la page n'affiche pas est le defaut que le test
+        # de « champs morts » traque.
+        "starting_equity": _equite_de_depart(courbe),
+        "equity_curve": courbe,
+        "closed_trades": _trades_fermes_publiables(historique, fenetre, fills),
         # LU par docs/index.html pour placer le separateur du kickoff et
         # partager le compteur de fuites. Publie parce qu'il est lu : meme
         # discipline que celle appliquee a `portfolio_value`, retire le 28/08
         # pour la raison inverse.
-        "kickoff": _kickoff_publie(),
+        "kickoff": kickoff,
         "team": "Hindsight Alpha",
         # Provenance embarquee dans les DONNEES, pas seulement dans la
         # page : si quelqu'un reprend data.json sans le HTML, l'origine

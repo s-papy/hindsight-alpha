@@ -353,6 +353,41 @@
     table { font-size: 12px; }
     th, td { padding: 8px 8px; }
   }
+
+  /* ---- Refonte du 02/09/2026 : ce qu'un juge voit en dix secondes ----
+     Comparee aux 65 autres soumissions, cette page enterrait son seul trade
+     ferme et sa courbe d'equite sous du texte. Les blocs ci-dessous rendent
+     les MEMES donnees, en tete : equite, P&L, trades fermes, entonnoir,
+     dernier cycle symbole par symbole. Aucune bibliotheque, aucun reseau :
+     la courbe est un SVG construit a partir de data.json. */
+  .hero { display: grid; grid-template-columns: repeat(auto-fit, minmax(185px, 1fr)); gap: 12px; margin: 18px 0 8px; }
+  .hero .card .value { font-size: 24px; white-space: nowrap; }
+  .muted { color: var(--muted); font-size: 13px; }
+  .hero .card .sub { color: var(--muted); font-size: 12px; margin-top: 4px; }
+  .pos { color: var(--green); }
+  .neg { color: var(--red); }
+  .duo { display: grid; grid-template-columns: 1.2fr 1fr; gap: 12px; margin: 12px 0; }
+  @media (max-width: 800px) { .duo { grid-template-columns: 1fr; } }
+  .panel { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; }
+  .panel h3 { margin: 0 0 8px; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600; }
+  .curve svg { width: 100%; height: 170px; display: block; }
+  .curve .legende { display: flex; justify-content: space-between; color: var(--muted); font-size: 11px; margin-top: 4px; font-variant-numeric: tabular-nums; }
+  .cycle-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; }
+  .sym-card { border: 1px solid var(--border); border-radius: 8px; padding: 10px; background: rgba(255,255,255,0.02); }
+  .sym-card .sym { font-weight: 700; font-size: 16px; }
+  .sym-card .badge { display: inline-block; margin-top: 6px; }
+  .sym-card .detail { color: var(--muted); font-size: 11px; margin-top: 8px; line-height: 1.4; }
+  .hv-bar { position: relative; height: 6px; background: rgba(139,146,165,0.18); border-radius: 3px; margin-top: 8px; overflow: hidden; }
+  .hv-bar .fill { position: absolute; left: 0; top: 0; bottom: 0; background: var(--yellow); border-radius: 3px; }
+  .hv-bar .fill.cheap { background: var(--green); }
+  .hv-bar .seuil { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--text); opacity: 0.7; }
+  .funnel .row { display: grid; grid-template-columns: 210px 1fr 48px; gap: 10px; align-items: center; margin: 7px 0; font-size: 13px; }
+  .funnel .row .bar { height: 12px; background: rgba(129,140,248,0.22); border-radius: 6px; overflow: hidden; }
+  .funnel .row .bar i { display: block; height: 100%; background: var(--accent); border-radius: 6px; }
+  .funnel .row .n { text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; }
+  .funnel .row .lib { color: var(--muted); }
+  @media (max-width: 480px) { .funnel .row { grid-template-columns: 130px 1fr 40px; font-size: 12px; } }
+  .badge-accent { background: rgba(129,140,248,0.18); color: var(--accent); }
 </style>
 </head>
 <body>
@@ -365,6 +400,14 @@
     Paper trading only — zero real funds at risk.
   </p>
 </header>
+
+<main class="hero-wrap">
+  <div class="hero" id="hero-cards"></div>
+  <div class="duo">
+    <div class="panel curve" id="equity-curve"></div>
+    <div class="panel" id="latest-cycle"></div>
+  </div>
+</main>
 
 <section class="lecture">
   <h2>How to read this page</h2>
@@ -385,6 +428,16 @@
 <div id="monitor-health-banner"></div>
 
 <main>
+  <section>
+    <h2>Decision funnel, since the kickoff</h2>
+    <div class="panel funnel" id="funnel"></div>
+  </section>
+
+  <section>
+    <h2>Closed Trades</h2>
+    <div id="closed-container"></div>
+  </section>
+
   <section>
     <h2>Account</h2>
     <div class="cards" id="account-cards">
@@ -456,6 +509,11 @@ async function loadDashboard() {
       // Une liste de positions vide se lit « aucune position ouverte ». La
       // page l'affirmait sans avoir rien lu -- le defaut meme que ce depot
       // traque partout, dans le seul endroit qu'un juge regarde.
+      ["hero-cards", () => renderHero(data)],
+      ["equity-curve", () => renderEquityCurve(data.equity_curve || null, data.starting_equity)],
+      ["latest-cycle", () => renderLatestCycle(data.recent_decisions || [])],
+      ["funnel", () => renderFunnel(data.week || null)],
+      ["closed-container", () => renderClosedTrades(data.closed_trades || [])],
       ["account-cards", () => renderAccount(data.account)],
       ["week-container", () => renderWeek(data.week || null)],
       ["positions-container", () => renderPositions(data.positions || [])],
@@ -1588,6 +1646,218 @@ function renderDecisions(decisions) {
     </tr>`;
   }
 }
+
+// ---------------------------------------------------------------------------
+// REFONTE DU 02/09/2026 -- les cinq rendus ci-dessous lisent des champs
+// ajoutes le meme jour a data.json (starting_equity, equity_curve,
+// closed_trades, week.orders_submitted, week.gate_blocked) et des champs qui
+// existaient deja (account, recent_decisions). Meme discipline que le reste
+// de la page : un champ absent se DIT (« not available in this snapshot »),
+// il ne se remplace jamais par un zero qui aurait l'air d'une mesure.
+// ---------------------------------------------------------------------------
+function _num(v) {
+  const n = typeof v === 'string' ? parseFloat(v) : v;
+  return (typeof n === 'number' && !isNaN(n)) ? n : null;
+}
+function fmtSigned(n, decimals) {
+  if (n === null || n === undefined) return '—';
+  const d = decimals === undefined ? 2 : decimals;
+  return (n >= 0 ? '+' : '−') + Math.abs(n).toLocaleString(undefined,
+      { minimumFractionDigits: d, maximumFractionDigits: d });
+}
+
+function renderHero(data) {
+  const el = document.getElementById('hero-cards');
+  if (!el) return;
+  const account = (data && data.account) || {};
+  const week = (data && data.week) || null;
+  const closed = (data && data.closed_trades) || [];
+  const equity = _num(account.equity);
+  const start = _num(data && data.starting_equity);
+  const tiles = [];
+  tiles.push(['Equity', equity === null ? '—' : fmtMoney(equity), 'paper account, live from Alpaca']);
+  if (equity !== null && start !== null && start > 0) {
+    const diff = equity - start;
+    const pct = diff / start * 100;
+    tiles.push(['P&amp;L since start',
+      '<span class="' + (diff >= 0 ? 'pos' : 'neg') + '">' + fmtSigned(diff) + '</span>',
+      fmtSigned(pct, 2) + '% on ' + fmtMoney(start) + ' starting equity']);
+  } else {
+    tiles.push(['P&amp;L since start', '—', 'starting equity not available in this snapshot']);
+  }
+  const realise = closed.map(t => _num(t && t.realized)).filter(v => v !== null);
+  const gagnes = closed.filter(t => _num(t && t.pnl_pct) !== null && _num(t.pnl_pct) > 0).length;
+  const sommeRealisee = realise.length ? realise.reduce((a, b) => a + b, 0) : null;
+  tiles.push(['Realized P&amp;L',
+    sommeRealisee === null ? (closed.length ? '—' : '$0.00')
+      : '<span class="' + (sommeRealisee >= 0 ? 'pos' : 'neg') + '">' + fmtSigned(sommeRealisee) + '</span>',
+    closed.length ? (closed.length + ' closed trade' + (closed.length > 1 ? 's' : '') + ' · ' + gagnes + ' won')
+                  : 'no trade closed since the kickoff yet']);
+  if (week) {
+    const refus = Object.values(week.refused || {}).reduce((a, b) => a + b, 0);
+    const taux = week.verdicts ? Math.round(refus / week.verdicts * 100) : null;
+    const fuites = (week.refused || {})['hindsight guard'] || 0;
+    tiles.push(['Refused', String(refus) + (taux === null ? '' : ' <span class="sub" style="font-size:14px">/ ' + week.verdicts + '</span>'),
+      (taux === null ? 'no verdict yet' : taux + '% of verdicts') + ' · ' + fuites + ' hindsight leak' + (fuites === 1 ? '' : 's') + ' caught']);
+    const ordres = _num(week.orders_submitted);
+    tiles.push(['Orders sent', ordres === null ? '—' : String(ordres),
+      (ordres === null ? 'not counted in this snapshot'
+        : (_num(week.gate_blocked) || 0) + ' blocked by the risk gates')]);
+  } else {
+    tiles.push(['Refused', '—', 'scoring window not available']);
+  }
+  el.innerHTML = tiles.map(([label, value, sub]) =>
+    '<div class="card"><div class="label">' + label + '</div><div class="value">' + value
+    + '</div><div class="sub">' + sub + '</div></div>').join('');
+}
+
+function renderEquityCurve(curve, startingEquity) {
+  const el = document.getElementById('equity-curve');
+  if (!el) return;
+  const points = (curve && Array.isArray(curve.points)) ? curve.points
+      .filter(p => Array.isArray(p) && _num(p[0]) !== null && _num(p[1]) !== null) : [];
+  if (points.length < 2) {
+    el.innerHTML = '<h3>Equity curve</h3><p class="muted">Not available in this snapshot'
+      + ' — the portfolio history call did not answer, or the scoring window has no point yet.</p>';
+    return;
+  }
+  const W = 600, H = 170, padL = 6, padR = 6, padT = 12, padB = 18;
+  const xs = points.map(p => _num(p[0])), ys = points.map(p => _num(p[1]));
+  const start = _num(startingEquity);
+  const lo = Math.min.apply(null, ys.concat(start === null ? [] : [start]));
+  const hi = Math.max.apply(null, ys.concat(start === null ? [] : [start]));
+  const span = (hi - lo) || 1;
+  const x0 = xs[0], x1 = xs[xs.length - 1], dx = (x1 - x0) || 1;
+  const X = t => padL + (t - x0) / dx * (W - padL - padR);
+  const Y = v => padT + (hi - v) / span * (H - padT - padB);
+  const path = points.map((p, i) => (i ? 'L' : 'M') + X(_num(p[0])).toFixed(1) + ' ' + Y(_num(p[1])).toFixed(1)).join(' ');
+  const last = ys[ys.length - 1];
+  const ref = start === null ? ys[0] : start;
+  const couleur = last >= ref ? 'var(--green)' : 'var(--red)';
+  const aire = path + ' L' + X(x1).toFixed(1) + ' ' + (H - padB) + ' L' + X(x0).toFixed(1) + ' ' + (H - padB) + ' Z';
+  const ligneRef = start === null ? '' :
+    '<line x1="' + padL + '" x2="' + (W - padR) + '" y1="' + Y(start).toFixed(1) + '" y2="' + Y(start).toFixed(1)
+    + '" stroke="var(--muted)" stroke-dasharray="4 4" stroke-width="1"/>';
+  const quand = t => { const d = new Date(t * 1000); return isNaN(d) ? '' : d.toISOString().slice(5, 16).replace('T', ' ') + ' UTC'; };
+  el.innerHTML = '<h3>Equity curve · ' + esc(String(curve.timeframe || '')) + ' steps since the kickoff</h3>'
+    + '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" role="img" aria-label="equity curve">'
+    + '<path d="' + aire + '" fill="' + couleur + '" opacity="0.12"/>'
+    + ligneRef
+    + '<path d="' + path + '" fill="none" stroke="' + couleur + '" stroke-width="2"/>'
+    + '</svg>'
+    + '<div class="legende"><span>' + esc(quand(x0)) + '</span>'
+    + '<span>low ' + fmtMoney(lo) + ' · high ' + fmtMoney(hi) + '</span>'
+    + '<span>' + esc(quand(x1)) + '</span></div>';
+}
+
+function _dernierCycle(decisions) {
+  // Le dernier VRAI passage de l'agent : pas un essai a blanc, pas le
+  // moniteur de sorties. Meme critere que _dernier_passage_de_l_agent
+  // cote Python.
+  const tri = (decisions || []).filter(d => d && !d.dry_run
+      && (d.run_type === undefined || d.run_type === null || d.run_type === '' || d.run_type === 'agent')
+      && Array.isArray(d.verdicts) && d.verdicts.length);
+  tri.sort((a, b) => horodatage(b) - horodatage(a));
+  return tri[0] || null;
+}
+
+function renderLatestCycle(decisions) {
+  const el = document.getElementById('latest-cycle');
+  if (!el) return;
+  const d = _dernierCycle(decisions);
+  if (!d) {
+    el.innerHTML = '<h3>Latest cycle</h3><p class="muted">No agent run in this snapshot.</p>';
+    return;
+  }
+  const cartes = d.verdicts.map(v => {
+    v = v || {};
+    const raison = String(v.reason || '');
+    const hv = raison.match(/HV rank\s*=?\s*(\d+(?:\.\d+)?)/i);
+    const fuite = raison.match(/winner \((\d+)\)\s*and in-sample winner \((\d+)\)/i);
+    const garde = /hindsight[_ ]guard/i.test(raison) && !v.tradeable;
+    let badge, classe;
+    if (v.tradeable) { badge = 'TRADEABLE'; classe = 'badge-green'; }
+    else if (garde) { badge = '🛡️ REFUSED · leak'; classe = 'badge-accent'; }
+    else { badge = 'SKIP · vol regime'; classe = 'badge-yellow'; }
+    const sens = v.tradeable ? (v.direction === -1 ? 'bearish → put' : (v.direction === 1 ? 'bullish → call' : '')) : '';
+    let detail = '';
+    if (fuite) detail = 'full history picks <b>' + esc(fuite[1]) + 'd</b>, in-sample picks <b>' + esc(fuite[2]) + 'd</b> — they disagree';
+    else if (hv) detail = 'HV rank <b>' + esc(hv[1]) + '</b> (need &lt; 30)' + (sens ? ' · ' + esc(sens) : '');
+    else detail = esc(raison) + (sens ? ' · ' + esc(sens) : '');
+    let barre = '';
+    if (hv) {
+      const val = Math.max(0, Math.min(100, parseFloat(hv[1])));
+      barre = '<div class="hv-bar"><i class="fill' + (val < 30 ? ' cheap' : '') + '" style="width:' + val.toFixed(0) + '%"></i><i class="seuil" style="left:30%"></i></div>';
+    }
+    return '<div class="sym-card"><div class="sym">' + esc(v.symbol || '?') + '</div>'
+      + '<span class="badge ' + classe + '">' + badge + '</span>'
+      + barre + '<div class="detail">' + detail + '</div></div>';
+  }).join('');
+  const quand = d.timestamp ? new Date(d.timestamp) : null;
+  const titre = quand && !isNaN(quand) ? quand.toISOString().slice(0, 16).replace('T', ' ') + ' UTC' : 'time unknown';
+  el.innerHTML = '<h3>Latest cycle · ' + esc(titre) + '</h3><div class="cycle-grid">' + cartes + '</div>';
+}
+
+function renderFunnel(week) {
+  const el = document.getElementById('funnel');
+  if (!el) return;
+  if (!week) {
+    el.innerHTML = '<p class="muted">The scoring window could not be read, so nothing here is counted.</p>';
+    return;
+  }
+  const refus = week.refused || {};
+  const verdicts = _num(week.verdicts) || 0;
+  const fuites = _num(refus['hindsight guard']) || 0;
+  const retenus = _num(week.tradeable) || 0;
+  const ordres = _num(week.orders_submitted);
+  const bloques = _num(week.gate_blocked);
+  const etapes = [
+    ['Verdicts', verdicts, ''],
+    ['Passed the hindsight guard', verdicts - fuites, fuites + ' refused as leaks'],
+    ['Cheap-volatility regime', retenus, (verdicts - fuites - retenus) + ' skipped, volatility not cheap'],
+    ['Cleared the risk gates → order sent', ordres === null ? null : ordres,
+      ordres === null ? 'not counted in this snapshot' : (bloques || 0) + ' blocked by a gate'],
+  ];
+  const max = Math.max(1, verdicts);
+  el.innerHTML = etapes.map(([lib, n, note]) =>
+    '<div class="row"><span class="lib">' + lib + (note ? ' <span style="opacity:.75">· ' + esc(note) + '</span>' : '') + '</span>'
+    + '<span class="bar"><i style="width:' + (n === null ? 0 : Math.round(n / max * 100)) + '%"></i></span>'
+    + '<span class="n">' + (n === null ? '—' : n) + '</span></div>').join('')
+    + '<p class="muted" style="margin:8px 0 0">Every step is a refusal the agent chose; the last one is the only place an order can come from.</p>';
+}
+
+function _contratFerme(symbole) {
+  // Un contrat FERME n'a plus d'echeance a compter : on garde la traduction
+  // OCC en clair, sans le « N days left » de la table des positions
+  // ouvertes, qui se lirait comme une position encore vivante.
+  const clair = _optionEnClair(symbole);
+  const brut = esc(symbole || '—');
+  return clair ? esc(clair.texte) + '<div class="symbole-brut">' + brut + '</div>' : brut;
+}
+
+function renderClosedTrades(closed) {
+  const el = document.getElementById('closed-container');
+  if (!el) return;
+  const liste = (closed || []).filter(t => t);
+  if (!liste.length) {
+    el.innerHTML = '<div class="empty">No position closed since the kickoff yet.</div>';
+    return;
+  }
+  const rows = liste.map(t => {
+    const pct = _num(t.pnl_pct);
+    const cls = pct === null ? 'badge-muted' : (pct >= 0 ? 'badge-green' : 'badge-red');
+    const lab = pct === null ? '—' : fmtSigned(pct * 100, 1) + '%';
+    const real = _num(t.realized);
+    const quand = t.timestamp ? new Date(t.timestamp) : null;
+    return '<tr><td data-colonne="Closed">' + esc(quand && !isNaN(quand) ? quand.toISOString().slice(0, 16).replace('T', ' ') + ' UTC' : String(t.timestamp || '—')) + '</td>'
+      + '<td data-colonne="Contract">' + _contratFerme(t.symbol) + '</td>'
+      + '<td data-colonne="Exit">' + esc(t.label || '—') + '</td>'
+      + '<td data-colonne="P&L"><span class="badge ' + cls + '">' + lab + '</span></td>'
+      + '<td data-colonne="Realized">' + (real === null ? '—' : '<span class="' + (real >= 0 ? 'pos' : 'neg') + '">' + fmtSigned(real) + '</span>') + '</td></tr>';
+  }).join('');
+  el.innerHTML = '<div style="overflow-x:auto"><table><thead><tr><th>Closed</th><th>Contract</th><th>Exit</th><th>P&amp;L</th><th>Realized</th></tr></thead><tbody>' + rows + '</tbody></table></div>';
+}
+
 
 function renderLeakStat(decisions) {
   // Counts real hindsight-leak catches across the published decision
