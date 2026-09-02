@@ -192,6 +192,45 @@
   footer p { margin: 0 0 6px; }
   footer p:last-child { margin-bottom: 0; }
   .lecture { font-size: 13px; }
+
+  /* ---- deuxieme passe du 02/09 : interactivite et visuels ---- */
+  .pill.live .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); display: inline-block; animation: pulse 2s infinite; }
+  @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(52,211,153,.55); } 70% { box-shadow: 0 0 0 8px rgba(52,211,153,0); } 100% { box-shadow: 0 0 0 0 rgba(52,211,153,0); } }
+  .curve { position: relative; }
+  .curve svg { height: 230px; }
+  .curve path.line { stroke-dasharray: 2600; stroke-dashoffset: 2600; animation: draw 1.8s cubic-bezier(.2,.7,.2,1) forwards; }
+  @keyframes draw { to { stroke-dashoffset: 0; } }
+  .curve .tip { position: absolute; top: 46px; transform: translateX(-50%); background: #0b0d12; border: 1px solid var(--border); border-radius: 8px; padding: 6px 9px; font-size: 11.5px; font-family: var(--mono); pointer-events: none; display: none; white-space: nowrap; color: var(--text); z-index: 2; }
+  .curve .endtag { font-family: var(--mono); font-size: 12px; font-weight: 600; }
+  .gauge { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
+  .gauge svg { width: 64px; height: 64px; flex: none; }
+  .gauge .gv { font-size: 11.5px; color: var(--muted); line-height: 1.4; }
+  .gauge .gv b { color: var(--text); font-family: var(--mono); font-size: 14px; }
+  .strip { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; margin: 0 0 14px; }
+  .day { border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px; font-size: 12px; background: var(--card); }
+  .day .dn { display: block; font-weight: 800; }
+  .day .ds { color: var(--muted); font-size: 11px; }
+  .day.done { border-color: rgba(52,211,153,.5); } .day.done .ds { color: var(--green); }
+  .day.miss { border-color: rgba(248,113,113,.5); } .day.miss .ds { color: var(--red); }
+  .day.todo { opacity: .55; }
+  @media (max-width: 640px) { .strip { grid-template-columns: repeat(3, 1fr); } }
+  .mx-table th { text-align: center; }
+  .mx-table th:first-child, .mx-table td:first-child { text-align: left; font-family: var(--mono); font-size: 12px; color: var(--muted); }
+  .mx-table td.mx { text-align: center; font-size: 15px; font-weight: 700; cursor: help; }
+  td.mx.ok { color: var(--green); background: rgba(52,211,153,.08); }
+  td.mx.leak { background: rgba(129,140,248,.14); }
+  td.mx.skip { color: var(--yellow); background: rgba(251,191,36,.06); }
+  td.mx.gate { background: rgba(248,113,113,.10); }
+  td.mx.none { color: var(--muted); }
+  .legend { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 10px; font-size: 11.5px; color: var(--muted); }
+  .legend .sw { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
+  .sw.ok { background: var(--green); } .sw.leak { background: var(--accent); } .sw.skip { background: var(--yellow); } .sw.gate { background: var(--red); }
+  .payoffs { display: grid; grid-template-columns: 1fr; gap: 12px; margin-top: 12px; }
+  .payoff svg { width: 100%; height: 190px; display: block; }
+  .payoff .legende { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; color: var(--muted); font-size: 11px; margin-top: 6px; font-family: var(--mono); }
+  #refusal-matrix { margin-bottom: 12px; }
+  #closed-container td:first-child { white-space: nowrap; font-family: var(--mono); font-size: 12px; color: var(--muted); }
+  .payoff svg { height: 200px; }
 </style>
 </head>
 <body>
@@ -206,6 +245,7 @@
     </div>
   </div>
   <div class="pills">
+    <span class="pill live" id="snapshot-pill"><i class="dot"></i>snapshot</span>
     <span class="pill paper">● paper trading only</span>
     <a class="pill" href="https://github.com/s-papy/hindsight-alpha" target="_blank" rel="noopener">source · MIT</a>
     <a class="pill" href="https://lablab.ai/ai-hackathons/alpaca-ai-trading-agents-hackathon" target="_blank" rel="noopener">Alpaca AI Trading Agents Hackathon</a>
@@ -218,6 +258,7 @@
 <section class="family">
   <h2><span class="num">01</span> Performance <span class="line"></span></h2>
   <div class="hero" id="hero-cards"></div>
+  <div class="strip" id="week-strip"></div>
   <div class="grid2">
     <div class="panel curve" id="equity-curve"></div>
     <div>
@@ -232,6 +273,7 @@
 <section class="family lecture">
   <h2><span class="num">02</span> The guard <span class="line"></span></h2>
   <div id="leak-stat" class="leak-stat"></div>
+  <div class="panel" id="refusal-matrix"></div>
   <div class="grid2">
     <div class="panel" id="latest-cycle"></div>
     <div class="panel funnel" id="funnel"></div>
@@ -257,6 +299,7 @@
 <section class="family">
   <h2><span class="num">03</span> Positions <span class="line"></span></h2>
   <div id="positions-container"></div>
+  <div id="payoff-container" class="payoffs"></div>
 </section>
 
 <section class="family">
@@ -324,8 +367,13 @@ async function loadDashboard() {
       // Une liste de positions vide se lit « aucune position ouverte ». La
       // page l'affirmait sans avoir rien lu -- le defaut meme que ce depot
       // traque partout, dans le seul endroit qu'un juge regarde.
+      ["snapshot-pill", () => renderTopPills(data)],
       ["hero-cards", () => renderHero(data)],
-      ["equity-curve", () => renderEquityCurve(data.equity_curve || null, data.starting_equity)],
+      ["week-strip", () => renderWeekStrip(data.recent_decisions || [], KICKOFF_MS)],
+      ["equity-curve", () => renderEquityCurve(data.equity_curve || null, data.starting_equity,
+          data.closed_trades || [], data.recent_decisions || [])],
+      ["refusal-matrix", () => renderRefusalMatrix(data.recent_decisions || [], KICKOFF_MS)],
+      ["payoff-container", () => renderPayoffs(data.positions || [], data.underlying_prices || {})],
       ["latest-cycle", () => renderLatestCycle(data.recent_decisions || [])],
       ["funnel", () => renderFunnel(data.week || null)],
       ["closed-container", () => renderClosedTrades(data.closed_trades || [])],
@@ -1490,12 +1538,12 @@ function renderHero(data) {
   const equity = _num(account.equity);
   const start = _num(data && data.starting_equity);
   const tiles = [];
-  tiles.push(['Equity', equity === null ? '—' : fmtMoney(equity), 'paper account, live from Alpaca']);
+  tiles.push(['Equity', equity === null ? '—' : '<span data-n="' + equity + '" data-k="money">' + fmtMoney(equity) + '</span>', 'paper account, live from Alpaca']);
   if (equity !== null && start !== null && start > 0) {
     const diff = equity - start;
     const pct = diff / start * 100;
     tiles.push(['P&amp;L since start',
-      '<span class="' + (diff >= 0 ? 'pos' : 'neg') + '">' + fmtSigned(diff) + '</span>',
+      '<span class="' + (diff >= 0 ? 'pos' : 'neg') + '" data-n="' + diff + '" data-k="signed">' + fmtSigned(diff) + '</span>',
       fmtSigned(pct, 2) + '% on ' + fmtMoney(start) + ' starting equity']);
   } else {
     tiles.push(['P&amp;L since start', '—', 'starting equity not available in this snapshot']);
@@ -1524,9 +1572,11 @@ function renderHero(data) {
   el.innerHTML = tiles.map(([label, value, sub]) =>
     '<div class="card"><div class="label">' + label + '</div><div class="value">' + value
     + '</div><div class="sub">' + sub + '</div></div>').join('');
+  _compterVers(el);
 }
 
-function renderEquityCurve(curve, startingEquity) {
+let _curvePts = [], _curveGeom = null;
+function renderEquityCurve(curve, startingEquity, closed, decisions) {
   const el = document.getElementById('equity-curve');
   if (!el) return;
   const points = (curve && Array.isArray(curve.points)) ? curve.points
@@ -1536,7 +1586,7 @@ function renderEquityCurve(curve, startingEquity) {
       + ' — the portfolio history call did not answer, or the scoring window has no point yet.</p>';
     return;
   }
-  const W = 600, H = 170, padL = 6, padR = 6, padT = 12, padB = 18;
+  const W = 640, H = 230, padL = 8, padR = 8, padT = 16, padB = 22;
   const xs = points.map(p => _num(p[0])), ys = points.map(p => _num(p[1]));
   const start = _num(startingEquity);
   const lo = Math.min.apply(null, ys.concat(start === null ? [] : [start]));
@@ -1553,16 +1603,193 @@ function renderEquityCurve(curve, startingEquity) {
   const ligneRef = start === null ? '' :
     '<line x1="' + padL + '" x2="' + (W - padR) + '" y1="' + Y(start).toFixed(1) + '" y2="' + Y(start).toFixed(1)
     + '" stroke="var(--muted)" stroke-dasharray="4 4" stroke-width="1"/>';
+  // REPERES : chaque ordre envoye (entree) et chaque position fermee (sortie),
+  // poses sur le point de la courbe le plus proche dans le temps.
+  const plusProche = t => { let b = 0; for (let k = 1; k < xs.length; k++) if (Math.abs(xs[k] - t) < Math.abs(xs[b] - t)) b = k; return b; };
+  const marques = [];
+  (decisions || []).forEach(d => {
+    if (!d || d.dry_run || !((d.orders_submitted || 0) > 0)) return;
+    const t = horodatage(d) / 1000; if (isNaN(t) || t < x0 || t > x1) return;
+    marques.push({ t, kind: 'entry', label: 'order sent' });
+  });
+  (closed || []).forEach(c => {
+    const t = c && c.timestamp ? new Date(c.timestamp).getTime() / 1000 : NaN; if (isNaN(t) || t < x0 || t > x1) return;
+    const pct = _num(c.pnl_pct);
+    marques.push({ t, kind: pct !== null && pct < 0 ? 'loss' : 'win', label: (c.label || 'closed') + (pct === null ? '' : ' ' + fmtSigned(pct * 100, 1) + '%') });
+  });
+  const cercles = marques.map(m => { const k = plusProche(m.t); const col = m.kind === 'entry' ? 'var(--accent)' : (m.kind === 'loss' ? 'var(--red)' : 'var(--green)');
+    return '<circle class="mk" cx="' + X(xs[k]).toFixed(1) + '" cy="' + Y(ys[k]).toFixed(1) + '" r="5" fill="' + col + '" stroke="#0b0d12" stroke-width="2"><title>' + esc(m.label) + '</title></circle>'; }).join('');
+  const diff = last - ref, pct = ref ? diff / ref * 100 : null;
+  const tag = '<span class="endtag" style="color:' + couleur + '">' + fmtSigned(diff) + (pct === null ? '' : ' (' + fmtSigned(pct, 2) + '%)') + '</span>';
+  _curvePts = points; _curveGeom = { x0, x1, W, padL, padR };
   const quand = t => { const d = new Date(t * 1000); return isNaN(d) ? '' : d.toISOString().slice(5, 16).replace('T', ' ') + ' UTC'; };
-  el.innerHTML = '<h3>Equity curve · ' + esc(String(curve.timeframe || '')) + ' steps since the kickoff</h3>'
-    + '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" role="img" aria-label="equity curve">'
+  el.innerHTML = '<h3 style="display:flex;justify-content:space-between;gap:10px"><span>Equity curve · ' + esc(String(curve.timeframe || '')) + ' steps since the kickoff · hover for values</span>' + tag + '</h3>'
+    + '<svg id="curve-svg" viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" role="img" aria-label="equity curve" onmousemove="_curveHover(event)" onmouseleave="_curveLeave()">'
     + '<path d="' + aire + '" fill="' + couleur + '" opacity="0.12"/>'
     + ligneRef
-    + '<path d="' + path + '" fill="none" stroke="' + couleur + '" stroke-width="2"/>'
-    + '</svg>'
+    + '<path class="line" d="' + path + '" fill="none" stroke="' + couleur + '" stroke-width="2"/>'
+    + '<line id="curve-cursor" x1="0" x2="0" y1="' + padT + '" y2="' + (H - padB) + '" stroke="var(--text)" stroke-opacity="0.35" style="display:none"/>'
+    + cercles
+    + '</svg><div class="tip" id="curve-tip"></div>'
     + '<div class="legende"><span>' + esc(quand(x0)) + '</span>'
-    + '<span>low ' + fmtMoney(lo) + ' · high ' + fmtMoney(hi) + '</span>'
+    + '<span>low ' + fmtMoney(lo) + ' · high ' + fmtMoney(hi) + ' · <span style="color:var(--accent)">●</span> order sent · <span style="color:var(--green)">●</span> closed</span>'
     + '<span>' + esc(quand(x1)) + '</span></div>';
+}
+function _curveHover(ev) {
+  const g = _curveGeom; if (!g || !_curvePts.length || !ev || !ev.currentTarget) return;
+  const r = ev.currentTarget.getBoundingClientRect();
+  const fx = Math.max(0, Math.min(1, (ev.clientX - r.left) / (r.width || 1)));
+  const t = g.x0 + fx * (g.x1 - g.x0);
+  let b = 0; for (let k = 1; k < _curvePts.length; k++) if (Math.abs(_curvePts[k][0] - t) < Math.abs(_curvePts[b][0] - t)) b = k;
+  const p = _curvePts[b];
+  const X = g.padL + (p[0] - g.x0) / ((g.x1 - g.x0) || 1) * (g.W - g.padL - g.padR);
+  const cur = document.getElementById('curve-cursor');
+  if (cur) { cur.setAttribute('x1', X); cur.setAttribute('x2', X); cur.style.display = 'block'; }
+  const tip = document.getElementById('curve-tip');
+  if (tip) { tip.style.display = 'block'; tip.style.left = (X / g.W * 100).toFixed(2) + '%';
+    tip.innerHTML = '<b>' + fmtMoney(p[1]) + '</b><br>' + new Date(p[0] * 1000).toISOString().slice(5, 16).replace('T', ' ') + ' UTC'; }
+}
+function _curveLeave() {
+  const cur = document.getElementById('curve-cursor'); if (cur) cur.style.display = 'none';
+  const tip = document.getElementById('curve-tip'); if (tip) tip.style.display = 'none';
+}
+
+function _jauge(valeur) {
+  // Arc de 240 degres, seuil a 30 (« need < 30 »), la valeur en chasse fixe au centre.
+  const r = 24, C = 2 * Math.PI * r, arc = C * 240 / 360;
+  const v = Math.max(0, Math.min(100, valeur));
+  const col = v < 30 ? 'var(--green)' : 'var(--yellow)';
+  const angleSeuil = 150 + 240 * 0.30;
+  const rad = (angleSeuil - 90) * Math.PI / 180;
+  const sx1 = 32 + (r - 6) * Math.cos(rad), sy1 = 32 + (r - 6) * Math.sin(rad), sx2 = 32 + (r + 6) * Math.cos(rad), sy2 = 32 + (r + 6) * Math.sin(rad);
+  return '<svg class="gauge-svg" viewBox="0 0 64 64">'
+    + '<circle cx="32" cy="32" r="' + r + '" fill="none" stroke="rgba(139,146,165,0.2)" stroke-width="7" stroke-dasharray="' + arc.toFixed(1) + ' ' + C.toFixed(1) + '" transform="rotate(150 32 32)" stroke-linecap="round"/>'
+    + '<circle cx="32" cy="32" r="' + r + '" fill="none" stroke="' + col + '" stroke-width="7" stroke-dasharray="' + (arc * v / 100).toFixed(1) + ' ' + C.toFixed(1) + '" transform="rotate(150 32 32)" stroke-linecap="round"/>'
+    + '<line x1="' + sx1.toFixed(1) + '" y1="' + sy1.toFixed(1) + '" x2="' + sx2.toFixed(1) + '" y2="' + sy2.toFixed(1) + '" stroke="var(--text)" stroke-width="2" opacity="0.8"/>'
+    + '<text x="32" y="37" text-anchor="middle" font-size="13" font-weight="700" fill="var(--text)" font-family="JetBrains Mono, monospace">' + v.toFixed(0) + '</text>'
+    + '</svg>';
+}
+
+function renderTopPills(data) {
+  const el = document.getElementById('snapshot-pill');
+  if (!el) return;
+  const t = data && data.generated_at ? new Date(data.generated_at).getTime() : NaN;
+  el.innerHTML = '<i class="dot"></i>' + (isNaN(t) ? 'snapshot time unknown' : 'snapshot ' + fmtAge(Math.max(0, Date.now() - t)));
+}
+
+function _passagesAgent(decisions, kickoffMs) {
+  return (decisions || []).filter(d => d && !d.dry_run
+      && (d.run_type === undefined || d.run_type === null || d.run_type === '' || d.run_type === 'agent')
+      && Array.isArray(d.verdicts) && d.verdicts.length && horodatage(d) >= kickoffMs)
+    .sort((a, b) => horodatage(a) - horodatage(b));
+}
+
+function renderRefusalMatrix(decisions, kickoffMs) {
+  // UNE CASE PAR VERDICT depuis le kickoff : la these du projet en un coup
+  // d'oeil -- XLK en violet a chaque ligne, les ordres a droite.
+  const el = document.getElementById('refusal-matrix');
+  if (!el) return;
+  const runs = _passagesAgent(decisions, kickoffMs);
+  if (!runs.length) { el.innerHTML = '<h3>Refusal matrix</h3><p class="muted">No agent run since the kickoff in this snapshot.</p>'; return; }
+  const syms = [];
+  runs.forEach(d => d.verdicts.forEach(v => { if (v && v.symbol && syms.indexOf(v.symbol) < 0) syms.push(v.symbol); }));
+  const cellule = v => {
+    if (!v) return '<td class="mx none">—</td>';
+    const raison = esc(String(v.reason || ''));
+    if (v.tradeable) return '<td class="mx ok" title="' + raison + '">✓</td>';
+    if (/hindsight[_ ]guard/i.test(String(v.reason || ''))) return '<td class="mx leak" title="' + raison + '">🛡️</td>';
+    return '<td class="mx skip" title="' + raison + '">·</td>';
+  };
+  const ordre = d => {
+    const tr = (d.trades || []).filter(t => t);
+    const envoyes = tr.filter(t => t.outcome === 'order_submitted').length;
+    const bloques = tr.filter(t => t.outcome === 'risk_gate_blocked').length;
+    if (envoyes) return '<td class="mx ok" title="' + envoyes + ' order(s) sent">▲ ' + envoyes + '</td>';
+    if (bloques) return '<td class="mx gate" title="blocked by a risk gate">⛔</td>';
+    return '<td class="mx none">—</td>';
+  };
+  const quand = d => { const x = new Date(horodatage(d)); return isNaN(x) ? '?' : x.toISOString().slice(5, 10).replace('-', '/') + ' ' + x.toISOString().slice(11, 16); };
+  const lignes = runs.map(d => '<tr><td>' + quand(d) + '</td>' + syms.map(sy => cellule(d.verdicts.find(v => v && v.symbol === sy))).join('') + ordre(d) + '</tr>').join('');
+  el.innerHTML = '<h3>Refusal matrix · every verdict since the kickoff</h3>'
+    + '<div style="overflow-x:auto"><table class="mx-table"><thead><tr><th>run (UTC)</th>' + syms.map(sy => '<th>' + esc(sy) + '</th>').join('') + '<th>order</th></tr></thead><tbody>' + lignes + '</tbody></table></div>'
+    + '<div class="legend"><span><i class="sw ok"></i>tradeable</span><span><i class="sw leak"></i>refused · hindsight leak</span><span><i class="sw skip"></i>skipped · volatility not cheap</span><span><i class="sw gate"></i>blocked by a risk gate</span></div>';
+}
+
+function renderWeekStrip(decisions, kickoffMs, nowMs) {
+  // Les jours de bourse de la semaine notee, du vendredi du kickoff au
+  // vendredi suivant. `nowMs` est un parametre pour que le test fige
+  // l'horloge -- la famille de tests « horloge reelle » a deja mordu trois fois.
+  const el = document.getElementById('week-strip');
+  if (!el) return;
+  const now = nowMs === undefined ? Date.now() : nowMs;
+  const JOUR = 86400000, start = new Date(kickoffMs);
+  if (isNaN(start)) { el.innerHTML = ''; return; }
+  const jours = [];
+  for (let i = 0; i < 10 && jours.length < 6; i++) {
+    const d = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate() + i));
+    if (d.getUTCDay() >= 1 && d.getUTCDay() <= 5) jours.push(d);
+  }
+  const parJour = {};
+  _passagesAgent(decisions, kickoffMs).forEach(d => { const k = new Date(horodatage(d)).toISOString().slice(0, 10); parJour[k] = (parJour[k] || 0) + 1; });
+  const NOMS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  el.innerHTML = jours.map(d => {
+    const k = d.toISOString().slice(0, 10), n = parJour[k] || 0;
+    const attendu = now > d.getTime() + 20 * 3600000;   // l'agent tourne a 19:37 UTC
+    let cls, txt;
+    if (n) { cls = 'done'; txt = '✓ ' + n + ' run' + (n > 1 ? 's' : ''); }
+    else if (attendu) { cls = 'miss'; txt = 'no run'; }
+    else { cls = 'todo'; txt = (now >= d.getTime() && now < d.getTime() + JOUR) ? 'today · 19:37 UTC' : 'upcoming'; }
+    return '<div class="day ' + cls + '"><span class="dn">' + NOMS[d.getUTCDay()] + ' ' + d.getUTCDate() + '</span><span class="ds">' + txt + '</span></div>';
+  }).join('');
+}
+
+function renderPayoffs(positions, prices) {
+  const el = document.getElementById('payoff-container');
+  if (!el) return;
+  const opts = (positions || []).map(p => p || {}).map(p => ({ p, clair: _optionEnClair(p.symbol), m: /^([A-Z]{1,6})(\d{6})([CP])(\d{8})$/.exec(String(p.symbol || '')) }))
+    .filter(o => o.clair && o.m);
+  if (!opts.length) { el.innerHTML = ''; return; }
+  el.innerHTML = opts.map(o => {
+    const K = parseInt(o.m[4], 10) / 1000, put = o.m[3] === 'P', racine = o.m[1];
+    const qty = Math.max(1, parseInt(o.p.qty, 10) || 1), cost = _num(o.p.cost_basis);
+    const prem = cost === null ? null : cost / (qty * 100);
+    const spot = prices ? _num(prices[racine]) : null;
+    const lo = K * 0.94, hi = K * 1.06, W = 640, H = 190, padL = 8, padR = 8, padT = 18, padB = 26;
+    const pay = S => ((put ? Math.max(K - S, 0) : Math.max(S - K, 0)) - (prem || 0)) * 100 * qty;
+    const N = 80, pts = []; let ymin = Infinity, ymax = -Infinity;
+    for (let i = 0; i <= N; i++) { const S = lo + (hi - lo) * i / N, y = pay(S); pts.push([S, y]); ymin = Math.min(ymin, y); ymax = Math.max(ymax, y); }
+    if (ymin === ymax) ymax = ymin + 1;
+    const X = S => padL + (S - lo) / (hi - lo) * (W - padL - padR), Y = y => padT + (ymax - y) / (ymax - ymin) * (H - padT - padB);
+    const d = pts.map((q, i) => (i ? 'L' : 'M') + X(q[0]).toFixed(1) + ' ' + Y(q[1]).toFixed(1)).join(' ');
+    const be = prem === null ? null : (put ? K - prem : K + prem);
+    const zero = '<line x1="' + padL + '" x2="' + (W - padR) + '" y1="' + Y(0).toFixed(1) + '" y2="' + Y(0).toFixed(1) + '" stroke="var(--muted)" stroke-dasharray="4 4"/>';
+    const gain = '<path d="' + d + ' L' + X(hi).toFixed(1) + ' ' + Y(0).toFixed(1) + ' L' + X(lo).toFixed(1) + ' ' + Y(0).toFixed(1) + ' Z" fill="var(--green)" opacity="0.10"/>';
+    const beL = be === null ? '' : '<line x1="' + X(be).toFixed(1) + '" x2="' + X(be).toFixed(1) + '" y1="' + padT + '" y2="' + (H - padB) + '" stroke="var(--yellow)" stroke-dasharray="3 3"/>';
+    const spotOk = spot !== null && spot !== undefined && spot >= lo && spot <= hi;
+    const spotL = !spotOk ? '' : '<line x1="' + X(spot).toFixed(1) + '" x2="' + X(spot).toFixed(1) + '" y1="' + padT + '" y2="' + (H - padB) + '" stroke="var(--accent)" stroke-width="2"/>';
+    return '<div class="panel payoff"><h3>Payoff at expiry · ' + esc(o.clair.texte) + ' · ×' + qty + '</h3>'
+      + '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" role="img" aria-label="payoff at expiry">' + gain + zero + beL + spotL
+      + '<path d="' + d + '" fill="none" stroke="var(--green)" stroke-width="2.5"/></svg>'
+      + '<div class="legende"><span>max loss ' + (cost === null ? '—' : fmtMoney(cost)) + ' · the premium paid, nothing more</span>'
+      + '<span style="color:var(--yellow)">┆ break-even ' + (be === null ? '?' : be.toFixed(2)) + '</span>'
+      + (spotOk ? '<span style="color:var(--accent)">│ ' + esc(racine) + ' last close ' + spot.toFixed(2) + '</span>' : '<span>last close not available in this snapshot</span>')
+      + '<span>' + (put ? 'profits if ' + esc(racine) + ' closes below ' : 'profits if ' + esc(racine) + ' closes above ') + (be === null ? '?' : be.toFixed(2)) + ' at expiry</span></div></div>';
+  }).join('');
+}
+
+function _compterVers(racine) {
+  // Compte-a-rebours des chiffres de tete : navigateur seulement. Sous node
+  // (tests) il n'y a ni window ni querySelectorAll, et le texte final est
+  // deja en place -- l'animation est un plus, jamais une dependance.
+  if (typeof window === 'undefined' || !window.requestAnimationFrame || !racine || !racine.querySelectorAll) return;
+  racine.querySelectorAll('[data-n]').forEach(n => {
+    const cible = parseFloat(n.getAttribute('data-n')), kind = n.getAttribute('data-k');
+    if (isNaN(cible)) return;
+    const t0 = performance.now(), dur = 900;
+    const fmt = v => kind === 'money' ? fmtMoney(v) : (kind === 'signed' ? fmtSigned(v) : String(Math.round(v)));
+    const pas = now => { const k = Math.min(1, (now - t0) / dur), e = 1 - Math.pow(1 - k, 3); n.textContent = fmt(cible * e); if (k < 1) window.requestAnimationFrame(pas); };
+    window.requestAnimationFrame(pas);
+  });
 }
 
 function _dernierCycle(decisions) {
@@ -1597,16 +1824,16 @@ function renderLatestCycle(decisions) {
     const sens = v.tradeable ? (v.direction === -1 ? 'bearish → put' : (v.direction === 1 ? 'bullish → call' : '')) : '';
     let detail = '';
     if (fuite) detail = 'full history picks <b>' + esc(fuite[1]) + 'd</b>, in-sample picks <b>' + esc(fuite[2]) + 'd</b> — they disagree';
-    else if (hv) detail = 'HV rank <b>' + esc(hv[1]) + '</b> (need &lt; 30)' + (sens ? ' · ' + esc(sens) : '');
+    else if (hv) detail = sens ? esc(sens) : '';
     else detail = esc(raison) + (sens ? ' · ' + esc(sens) : '');
-    let barre = '';
+    let jauge = '';
     if (hv) {
-      const val = Math.max(0, Math.min(100, parseFloat(hv[1])));
-      barre = '<div class="hv-bar"><i class="fill' + (val < 30 ? ' cheap' : '') + '" style="width:' + val.toFixed(0) + '%"></i><i class="seuil" style="left:30%"></i></div>';
+      const val = parseFloat(hv[1]);
+      jauge = '<div class="gauge">' + _jauge(val) + '<div class="gv">HV rank <b>' + esc(hv[1]) + '</b><br>' + (val < 30 ? 'cheap · below 30' : 'not cheap · need &lt; 30') + '</div></div>';
     }
     return '<div class="sym-card"><div class="sym">' + esc(v.symbol || '?') + '</div>'
       + '<span class="badge ' + classe + '">' + badge + '</span>'
-      + barre + '<div class="detail">' + detail + '</div></div>';
+      + jauge + (detail ? '<div class="detail">' + detail + '</div>' : '') + '</div>';
   }).join('');
   const quand = d.timestamp ? new Date(d.timestamp) : null;
   const titre = quand && !isNaN(quand) ? quand.toISOString().slice(0, 16).replace('T', ' ') + ' UTC' : 'time unknown';

@@ -391,6 +391,24 @@ def _trades_fermes_publiables(entrees, fenetre, fills) -> list:
     return fermes
 
 
+def _prix_des_sous_jacents(positions) -> dict:
+    """Dernier cours de cloture connu de chaque sous-jacent d'option ouverte,
+    pour tracer le payoff a l'echeance. Best-effort : un sous-jacent muet est
+    simplement absent, la page trace alors le payoff sans le spot."""
+    import re as _re
+    prix = {}
+    for pos in positions or []:
+        m = _re.match(r"^([A-Z]{1,6})\d{6}[CP]\d{8}$", str((pos or {}).get("symbol") or ""))
+        if not m or m.group(1) in prix:
+            continue
+        try:
+            prix[m.group(1)] = float(alpaca_cli.get_last_price(m.group(1)))
+        except Exception as e:  # noqa: BLE001
+            print("  WARNING: last price unavailable for %s (%s) -- payoff drawn "
+                  "without the spot." % (m.group(1), type(e).__name__), flush=True)
+    return prix
+
+
 def build_snapshot() -> dict:
     config.require_credentials()
     account = alpaca_cli.get_account()
@@ -441,6 +459,7 @@ def build_snapshot() -> dict:
         "starting_equity": _equite_de_depart(courbe),
         "equity_curve": courbe,
         "closed_trades": _trades_fermes_publiables(historique, fenetre, fills),
+        "underlying_prices": _prix_des_sous_jacents(positions),
         # LU par docs/index.html pour placer le separateur du kickoff et
         # partager le compteur de fuites. Publie parce qu'il est lu : meme
         # discipline que celle appliquee a `portfolio_value`, retire le 28/08

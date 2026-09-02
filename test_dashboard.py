@@ -1921,7 +1921,8 @@ class TestLaTeteDePageDuDeuxSeptembre(BaseRendu):
         self.assertIn("2026-09-01 19:37 UTC", h, "le dernier VRAI passage est celui du 01/09, pas l'essai à blanc")
         self.assertNotIn("ZZZ", h, "un essai à blanc ne doit pas passer pour le dernier cycle")
         self.assertIn("TRADEABLE", h); self.assertIn("bearish → put", h)
-        self.assertIn("HV rank <b>47.2</b>", h); self.assertIn("width:47%", h)
+        self.assertIn("HV rank <b>47.2</b>", h); self.assertIn("gauge-svg", h)
+        self.assertIn("not cheap · need", h); self.assertNotIn("cheap · below 30", h.split("XLK")[0].split("GLD")[1])
         self.assertIn("picks <b>90d</b>", h); self.assertIn("picks <b>10d</b>", h)
         self.assertIn("REFUSED · leak", h)
 
@@ -1952,3 +1953,84 @@ class TestLaTeteDePageDuDeuxSeptembre(BaseRendu):
         self.assertNotIn("days left", h, "un contrat fermé n'a plus d'échéance à compter")
         self.assertIn("+102.1%", h); self.assertIn("+798.00", h); self.assertIn("take-profit", h)
         self.assertIn("No position closed", r["vide"])
+
+
+class TestLaDeuxiemePasseDuDeuxSeptembre(BaseRendu):
+    """Matrice des refus, bande de la semaine, payoff, reperes sur la courbe,
+    pastille d'age : la meme regle -- ce qui manque se dit, l'horloge est un
+    parametre, et rien ne depend du navigateur pour le texte final."""
+
+    DECISIONS = """[
+      {timestamp:"2026-08-28T19:37:13+00:00", run_type:"agent", dry_run:false, orders_submitted:1, verdicts:[
+        {symbol:"SPY", tradeable:true, reason:"cheap-vol regime confirmed, hindsight_guard clean", direction:-1},
+        {symbol:"XLK", tradeable:false, reason:"hindsight_guard: full-window winner (90) and in-sample winner (10) disagree"}],
+       trades:[{symbol:"SPY", outcome:"order_submitted"}]},
+      {timestamp:"2026-08-31T19:37:12+00:00", run_type:"agent", dry_run:false, orders_submitted:0, verdicts:[
+        {symbol:"SPY", tradeable:true, reason:"cheap-vol regime confirmed"},
+        {symbol:"XLK", tradeable:false, reason:"hindsight_guard: windows disagree"}],
+       trades:[{symbol:"SPY", outcome:"risk_gate_blocked"}]},
+      {timestamp:"2026-08-30T12:00:00+00:00", run_type:"agent", dry_run:true, verdicts:[{symbol:"ZZZ", tradeable:true, reason:"x"}]},
+      {timestamp:"2026-08-27T19:37:00+00:00", run_type:"agent", dry_run:false, verdicts:[{symbol:"AVANT", tradeable:true, reason:"x"}]}
+    ]"""
+
+    def test_la_matrice_a_une_case_par_verdict_et_ignore_blanc_et_avant_kickoff(self):
+        r = self.executer("""
+            renderRefusalMatrix(%s, Date.UTC(2026, 7, 28, 15, 0));
+            _resultats.html = document.getElementById('refusal-matrix').innerHTML;
+        """ % self.DECISIONS)
+        h = r["html"]
+        self.assertEqual(h.count('class="mx leak"'), 2, "XLK doit être violet sur chaque ligne")
+        self.assertEqual(h.count('class="mx ok"'), 3, "deux SPY retenus + un ordre envoyé")
+        self.assertIn('class="mx gate"', h, "le passage bloqué par une porte doit se voir")
+        self.assertNotIn("ZZZ", h); self.assertNotIn("AVANT", h)
+        self.assertIn("08/28 19:37", h)
+
+    def test_la_bande_de_la_semaine_fige_son_horloge(self):
+        r = self.executer("""
+            renderWeekStrip(%s, Date.UTC(2026, 7, 28, 15, 0), Date.UTC(2026, 8, 2, 13, 0));
+            _resultats.html = document.getElementById('week-strip').innerHTML;
+        """ % self.DECISIONS)
+        h = r["html"]
+        self.assertEqual(h.count('class="day '), 6, "du vendredi du kickoff au vendredi suivant, jours de bourse")
+        self.assertIn("Fri 28", h); self.assertIn("Fri 4", h)
+        self.assertEqual(h.count("day done"), 2)
+        self.assertEqual(h.count("day miss"), 1, "le mardi 1er sans passage est manquant, mercredi 2 a 13h n'est pas encore attendu")
+        self.assertIn("today · 19:37 UTC", h)
+
+    def test_le_payoff_donne_le_seuil_de_rentabilite_et_le_spot(self):
+        r = self.executer("""
+            renderPayoffs([{symbol:"SPY260908P00761000", qty:"2", cost_basis:"902"}], {SPY: 761.78});
+            _resultats.avec = document.getElementById('payoff-container').innerHTML;
+            renderPayoffs([{symbol:"SPY260908P00761000", qty:"2", cost_basis:"902"}], {});
+            _resultats.sans = document.getElementById('payoff-container').innerHTML;
+            renderPayoffs([], {});
+            _resultats.vide = document.getElementById('payoff-container').innerHTML;
+        """)
+        self.assertIn("break-even 756.49", r["avec"], "761 − 902/(2×100) = 756.49")
+        self.assertIn("SPY last close 761.78", r["avec"])
+        self.assertIn("max loss $902.00", r["avec"])
+        self.assertNotIn('stroke="var(--accent)"', r["sans"], "sans prix, pas de ligne de spot inventée")
+        self.assertIn("last close not available", r["sans"], "l'absence se dit, elle ne se tait pas")
+        self.assertEqual(r["vide"], "")
+
+    def test_la_courbe_porte_les_reperes_d_entree_et_de_sortie(self):
+        r = self.executer("""
+            renderEquityCurve({timeframe:"15Min", points:[[1000,100000],[1900,100200],[2800,100100],[3700,100900]]}, 100000,
+              [{timestamp:new Date(2800*1000).toISOString(), pnl_pct:1.02, label:"take-profit"}],
+              [{timestamp:new Date(1900*1000).toISOString(), dry_run:false, orders_submitted:1}]);
+            _resultats.html = document.getElementById('equity-curve').innerHTML;
+        """)
+        h = r["html"]
+        self.assertEqual(h.count('class="mk"'), 2)
+        self.assertIn("take-profit +102.0%", h); self.assertIn("order sent", h)
+        self.assertIn("+900.00 (+0.90%)", h, "l'étiquette de fin dit le P&amp;L depuis le départ")
+        self.assertIn('class="line"', h, "la ligne animée doit porter sa classe")
+
+    def test_la_pastille_dit_l_age_de_l_instantane(self):
+        r = self.executer("""
+            const _D = Date; const T = _D.UTC(2026, 8, 2, 13, 30);
+            Date = class extends _D { constructor(...a) { super(...(a.length ? a : [T])); } static now() { return T; } static UTC(...a) { return _D.UTC(...a); } };
+            renderTopPills({generated_at: new _D(T - 25*60000).toISOString()});
+            _resultats.html = document.getElementById('snapshot-pill').innerHTML;
+        """)
+        self.assertIn("snapshot 25 minutes ago", r["html"])

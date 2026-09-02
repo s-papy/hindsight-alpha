@@ -8175,3 +8175,16 @@ class TestLesNouveauxChampsDuTableauDeBordSontBestEffort(unittest.TestCase):
         self.assertEqual(self.pd._equite_de_depart({"base_value": 100000}), 100000.0)
         self.assertIsNone(self.pd._equite_de_depart(None))
         self.assertIsNone(self.pd._equite_de_depart({"base_value": "n/a"}))
+
+
+    def test_le_prix_des_sous_jacents_est_best_effort_et_sans_doublon(self):
+        appels = []
+        def prix(sym):
+            appels.append(sym)
+            if sym == "GLD": raise RuntimeError("no bars")
+            return 761.78
+        with self.mock.patch.object(self.pd.alpaca_cli, "get_last_price", prix):
+            r = self.pd._prix_des_sous_jacents([{"symbol": "SPY260908P00761000"}, {"symbol": "SPY260904P00769000"},
+                                                {"symbol": "GLD260904P00300000"}, {"symbol": "AAPL"}, None])
+        self.assertEqual(r, {"SPY": 761.78})
+        self.assertEqual(appels, ["SPY", "GLD"], "un sous-jacent n'est demandé qu'une fois, une action nue jamais")
