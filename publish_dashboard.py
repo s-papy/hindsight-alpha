@@ -401,6 +401,90 @@ _DELAI_LOCAL = 30
 _DELAI_RESEAU = 120
 
 
+def _integrer_l_amont() -> bool:
+    """Met les commits locaux A JOUR par rapport a l'amont AVANT de pousser.
+
+    AJOUTE le 02/09/2026, apres TROIS JOURS de tableau de bord public fige --
+    lundi 31/08 et mardi 01/09 en entier, les deux premiers jours ouvres de la
+    semaine jugee, plus le mercredi matin. Cause mesuree dans
+    publish_dashboard.log et push_pending.log, pas devinee : quatre PR
+    (#2 a #5) fusionnees sur GitHub les 30 et 31/08 ont fait avancer
+    origin/main de 16 commits, pendant que CE clone -- celui que launchd
+    fait tourner -- continuait a committer ses instantanes par-dessus
+    l'ancien sommet. Des lors, CHAQUE `git push` etait rejete
+    « non-fast-forward », 25 fois de suite, toutes les 30 minutes, et
+    24 instantanes se sont empiles en local sans jamais etre publies. Les
+    agents, eux, tournaient : une position fermee en take-profit, une autre
+    ouverte -- mais la page publique n'en montrait rien.
+
+    Le message d'erreur du push rejete nommait bien « the remote having
+    moved ahead » -- mais ne faisait rien pour l'integrer, et attribuait le
+    cas a une collision avec push-pending.plist « qui se cicatrise au cycle
+    suivant ». Une fusion de PR ne se cicatrise jamais toute seule.
+
+    Ce que fait cette fonction : `git fetch`, puis, si l'amont contient des
+    commits que HEAD n'a pas, `git rebase` des commits LOCAUX (les
+    instantanes, qui ne touchent que docs/data.json et decision_log.jsonl)
+    par-dessus l'amont. Ce n'est PAS une reecriture d'historique au sens
+    interdit par CLAUDE.md : seuls des commits que personne n'a encore vus
+    sont deplaces, l'amont n'est jamais touche, et le push qui suit reste un
+    fast-forward -- githooks/pre-push continue de refuser tout le reste.
+
+    Si le rebase echoue (conflit reel, arbre de travail sale), il est AVORTE
+    tout de suite : le depot revient exactement a l'etat d'avant, rien n'est
+    perdu, et on le dit. Le push qui suit sera rejete comme avant -- mais
+    avec la cause ecrite juste au-dessus.
+
+    Rend True si le push peut etre tente, False si l'integration a echoue.
+    Ne leve jamais : un echec ici ne doit pas masquer celui, plus parlant, du
+    push lui-meme.
+    """
+    try:
+        subprocess.run(["git", "fetch", "--quiet"], check=True,
+                       timeout=_DELAI_RESEAU, env=_ENV_GIT)
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
+        print("  WARNING: `git fetch` failed (%s) -- cannot tell whether the "
+              "remote moved ahead; trying the push anyway, it will say."
+              % type(e).__name__, flush=True)
+        return True
+    contenu = subprocess.run(["git", "merge-base", "--is-ancestor",
+                              "@{upstream}", "HEAD"],
+                             capture_output=True, timeout=_DELAI_LOCAL,
+                             env=_ENV_GIT)
+    if contenu.returncode == 0:
+        return True          # l'amont est deja sous HEAD : rien a integrer
+    if contenu.returncode != 1:
+        print("  WARNING: cannot compare HEAD with its upstream (exit %d): "
+              "no upstream configured? Trying the push anyway."
+              % contenu.returncode, flush=True)
+        return True
+    print("  The remote moved ahead of this branch (a PR merged on GitHub, "
+          "most likely): rebasing the local commits on top of it before "
+          "pushing.", flush=True)
+    try:
+        subprocess.run(["git", "rebase", "--quiet", "@{upstream}"], check=True,
+                       timeout=_DELAI_LOCAL, env=_ENV_GIT)
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
+        try:
+            subprocess.run(["git", "rebase", "--abort"],
+                           timeout=_DELAI_LOCAL, env=_ENV_GIT)
+        except Exception:
+            pass
+        print("  ERROR: rebasing the local commits onto the remote FAILED "
+              "(%s) and was ABORTED: the repo is exactly as before, nothing "
+              "is lost, the local commits are intact -- but they cannot be "
+              "published until an operator integrates the remote by hand "
+              "(`git pull --rebase`, then resolve what conflicts). The usual "
+              "causes: a remote commit touched docs/data.json or "
+              "decision_log.jsonl too, or the working tree has uncommitted "
+              "changes to a file the remote also changed."
+              % type(e).__name__, flush=True)
+        return False
+    print("  Remote integrated; the push below is a fast-forward again.",
+          flush=True)
+    return True
+
+
 def git_publish() -> None:
     paths = ["docs/data.json", "decision_log.jsonl"]
     # LA TROISIEME JUMELLE. Le commit refuse et le push rejete sont expliques
@@ -511,6 +595,12 @@ def git_publish() -> None:
     # delai depasse ne veut pas dire « ca a echoue », il veut dire « ON NE SAIT
     # PAS ». Le commit local est deja fait ; le push a pu atteindre GitHub sans
     # rendre la main. Le dire, plutot que de laisser croire a un echec net.
+    #
+    # AVANT le push, depuis le 02/09/2026 : integrer ce que l'amont a recu
+    # entre-temps (une PR fusionnee sur GitHub), sinon le push est rejete
+    # « non-fast-forward » a CHAQUE cycle et rien ne se cicatrise jamais --
+    # trois jours de page publique figee. Voir _integrer_l_amont().
+    _integrer_l_amont()
     try:
         subprocess.run(["git", "push"], check=True,
                        timeout=_DELAI_RESEAU, env=_ENV_GIT)
@@ -546,11 +636,15 @@ def git_publish() -> None:
             "so without saying why. Local commits keep piling up, and a single "
             "successful `git push` publishes the whole backlog at once. Common "
             "causes: credentials expired, GitHub refusing the commit e-mail "
-            "(GH007), or the remote having moved ahead of this branch -- most "
-            "often push-pending.plist (runs every 30 min, 7 days a week) "
-            "winning the same race, confirmed reproducible 31/08 with two real "
-            "concurrent pushes. Self-heals next cycle either way; if it "
-            "persists, run `git push` by hand to see the exact refusal."
+            "(GH007), or the remote having moved ahead of this branch in the "
+            "seconds since it was integrated just above -- push-pending.plist "
+            "(runs every 30 min, 7 days a week) winning the same race, "
+            "confirmed reproducible 31/08 with two real concurrent pushes; "
+            "that one self-heals next cycle. A remote that moved ahead by a "
+            "PR merge does NOT self-heal by itself: it is rebased under the "
+            "local commits before every push since 02/09 -- if that rebase "
+            "failed, its ERROR is printed just above. If it persists, run "
+            "`git push` by hand to see the exact refusal."
             % refus.returncode,
             flush=True,
         )
@@ -610,6 +704,7 @@ def pousser_les_commits_en_attente() -> None:
     Best-effort et jamais fatal : si la poussee echoue, on le dit et on
     laisse remonter l'erreur d'origine, qui est plus interessante.
     """
+    _integrer_l_amont()
     try:
         subprocess.run(["git", "push"], check=True,
                        timeout=_DELAI_RESEAU, env=_ENV_GIT)

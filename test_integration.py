@@ -7549,6 +7549,150 @@ class TestUnPushREJETESeRaconte(unittest.TestCase):
         self.assertNotIn("ERROR", sortie, sortie)
 
 
+class TestUnAmontQuiAAvanceEstINTEGREAvantLePush(unittest.TestCase):
+    """TROIS JOURS de tableau de bord public figé, du vendredi 28/08 au soir
+    au mercredi 02/09 à midi — lundi 31/08 et mardi 01/09 en entier, les deux
+    premiers jours ouvrés de la semaine jugée.
+
+    Cause LUE dans publish_dashboard.log et push_pending.log, pas devinée :
+    quatre PR (#2 à #5) fusionnées sur GitHub les 30 et 31/08 ont fait
+    avancer origin/main de 16 commits, pendant que le clone que launchd fait
+    tourner continuait à committer ses instantanés par-dessus l'ancien
+    sommet. Chaque `git push` était alors rejeté « non-fast-forward » —
+    25 fois de suite, toutes les 30 minutes — et 24 instantanés se sont
+    empilés en local sans jamais être publiés. Les agents, eux, tournaient
+    (une position fermée en take-profit, une autre ouverte) ; la page
+    publique n'en montrait rien.
+
+    Le message du push rejeté nommait bien « the remote having moved
+    ahead », mais ne faisait RIEN pour l'intégrer, et l'attribuait à une
+    collision avec push-pending.plist « qui se cicatrise au cycle suivant ».
+    Une fusion de PR ne se cicatrise jamais toute seule.
+
+    Reproduit ici avec un VRAI amont (dépôt bare), un VRAI clone qui publie,
+    et un second clone qui joue la PR fusionnée : sans `_integrer_l_amont()`,
+    le premier test tombe sur « REJECTED » — vérifié par mutation le 02/09
+    avant d'écrire ce texte."""
+
+    def _scenario(self, pr=True, conflit=False):
+        import shutil, subprocess, tempfile
+        d = Path(tempfile.mkdtemp(prefix="hindsight-amont-"))
+        graine, amont = d / "graine", d / "amont.git"
+        local, autre = d / "local", d / "autre"
+
+        def git(*args, cwd=None):
+            subprocess.run([*GIT_NEUTRE, *args], cwd=str(cwd) if cwd else None,
+                           check=True, capture_output=True, timeout=30)
+
+        git("init", "-q", str(graine))
+        (graine / "docs").mkdir()
+        (graine / "docs" / "data.json").write_text('{"v": 0}\n', encoding="utf-8")
+        (graine / "decision_log.jsonl").write_text("", encoding="utf-8")
+        (graine / "code.py").write_text("x = 0\n", encoding="utf-8")
+        git("add", "-A", cwd=graine)
+        git("commit", "-q", "-m", "base", cwd=graine)
+        git("clone", "-q", "--bare", str(graine), str(amont))
+        git("clone", "-q", str(amont), str(local))
+        git("clone", "-q", str(amont), str(autre))
+        for depot in (local, autre):
+            git("config", "user.email", "test@example.invalid", cwd=depot)
+            git("config", "user.name", "hindsight-test", cwd=depot)
+        sha_pr = None
+        if pr:
+            # La PR fusionnée « ailleurs » : l'amont avance, le clone qui
+            # publie n'en sait rien.
+            (autre / "code.py").write_text("x = 1\n", encoding="utf-8")
+            if conflit:
+                (autre / "docs" / "data.json").write_text('{"v": "conflit"}\n', encoding="utf-8")
+            git("commit", "-q", "-am", "fusion d'une PR", cwd=autre)
+            git("push", "-q", cwd=autre)
+            r = subprocess.run([*GIT_NEUTRE, "-C", str(autre), "rev-parse", "HEAD"],
+                               capture_output=True, text=True, timeout=30)
+            sha_pr = r.stdout.strip()
+        # L'instantané local, pas encore committé : c'est git_publish() qui
+        # le committe, comme sous launchd.
+        (local / "docs" / "data.json").write_text('{"v": 1}\n', encoding="utf-8")
+        self.addCleanup(shutil.rmtree, d, ignore_errors=True)
+        return amont, local, sha_pr
+
+    def _publier(self, local):
+        import contextlib, importlib, io
+        import publish_dashboard as pd
+        importlib.reload(pd)
+        avant = os.getcwd()
+        os.chdir(str(local))
+        tampon = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(tampon):
+                try:
+                    pd.git_publish()
+                    leve = None
+                except Exception as e:
+                    leve = type(e).__name__
+        finally:
+            os.chdir(avant)
+        return leve, tampon.getvalue()
+
+    def _sujets(self, depot, ref="HEAD"):
+        import subprocess
+        r = subprocess.run([*GIT_NEUTRE, "-C", str(depot), "log", "--format=%s", ref],
+                           capture_output=True, text=True, timeout=30)
+        return r.stdout.split("\n")[:-1]
+
+    def _est_ancetre(self, depot, ancetre, ref):
+        import subprocess
+        r = subprocess.run([*GIT_NEUTRE, "-C", str(depot), "merge-base",
+                            "--is-ancestor", ancetre, ref], timeout=30)
+        return r.returncode == 0
+
+    def test_le_snapshot_est_publie_PAR_DESSUS_la_PR_fusionnee(self):
+        amont, local, sha_pr = self._scenario()
+        leve, sortie = self._publier(local)
+        self.assertIsNone(leve, "le push a échoué alors que l'amont n'a fait "
+                          "qu'avancer :\n%s" % sortie)
+        self.assertNotIn("REJECTED", sortie, sortie)
+        publies = self._sujets(amont, "main")
+        self.assertIn("fusion d'une PR", publies, publies)
+        self.assertTrue(any(s.startswith("dashboard: snapshot") for s in publies),
+                        "l'instantané n'est pas chez l'amont : %s" % publies)
+        self.assertTrue(self._est_ancetre(local, sha_pr, "HEAD"),
+                        "la PR n'est pas SOUS l'instantané local : le rebase "
+                        "n'a pas eu lieu, ou a fusionné autrement")
+
+    def test_un_conflit_est_AVORTE_sans_rien_perdre_et_reste_une_erreur(self):
+        """Quand le rebase est impossible (la PR a touché docs/data.json
+        aussi), le dépôt doit revenir EXACTEMENT à l'état d'avant : pas de
+        rebase en cours qui bloquerait tous les cycles suivants, instantané
+        local intact, et le push rejeté reste une erreur pour launchd."""
+        amont, local, sha_pr = self._scenario(conflit=True)
+        leve, sortie = self._publier(local)
+        self.assertEqual(leve, "CalledProcessError",
+                         "un push impossible doit rester une erreur : %s" % sortie)
+        self.assertIn("ABORTED", sortie, sortie)
+        self.assertFalse((local / ".git" / "rebase-merge").exists(),
+                         "rebase laissé EN COURS : le prochain cycle ne pourra "
+                         "plus rien committer")
+        self.assertFalse((local / ".git" / "rebase-apply").exists())
+        sujets = self._sujets(local)
+        self.assertEqual(len(sujets), 2, sujets)
+        self.assertTrue(sujets[0].startswith("dashboard: snapshot"), sujets)
+        self.assertEqual(sujets[1], "base", "l'instantané local a bougé : %s" % sujets)
+        self.assertEqual(self._sujets(amont, "main"), ["fusion d'une PR", "base"],
+                         "l'amont a été modifié malgré le conflit")
+
+    def test_un_amont_immobile_ne_rebase_RIEN(self):
+        """TÉMOIN : à force d'intégrer, rebaser à chaque cycle sans raison
+        passerait le premier test. Sans PR, aucun rebase, push direct."""
+        amont, local, _ = self._scenario(pr=False)
+        leve, sortie = self._publier(local)
+        self.assertIsNone(leve, sortie)
+        self.assertNotIn("rebasing", sortie, sortie)
+        self.assertNotIn("Remote integrated", sortie, sortie)
+        self.assertEqual(self._sujets(local)[1:], ["base"])
+        self.assertTrue(any(s.startswith("dashboard: snapshot")
+                            for s in self._sujets(amont, "main")))
+
+
 class TestUneComparaisonIMPOSSIBLENEstPasUnSUCCES(unittest.TestCase):
     """`travail_pousse()` comptait les commits d'avance avec
 
