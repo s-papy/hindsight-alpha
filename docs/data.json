@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-09-03T14:00:05.296741+00:00",
+  "generated_at": "2026-09-03T14:30:06.656250+00:00",
   "starting_equity": 100000.0,
   "equity_curve": {
     "timeframe": "15Min",
@@ -424,6 +424,14 @@
       [
         1788444000,
         99949.5
+      ],
+      [
+        1788444900,
+        100057.5
+      ],
+      [
+        1788445800,
+        100011.5
       ]
     ]
   },
@@ -444,7 +452,7 @@
     }
   ],
   "underlying_prices": {
-    "SPY": 769.56
+    "SPY": 768.67
   },
   "kickoff": "2026-08-28T15:00:00+00:00",
   "team": "Hindsight Alpha",
@@ -454,7 +462,7 @@
   "account": {
     "account_number": "PA3K8MP3MF0U",
     "status": "ACTIVE",
-    "equity": "99983.5",
+    "equity": "100023.5",
     "cash": "99577.5",
     "buying_power": "398310"
   },
@@ -482,8 +490,8 @@
       "side": "long",
       "asset_class": "us_option",
       "cost_basis": "756",
-      "unrealized_pl": "-352",
-      "unrealized_plpc": "-0.46561"
+      "unrealized_pl": "-312",
+      "unrealized_plpc": "-0.4127"
     }
   ],
   "recent_decisions": [
@@ -1200,7 +1208,7 @@
     }
   ],
   "monitor_status": {
-    "last_run_at": "2026-09-03T13:45:04.188908+00:00",
+    "last_run_at": "2026-09-03T14:30:05.425315+00:00",
     "outcome": "checked",
     "market_open": true,
     "dry_run": false
