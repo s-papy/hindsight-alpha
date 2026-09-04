@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-09-04T19:30:06.973620+00:00",
+  "generated_at": "2026-09-04T20:00:07.013838+00:00",
   "starting_equity": 100000.0,
   "equity_curve": {
     "timeframe": "15Min",
@@ -620,6 +620,14 @@
       [
         1788550200,
         99373.31
+      ],
+      [
+        1788551100,
+        99373.31
+      ],
+      [
+        1788552000,
+        99373.31
       ]
     ]
   },
@@ -678,6 +686,65 @@
   },
   "positions": [],
   "recent_decisions": [
+    {
+      "timestamp": "2026-09-04T19:37:12.335873+00:00",
+      "run_type": "agent",
+      "dry_run": false,
+      "symbols": [
+        "SPY",
+        "GLD",
+        "XLK",
+        "XLV"
+      ],
+      "outcome": "risk_gate_blocked",
+      "market_open": true,
+      "next_close": "2026-09-04T16:00:00-04:00",
+      "minutes_before_close": 22,
+      "exit_actions": [],
+      "verdicts": [
+        {
+          "symbol": "SPY",
+          "tradeable": true,
+          "reason": "cheap-vol regime confirmed, hindsight_guard clean",
+          "direction": 1
+        },
+        {
+          "symbol": "GLD",
+          "tradeable": false,
+          "reason": "volatility not cheap today (HV rank 49.6)",
+          "direction": null
+        },
+        {
+          "symbol": "XLK",
+          "tradeable": false,
+          "reason": "hindsight_guard: full-window winner (90) and in-sample winner (10) disagree",
+          "direction": null
+        },
+        {
+          "symbol": "XLV",
+          "tradeable": true,
+          "reason": "cheap-vol regime confirmed, hindsight_guard clean",
+          "direction": -1
+        }
+      ],
+      "trades": [
+        {
+          "symbol": "SPY",
+          "direction": "bullish (call)",
+          "contract": "SPY260911C00770000",
+          "risk_gate_reason": "consecutive-loss circuit breaker: 3 stop-losses in a row (>= 3) -- pausing new entries for a human to look, not resetting on its own",
+          "outcome": "risk_gate_blocked"
+        },
+        {
+          "symbol": "XLV",
+          "direction": "bearish (put)",
+          "contract": "XLV260911P00171000",
+          "risk_gate_reason": "consecutive-loss circuit breaker: 3 stop-losses in a row (>= 3) -- pausing new entries for a human to look, not resetting on its own",
+          "outcome": "risk_gate_blocked"
+        }
+      ],
+      "orders_submitted": 0
+    },
     {
       "timestamp": "2026-09-04T15:00:07.536362+00:00",
       "run_type": "exit_monitor",
@@ -1317,31 +1384,19 @@
       "dry_run": false,
       "outcome": "error",
       "error": "AlpacaCLIError: alpaca clock failed (exit 1): {\n  \"code\": 0,\n  \"error\": \"could not reach https://paper-api.alpaca.markets/v2/clock: Get \\\"https://paper-api.alpaca.markets/v2/clock\\\": dial tcp: lookup paper-api.alpaca.markets: no such host\",\n  \"hint\": \"check your internet connection and base URL. Run `alpaca doctor` to verify configuration\",\n  \"status\": 0\n}"
-    },
-    {
-      "timestamp": "2026-08-25T10:02:50.192046+00:00",
-      "dry_run": true,
-      "symbols": [
-        "SPY",
-        "GLD",
-        "XLK",
-        "XLV"
-      ],
-      "outcome": "market_closed",
-      "market_open": false
     }
   ],
   "monitor_status": {
-    "last_run_at": "2026-09-04T19:30:06.105747+00:00",
+    "last_run_at": "2026-09-04T19:58:06.054316+00:00",
     "outcome": "checked",
     "market_open": true,
     "dry_run": false
   },
   "agent_status": {
-    "last_run_at": "2026-09-03T19:37:13.840244+00:00",
-    "outcome": "order_submitted",
+    "last_run_at": "2026-09-04T19:37:12.335873+00:00",
+    "outcome": "risk_gate_blocked",
     "dry_run": false,
     "symbols_evaluated": 4,
-    "trades": 1
+    "trades": 2
   }
 }
