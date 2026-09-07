@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-09-07T19:30:03.718445+00:00",
+  "generated_at": "2026-09-07T20:00:04.481740+00:00",
   "starting_equity": 100000.0,
   "equity_curve": {
     "timeframe": "15Min",
@@ -686,6 +686,19 @@
   },
   "positions": [],
   "recent_decisions": [
+    {
+      "timestamp": "2026-09-07T19:37:05.812103+00:00",
+      "run_type": "agent",
+      "dry_run": false,
+      "symbols": [
+        "SPY",
+        "GLD",
+        "XLK",
+        "XLV"
+      ],
+      "outcome": "market_closed",
+      "market_open": false
+    },
     {
       "timestamp": "2026-09-04T19:37:12.335873+00:00",
       "run_type": "agent",
@@ -1377,26 +1390,19 @@
       "dry_run": false,
       "outcome": "error",
       "error": "AlpacaCLIError: alpaca clock failed (exit 1): {\n  \"code\": 0,\n  \"error\": \"could not reach https://paper-api.alpaca.markets/v2/clock: Get \\\"https://paper-api.alpaca.markets/v2/clock\\\": dial tcp: lookup paper-api.alpaca.markets: no such host\",\n  \"hint\": \"check your internet connection and base URL. Run `alpaca doctor` to verify configuration\",\n  \"status\": 0\n}"
-    },
-    {
-      "timestamp": "2026-08-25T13:13:34.582183+00:00",
-      "run_type": "exit_monitor",
-      "dry_run": false,
-      "outcome": "error",
-      "error": "AlpacaCLIError: alpaca clock failed (exit 1): {\n  \"code\": 0,\n  \"error\": \"could not reach https://paper-api.alpaca.markets/v2/clock: Get \\\"https://paper-api.alpaca.markets/v2/clock\\\": dial tcp: lookup paper-api.alpaca.markets: no such host\",\n  \"hint\": \"check your internet connection and base URL. Run `alpaca doctor` to verify configuration\",\n  \"status\": 0\n}"
     }
   ],
   "monitor_status": {
-    "last_run_at": "2026-09-07T19:30:02.444279+00:00",
+    "last_run_at": "2026-09-07T19:58:05.441783+00:00",
     "outcome": "market_closed",
     "market_open": false,
     "dry_run": false
   },
   "agent_status": {
-    "last_run_at": "2026-09-04T19:37:12.335873+00:00",
-    "outcome": "risk_gate_blocked",
+    "last_run_at": "2026-09-07T19:37:05.812103+00:00",
+    "outcome": "market_closed",
     "dry_run": false,
     "symbols_evaluated": 4,
-    "trades": 2
+    "trades": 0
   }
 }
