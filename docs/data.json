@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-09-07T19:00:07.893999+00:00",
+  "generated_at": "2026-09-07T19:30:03.718445+00:00",
   "starting_equity": 100000.0,
   "equity_curve": {
     "timeframe": "15Min",
@@ -1387,7 +1387,7 @@
     }
   ],
   "monitor_status": {
-    "last_run_at": "2026-09-07T19:00:06.542938+00:00",
+    "last_run_at": "2026-09-07T19:30:02.444279+00:00",
     "outcome": "market_closed",
     "market_open": false,
     "dry_run": false
