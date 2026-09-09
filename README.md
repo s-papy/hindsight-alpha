@@ -13,10 +13,11 @@ winners disagree. Re-run before every decision, not once at design time.
 Entry for the **Alpaca AI Trading Agents Hackathon** (lablab.ai, deadline
 04/09/2026). Paper trading only, zero real funds at risk.
 
-**Live dashboard: [s-papy.github.io/hindsight-alpha](https://s-papy.github.io/hindsight-alpha)** —
-every run, every refusal, every real order. It is a *snapshot*, republished
-every 30 minutes during market hours, and the page says so itself when it goes
-stale.
+**Dashboard: [s-papy.github.io/hindsight-alpha](https://s-papy.github.io/hindsight-alpha)** —
+every run, every refusal, every real order. It republished every 30 minutes
+during market hours through the hackathon window; the automation was stopped
+after the 04/09/2026 deadline (see "What runs unattended" below), so the page
+now shows its final snapshot rather than a live feed.
 
 ### The mechanism, in one picture
 
@@ -171,7 +172,10 @@ a good idea buried inside it.
 
 Five `launchd` schedules, versioned in `launchagents/` rather than living on
 one machine. A judge should be able to see every automatic behaviour, so each
-one is named with what it actually launches.
+one is named with what it actually launches. **Status: stopped.** All five
+were unloaded and moved out of `~/Library/LaunchAgents/` after the hackathon's
+04/09/2026 deadline passed; the descriptions below document what each one did
+while the submission was live, not a currently-running process.
 
 - **`launchagents/com.hindsightalpha.agent-daily.plist`** — the entry decision,
   once per trading day at 21:37 local (15:37 ET), twenty-three minutes before
